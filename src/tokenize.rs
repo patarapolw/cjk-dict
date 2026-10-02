@@ -174,36 +174,64 @@ impl TokenizerMapper {
                 continue;
             }
 
-            for (i, d) in token.details().iter().enumerate() {
-                if *d == "*" {
-                    continue;
+            let details = token.details();
+
+            match lang {
+                Lang::Ja => {
+                    if let Some(pos) = details.get(0) {
+                        if pos.starts_with("助") || pos.ends_with("記号") {
+                            continue 'outer;
+                        }
+                    }
+
+                    // @see https://lindera.github.io/lindera/lindera-unidic/dictionary_format.html
+                    // 11 - Lexeme
+                    // 14 - Orthographic base form
+                    if let Some(d) = details.get(11 - 4)
+                        && *d != "*"
+                    {
+                        out.push(d.to_string());
+                        continue 'outer;
+                    }
+
+                    if let Some(d) = details.get(14 - 4)
+                        && *d != "*"
+                    {
+                        out.push(d.to_string());
+                        continue 'outer;
+                    }
                 }
+                Lang::Ko => {
+                    if let Some(pos) = details.get(0) {
+                        if !"NVM".chars().any(|c| pos.starts_with(c)) {
+                            continue 'outer;
+                        }
+                    }
 
-                match lang {
-                    Lang::Ja => {
-                        // https://lindera.github.io/lindera/lindera-unidic/dictionary_format.html#dictionary-format
-                        // POS is index 4 in docs, but 0 in token.details();
-                        let i = i + 4;
+                    // @see https://lindera.github.io/lindera/lindera-ko-dic/dictionary_format.html
+                    // 8 - Type
+                    // 11 - Expression
+                    if let Some(ty) = details.get(8 - 4)
+                        && let Some(expr) = details.get(11 - 4)
+                    {
+                        if matches!(*ty, "Compound" | "Inflect" | "Preanalysis") && *expr != "*" {
+                            for sub_token in expr.split('+') {
+                                let sub_tokens: Vec<&str> = sub_token.split('/').collect();
+                                if let Some(pos) = sub_tokens.get(1) {
+                                    if !"NVM".chars().any(|c| pos.starts_with(c)) {
+                                        continue;
+                                    }
+                                }
 
-                        match i {
-                            // POS is 4-7
-                            4..8 => {
-                                if d.starts_with("助") || d.ends_with("記号") {
-                                    continue 'outer;
+                                if let Some(t) = sub_tokens.get(0) {
+                                    out.push(t.to_string());
                                 }
                             }
-                            // 11 - Lexeme
-                            // 14 - Orthographic base form
-                            11 | 14 => {
-                                out.push(d.to_string());
-                                continue 'outer;
-                            }
-                            _ => (),
-                        };
+                            continue 'outer;
+                        }
                     }
-                    Lang::Ko => {}
-                    Lang::Zh => {}
                 }
+                _ => {}
             }
 
             out.push(surface);
@@ -219,7 +247,7 @@ impl TokenizerMapper {
         }
         let model = match lang {
             Lang::Ja => "unidic", // more consistent minimal units than ipadic(-neologd) and much smaller than sudachidict
-            Lang::Zh => "cc-cedict", // cc-cedict may have better suuport traditional form better than jieba
+            Lang::Zh => "cc-cedict", // cc-cedict may have better support traditional form better than jieba
             Lang::Ko => "ko-dic",
         };
 
