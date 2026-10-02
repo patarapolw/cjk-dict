@@ -4,7 +4,10 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use lindera_analysis::tokenizer::{Tokenizer, TokenizerBuilder};
+use lindera::{dictionary::load_dictionary, mode::Mode, segmenter::Segmenter};
+use lindera_analysis::{
+    character_filter::CharacterFilterLoader, token_filter::TokenFilterLoader, tokenizer::Tokenizer,
+};
 use serde_json::json;
 
 use crate::error::YomitanError;
@@ -26,8 +29,23 @@ impl std::fmt::Display for Lang {
     }
 }
 
+impl Lang {
+    pub fn from(value: &str) -> Result<Self, YomitanError> {
+        let out = match value {
+            "ja-JP" => Lang::Ja,
+            "ko-KR" => Lang::Ko,
+            "zh-CN" => Lang::Zh,
+            _ => {
+                return Err(YomitanError::Error("unsupported language".to_string()));
+            }
+        };
+        Ok(out)
+    }
+}
+
 pub struct TokenizerMapper {
     root_dir: PathBuf,
+    segmenter: Mutex<HashMap<Lang, Arc<Segmenter>>>,
     tokenizer: Mutex<HashMap<Lang, Arc<Tokenizer>>>,
 }
 
@@ -35,8 +53,28 @@ impl TokenizerMapper {
     pub fn new(root_dir: PathBuf) -> Self {
         Self {
             root_dir,
+            segmenter: Mutex::new(HashMap::new()),
             tokenizer: Mutex::new(HashMap::new()),
         }
+    }
+
+    pub async fn segment(
+        &self,
+        lang: Lang,
+        text: &str,
+    ) -> Result<Vec<(String, Vec<String>)>, YomitanError> {
+        let segmenter = self.get_segmenter(lang)?;
+
+        let mut out = vec![];
+        let mut tokens = segmenter.segment(std::borrow::Cow::Borrowed(text))?;
+        for token in tokens.iter_mut() {
+            out.push((
+                token.surface.to_string(),
+                token.details_iter().map(|s| s.to_string()).collect(),
+            ));
+        }
+
+        Ok(out)
     }
 
     pub async fn tokenize(&self, lang: Lang, text: &str) -> Result<Vec<String>, YomitanError> {
@@ -45,70 +83,80 @@ impl TokenizerMapper {
             match tokenizer_map.get(&lang) {
                 Some(t) => Arc::clone(t),
                 None => {
-                    let mut builder = TokenizerBuilder::from_config(json!({
-                        "segmenter": {
-                            "mode": "normal"
-                        },
-                        "character_filters": [
-                            {
-                                "kind": "unicode_normalize",
-                                "args": { "kind": "nfkc" }
-                            },
-                            {
-                                "kind": "japanese_iteration_mark",
-                                "args": {
-                                    "normalize_kanji": true,
-                                    "normalize_kana": true
-                                }
+                    let character_filters = vec![
+                        json!({
+                            "kind": "unicode_normalize",
+                            "args": { "kind": "nfkc" }
+                        }),
+                        json!({
+                            "kind": "japanese_iteration_mark",
+                            "args": {
+                                "normalize_kanji": true,
+                                "normalize_kana": true
                             }
-                        ],
-                        "token_filters": [
-                            {
-                                "kind": "remove_diacritical_mark",
-                                "args": {
-                                    // do not remove dakuten, handakuten
-                                    "japanese": false
-                                }
-                            },
-                            {
-                                "kind": "japanese_kana",
-                                "args": {
-                                    "kind": "hiragana"
-                                }
-                            },
-                            {
-                                "kind": "japanese_katakana_stem",
-                                "args": {
-                                    "min": 3
-                                }
-                            },
-                            {
-                                "kind": "remove_diacritical_mark",
-                                "args": {
-                                    "japanese": false
-                                }
-                            },
-                            {
-                                "kind": "uppercase"
+                        }),
+                    ];
+
+                    let token_filters = vec![
+                        json!({
+                            "kind": "remove_diacritical_mark",
+                            "args": {
+                                // do not remove dakuten, handakuten
+                                "japanese": false
                             }
-                        ],
-                    }))?;
+                        }),
+                        json!({
+                            "kind": "japanese_kana",
+                            "args": {
+                                "kind": "hiragana"
+                            }
+                        }),
+                        json!({
+                            "kind": "japanese_katakana_stem",
+                            "args": {
+                                "min": 3
+                            }
+                        }),
+                        json!({
+                            "kind": "remove_diacritical_mark",
+                            "args": {
+                                "japanese": false
+                            }
+                        }),
+                        json!({
+                            "kind": "uppercase"
+                        }),
+                    ];
 
-                    let model = match lang {
-                        Lang::Ja => "unidic",
-                        Lang::Zh => "jieba",
-                        Lang::Ko => "ko-dic",
-                    };
+                    let segmenter = self.get_segmenter(lang)?;
+                    let mut tokenizer = Tokenizer::new((*segmenter).clone());
 
-                    builder.set_segmenter_dictionary(
-                        &self
-                            .root_dir
-                            .join(format!("lindera-{}", model))
-                            .display()
-                            .to_string(),
-                    );
+                    for character_filter_setting in character_filters {
+                        let character_filter_name = character_filter_setting["kind"].as_str();
+                        if let Some(character_filter_name) = character_filter_name {
+                            // Append a character filter to the tokenizer.
+                            tokenizer.append_character_filter(
+                                CharacterFilterLoader::load_from_value(
+                                    character_filter_name,
+                                    &character_filter_setting["args"],
+                                )?,
+                            );
+                        }
+                    }
 
-                    let tokenizer = Arc::new(builder.build()?);
+                    for token_filter_setting in token_filters {
+                        let token_filter_name = token_filter_setting["kind"].as_str();
+                        if let Some(token_filter_name) = token_filter_name {
+                            // Append a token filter to the tokenizer.
+                            tokenizer.append_token_filter(TokenFilterLoader::load_from_value(
+                                token_filter_name,
+                                &token_filter_setting["args"],
+                            )?);
+                        }
+                    }
+
+                    let tokenizer = Arc::new(tokenizer);
+
                     tokenizer_map.insert(lang, Arc::clone(&tokenizer));
                     tokenizer
                 }
@@ -144,8 +192,9 @@ impl TokenizerMapper {
                                     continue 'outer;
                                 }
                             }
-                            // Orthographic base form
-                            14 => {
+                            // 11 - Lexeme
+                            // 14 - Orthographic base form
+                            11 | 14 => {
                                 out.push(d.to_string());
                                 continue 'outer;
                             }
@@ -161,5 +210,29 @@ impl TokenizerMapper {
         }
 
         Ok(out)
+    }
+
+    fn get_segmenter(&self, lang: Lang) -> Result<Arc<Segmenter>, YomitanError> {
+        let mut segmenter_map = self.segmenter.lock()?;
+        if let Some(segmenter) = segmenter_map.get(&lang) {
+            return Ok(Arc::clone(segmenter));
+        }
+        let model = match lang {
+            Lang::Ja => "unidic", // more consistent minimal units than ipadic(-neologd) and much smaller than sudachidict
+            Lang::Zh => "cc-cedict", // cc-cedict may have better suuport traditional form better than jieba
+            Lang::Ko => "ko-dic",
+        };
+
+        let dictionary = load_dictionary(
+            &self
+                .root_dir
+                .join(format!("lindera-{}", model))
+                .display()
+                .to_string(),
+        )?;
+
+        let segmenter = Arc::new(Segmenter::new(Mode::Normal, dictionary, None));
+        segmenter_map.insert(lang, Arc::clone(&segmenter));
+        Ok(segmenter)
     }
 }
