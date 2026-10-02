@@ -8,13 +8,13 @@ CREATE TABLE "index" (
 
 CREATE TABLE term (
   term        TEXT NOT NULL,
-  term_parsed_ja      TEXT,
-  term_parsed_zh      TEXT,
-  term_parsed_ko      TEXT,
+  term_ja     TEXT,
+  term_zh     TEXT,
+  term_ko     TEXT,
 
-  reading     TEXT NOT NULL,
-  reading_parsed_ja   TEXT,
-  reading_parsed_zh   TEXT,
+  reading     TEXT NOT NULL,  -- DEFAULT ''
+  reading_ja  TEXT,
+  reading_zh  TEXT,
 
   def_tags    TEXT, -- space-separated
   rules       TEXT, -- space-separated
@@ -25,59 +25,49 @@ CREATE TABLE term (
 
   L1          TEXT NOT NULL, -- index.L1
   L2          TEXT NOT NULL, -- index.L2
-  index_rowid INTEGER NOT NULL REFERENCES "index" (rowid)
+  index_rowid     INTEGER NOT NULL REFERENCES "index" (rowid),
+  term_rowid      INTEGER NOT NULL
 );
 
+CREATE INDEX idx_term_term ON term (term);
+CREATE INDEX idx_term_reading ON term (reading);
 CREATE INDEX idx_term_score ON term (score);
 CREATE INDEX idx_term_sequence ON term ("sequence");
+CREATE INDEX idx_term_L1 ON term (L1);
+CREATE INDEX idx_term_L2 ON term (L2);
 
-CREATE VIRTUAL TABLE term_fts USING fts5 (
-  term,
-  term_parsed_ja, -- VIRTUAL TABLE will need to dropped and recreated for additional language support.
-  term_parsed_zh,
-  term_parsed_ko,
-  reading,
-  reading_parsed_ja,
-  reading_parsed_zh,
+CREATE VIRTUAL TABLE term_ja_fts USING fts5 (
+  term        UNINDEXED,
+  term_ja,
+  reading     UNINDEXED,
+  reading_ja,
   def_tags,
   rules,
   score       UNINDEXED,  -- consider sorting non-TEXT outside
   "sequence"  UNINDEXED,
   tags,
-  L1,
-  L2,
+  L1          UNINDEXED,  -- ja-JP
+  L2          UNINDEXED,
   index_rowid UNINDEXED,
   content='term'
 );
 
 -- Triggers to keep the FTS index up to date.
 -- Other triggers (after update/delete) not used, expect table to be rebuilt or left as is.
-CREATE TRIGGER term_afer_insert AFTER INSERT ON term BEGIN
-  INSERT INTO term_fts(
-    term,
-    term_parsed_ja,
-    term_parsed_zh,
-    term_parsed_ko,
-    reading,
-    reading_parsed_ja,
-    reading_parsed_zh,
+CREATE TRIGGER term_ja_afer_insert AFTER INSERT ON term
+WHEN new.L1 LIKE 'ja%'
+BEGIN
+  INSERT INTO term_ja_fts(
+    term_ja,
+    reading_ja,
     def_tags,
     rules,
     tags,
-    L1,
-    L2,
   rowid) VALUES (
-    new.term,
-    new.term_parsed_ja,
-    new.term_parsed_zh,
-    new.term_parsed_ko,
-    new.reading,
-    new.reading_parsed_ja,
-    new.reading_parsed_zh,
+    new.term_ja,
+    new.reading_ja,
     new.def_tags,
     new.rules,
     new.tags,
-    new.L1,
-    new.L2,
   new.rowid);
 END;

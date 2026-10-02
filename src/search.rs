@@ -4,7 +4,11 @@ use futures::TryStreamExt;
 use serde::Serialize;
 use sqlx::{Pool, Row, Sqlite, SqlitePool, sqlite::SqliteConnectOptions};
 
-use crate::{error::YomitanError, parser::YomitanReader};
+use crate::{
+    error::YomitanError,
+    parser::YomitanReader,
+    tokenize::{Lang, TokenizerMapper},
+};
 
 pub struct YomitanSearch {
     pub db: Pool<Sqlite>,
@@ -22,7 +26,8 @@ impl YomitanSearch {
     pub async fn init(
         db_path: PathBuf,
         dict_paths: Vec<&str>,
-        source_language: &str,
+        source_language: Lang,
+        tokenizer_mapper: TokenizerMapper,
         progress_callback: impl Fn(YomitanSearchInitProgress),
     ) -> Result<Self, YomitanError> {
         let options = SqliteConnectOptions::new()
@@ -66,29 +71,69 @@ impl YomitanSearch {
                     .unwrap_or(source_language.to_string());
                 let lang_2 = idx_clone.target_language.unwrap_or("en".to_string());
 
+                let data_str = serde_json::to_string(&index_json)?;
+
+                let r = sqlx::query(
+                    "INSERT INTO `index` (`path`, `L1`, `L2`, `data`)
+                    VALUES ($1, $2, $3, $4)",
+                )
+                .bind(&d)
+                .bind(&lang_1)
+                .bind(&lang_2)
+                .bind(data_str)
+                .execute(&mut *tx)
+                .await?;
+
+                let index_rowid = r.last_insert_rowid();
+                let is_ja = lang_1.starts_with("ja");
+
+                let join_tokens_if = async |s: &str| -> Result<String, YomitanError> {
+                    Ok(if is_ja {
+                        tokenizer_mapper
+                            .tokenize(source_language, s)
+                            .await?
+                            .join(" ")
+                    } else {
+                        "".to_string()
+                    })
+                };
+
                 let mut term_stream = sqlx::query("SELECT *, rowid FROM term").fetch(&reader_db);
                 while let Some(row) = term_stream.try_next().await? {
                     let p1_term: String = row.get("term");
-                    let p2_reading: String = row.get("reading");
-                    let p3_def_tags: Option<String> = row.get("def_tags");
-                    let p4_rules: Option<String> = row.get("rules");
-                    let p5_score: Option<i64> = row.get("score");
-                    let p6_sequence: Option<i64> = row.get("sequence");
-                    let p7_tags: Option<String> = row.get("tags");
-                    let p8_rowid: i64 = row.get("rowid");
+                    let p2_term = join_tokens_if(&p1_term).await?;
+
+                    let p3_reading: String = row.get("reading");
+                    let p4_reading = join_tokens_if(&p3_reading).await?;
+
+                    let p5_def_tags: Option<String> = row.get("def_tags");
+                    let p6_rules: Option<String> = row.get("rules");
+                    let p7_score: Option<i64> = row.get("score");
+                    let p8_sequence: Option<i64> = row.get("sequence");
+                    let p9_tags: Option<String> = row.get("tags");
+
+                    let p11_term_rowid: i64 = row.get("rowid");
 
                     sqlx::query(
-                        "INSERT INTO `term` (`term`, `reading`, `def_tags`, `rules`, `score`, `sequence`, `tags`, `index_rowid`, `L1`, `L2`)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+                        "INSERT INTO `term` (
+                        `term`, `term_ja`,                                  -- 1,2
+                        `reading`, `reading_ja`,                            -- 3,4
+                        `def_tags`, `rules`, `score`, `sequence`, `tags`,   -- 5,6,7,8,9
+                        `index_rowid`, `term_rowid`,                        -- 10,11
+                        `L1`, `L2`                                          -- 12,13
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
                     )
                     .bind(p1_term)
-                    .bind(p2_reading)
-                    .bind(p3_def_tags)
-                    .bind(p4_rules)
-                    .bind(p5_score)
-                    .bind(p6_sequence)
-                    .bind(p7_tags)
-                    .bind(p8_rowid)
+                    .bind(p2_term)
+                    .bind(p3_reading)
+                    .bind(p4_reading)
+                    .bind(p5_def_tags)
+                    .bind(p6_rules)
+                    .bind(p7_score)
+                    .bind(p8_sequence)
+                    .bind(p9_tags)
+                    .bind(index_rowid)
+                    .bind(p11_term_rowid)
                     .bind(&lang_1)
                     .bind(&lang_2)
                     .execute(&mut *tx)
@@ -101,19 +146,6 @@ impl YomitanSearch {
                         total,
                     })
                 }
-
-                let data_str = serde_json::to_string(&index_json)?;
-
-                sqlx::query(
-                    "INSERT INTO `index` (`path`, `L1`, `L2`, `data`)
-                    VALUES ($1, $2, $3, $4)",
-                )
-                .bind(&d)
-                .bind(&lang_1)
-                .bind(&lang_2)
-                .bind(data_str)
-                .execute(&mut *tx)
-                .await?;
 
                 tx.commit().await?;
             }
