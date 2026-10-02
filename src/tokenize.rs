@@ -1,7 +1,7 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{Arc, LazyLock, Mutex},
 };
 
 use lindera::{dictionary::load_dictionary, mode::Mode, segmenter::Segmenter};
@@ -42,6 +42,15 @@ impl Lang {
         Ok(out)
     }
 }
+
+static KO_STOP_TAGS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
+    [
+        "JKS", "JKC", "JKG", "JKO", "JKB", "JKV", "JKQ", "JX", "JC", "EP", "EF", "EC", "ETN",
+        "ETM", "SF", "SE", "SSO", "SSC", "SC", "SY",
+    ]
+    .into_iter()
+    .collect()
+});
 
 pub struct TokenizerMapper {
     root_dir: PathBuf,
@@ -174,10 +183,10 @@ impl TokenizerMapper {
                 continue;
             }
 
-            let details = token.details();
-
             match lang {
                 Lang::Ja => {
+                    let details = token.details();
+
                     if let Some(pos) = details.get(0) {
                         if pos.starts_with("助") || pos.ends_with("記号") {
                             continue 'outer;
@@ -202,8 +211,10 @@ impl TokenizerMapper {
                     }
                 }
                 Lang::Ko => {
+                    let details = token.details();
+
                     if let Some(pos) = details.get(0) {
-                        if !"NVM".chars().any(|c| pos.starts_with(c)) {
+                        if KO_STOP_TAGS.contains(pos) {
                             continue 'outer;
                         }
                     }
@@ -218,7 +229,7 @@ impl TokenizerMapper {
                             for sub_token in expr.split('+') {
                                 let sub_tokens: Vec<&str> = sub_token.split('/').collect();
                                 if let Some(pos) = sub_tokens.get(1) {
-                                    if !"NVM".chars().any(|c| pos.starts_with(c)) {
+                                    if KO_STOP_TAGS.contains(pos) {
                                         continue;
                                     }
                                 }
