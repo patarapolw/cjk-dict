@@ -6,7 +6,7 @@ use sqlx::{
     Pool, Sqlite, SqlitePool,
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous},
 };
-use tokio::fs::{create_dir_all, read_dir, remove_file};
+use tokio::fs::{create_dir_all, read_dir, read_to_string, remove_file};
 use zip::ZipArchive;
 
 use crate::error::YomitanError;
@@ -385,9 +385,11 @@ impl YomitanReader {
         self.db.close().await;
     }
 
+    pub async fn get_index_json_str(self) -> Result<String, YomitanError> {
+        Ok(read_to_string(self.root_dir.join("index.json")).await?)
+    }
+
     pub async fn get_index_json(self) -> Result<YomitanIndex, YomitanError> {
-        let json_str: String = tokio::fs::read_to_string(self.root_dir.join("index.json")).await?;
-        let index_json: YomitanIndex = serde_json::from_str(&json_str)?;
-        Ok(index_json)
+        Ok(serde_json::from_str(&self.get_index_json_str().await?)?)
     }
 }

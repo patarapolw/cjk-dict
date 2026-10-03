@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use yomitan_parser::{
     error::YomitanError,
-    search::YomitanSearch,
+    search::{YomitanSearch, YomitanSearchInitProgress},
     tokenize::{Lang, TokenizerMapper},
 };
 
@@ -14,16 +14,24 @@ async fn main() -> Result<(), YomitanError> {
         "C:\\Users\\HP\\AppData\\Roaming\\cc.polv.cjk-explainer\\lindera",
     ));
 
-    let _ = YomitanSearch::init(
+    let yomi = YomitanSearch::new(
         root_dir.join("yomitan.db"),
         vec!["jitenon-kotowaza", "jitsuyou", "Pixiv", "sankoku8", "smk8"],
-        Lang::Ja,
-        tok,
-        |p| {
-            if p.current % 10_000 == 0 {
-                println!("{:?}", p);
-            }
-        },
+    )
+    .await?;
+
+    fn cb(p: YomitanSearchInitProgress) {
+        if p.current % 10_000 == 0 {
+            println!("{:?}", p);
+        }
+    }
+
+    yomi.import(vec!["Pixiv"], None, &tok, cb).await?;
+    yomi.import(
+        vec!["jitenon-kotowaza", "jitsuyou", "sankoku8", "smk8"],
+        Some(Lang::Ja),
+        &tok,
+        cb,
     )
     .await?;
 

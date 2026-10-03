@@ -13,3 +13,4 @@ tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
 zip = "8.6.0"
 lindera = "6.2.0"
 lindera-analysis = "6.2.0"
+unicode-normalization = "0.1"
