@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
-    sync::{Arc, LazyLock, Mutex},
+    sync::{Arc, LazyLock},
 };
 
 use lindera::{dictionary::load_dictionary, mode::Mode, segmenter::Segmenter};
@@ -9,6 +9,7 @@ use lindera_analysis::{
     character_filter::CharacterFilterLoader, token_filter::TokenFilterLoader, tokenizer::Tokenizer,
 };
 use serde_json::json;
+use tokio::{sync::OnceCell, task::spawn_blocking};
 
 use crate::error::YomitanError;
 
@@ -30,6 +31,12 @@ impl std::fmt::Display for Lang {
 }
 
 impl Lang {
+    const ALL: [Lang; 3] = [Lang::Ja, Lang::Ko, Lang::Zh];
+
+    pub fn new_oncecell_map<T>() -> HashMap<Lang, OnceCell<T>> {
+        Lang::ALL.iter().map(|&l| (l, OnceCell::new())).collect()
+    }
+
     pub fn from(value: &str) -> Result<Self, YomitanError> {
         let out = match value {
             "ja-JP" => Lang::Ja,
@@ -54,16 +61,16 @@ static KO_STOP_TAGS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
 
 pub struct TokenizerMapper {
     root_dir: PathBuf,
-    segmenter: Mutex<HashMap<Lang, Arc<Segmenter>>>,
-    tokenizer: Mutex<HashMap<Lang, Arc<Tokenizer>>>,
+    segmenter: HashMap<Lang, OnceCell<Arc<Segmenter>>>,
+    tokenizer: HashMap<Lang, OnceCell<Arc<Tokenizer>>>,
 }
 
 impl TokenizerMapper {
     pub fn new(root_dir: PathBuf) -> Self {
         Self {
             root_dir,
-            segmenter: Mutex::new(HashMap::new()),
-            tokenizer: Mutex::new(HashMap::new()),
+            segmenter: Lang::new_oncecell_map(),
+            tokenizer: Lang::new_oncecell_map(),
         }
     }
 
@@ -72,7 +79,7 @@ impl TokenizerMapper {
         lang: Lang,
         text: &str,
     ) -> Result<Vec<(String, Vec<String>)>, YomitanError> {
-        let segmenter = self.get_segmenter(lang)?;
+        let segmenter = self.get_segmenter(lang).await?;
 
         let mut out = vec![];
         let mut tokens = segmenter.segment(std::borrow::Cow::Borrowed(text))?;
@@ -87,90 +94,81 @@ impl TokenizerMapper {
     }
 
     pub async fn tokenize(&self, lang: Lang, text: &str) -> Result<Vec<String>, YomitanError> {
-        let tokenizer = {
-            let mut tokenizer_map = self.tokenizer.lock()?;
-            match tokenizer_map.get(&lang) {
-                Some(t) => Arc::clone(t),
-                None => {
-                    let character_filters = vec![
-                        json!({
-                            "kind": "unicode_normalize",
-                            "args": { "kind": "nfkc" }
-                        }),
-                        json!({
-                            "kind": "japanese_iteration_mark",
-                            "args": {
-                                "normalize_kanji": true,
-                                "normalize_kana": true
-                            }
-                        }),
-                    ];
-
-                    let token_filters = vec![
-                        json!({
-                            "kind": "remove_diacritical_mark",
-                            "args": {
-                                // do not remove dakuten, handakuten
-                                "japanese": false
-                            }
-                        }),
-                        json!({
-                            "kind": "japanese_kana",
-                            "args": {
-                                "kind": "hiragana"
-                            }
-                        }),
-                        json!({
-                            "kind": "japanese_katakana_stem",
-                            "args": {
-                                "min": 3
-                            }
-                        }),
-                        json!({
-                            "kind": "remove_diacritical_mark",
-                            "args": {
-                                "japanese": false
-                            }
-                        }),
-                        json!({
-                            "kind": "uppercase"
-                        }),
-                    ];
-
-                    let segmenter = self.get_segmenter(lang)?;
-                    let mut tokenizer = Tokenizer::new((*segmenter).clone());
-
-                    for character_filter_setting in character_filters {
-                        let character_filter_name = character_filter_setting["kind"].as_str();
-                        if let Some(character_filter_name) = character_filter_name {
-                            // Append a character filter to the tokenizer.
-                            tokenizer.append_character_filter(
-                                CharacterFilterLoader::load_from_value(
-                                    character_filter_name,
-                                    &character_filter_setting["args"],
-                                )?,
-                            );
+        let tokenizer = self.tokenizer[&lang]
+            .get_or_try_init(|| async move {
+                let character_filters = vec![
+                    json!({
+                        "kind": "unicode_normalize",
+                        "args": { "kind": "nfkc" }
+                    }),
+                    json!({
+                        "kind": "japanese_iteration_mark",
+                        "args": {
+                            "normalize_kanji": true,
+                            "normalize_kana": true
                         }
-                    }
+                    }),
+                ];
 
-                    for token_filter_setting in token_filters {
-                        let token_filter_name = token_filter_setting["kind"].as_str();
-                        if let Some(token_filter_name) = token_filter_name {
-                            // Append a token filter to the tokenizer.
-                            tokenizer.append_token_filter(TokenFilterLoader::load_from_value(
-                                token_filter_name,
-                                &token_filter_setting["args"],
-                            )?);
+                let token_filters = vec![
+                    json!({
+                        "kind": "remove_diacritical_mark",
+                        "args": {
+                            // do not remove dakuten, handakuten
+                            "japanese": false
                         }
+                    }),
+                    json!({
+                        "kind": "japanese_kana",
+                        "args": {
+                            "kind": "hiragana"
+                        }
+                    }),
+                    json!({
+                        "kind": "japanese_katakana_stem",
+                        "args": {
+                            "min": 3
+                        }
+                    }),
+                    json!({
+                        "kind": "remove_diacritical_mark",
+                        "args": {
+                            "japanese": false
+                        }
+                    }),
+                    json!({
+                        "kind": "uppercase"
+                    }),
+                ];
+
+                let segmenter = self.get_segmenter(lang).await?;
+                let mut tokenizer = Tokenizer::new((*segmenter).clone());
+
+                for character_filter_setting in character_filters {
+                    let character_filter_name = character_filter_setting["kind"].as_str();
+                    if let Some(character_filter_name) = character_filter_name {
+                        // Append a character filter to the tokenizer.
+                        tokenizer.append_character_filter(CharacterFilterLoader::load_from_value(
+                            character_filter_name,
+                            &character_filter_setting["args"],
+                        )?);
                     }
-
-                    let tokenizer = Arc::new(tokenizer);
-
-                    tokenizer_map.insert(lang, Arc::clone(&tokenizer));
-                    tokenizer
                 }
-            }
-        };
+
+                for token_filter_setting in token_filters {
+                    let token_filter_name = token_filter_setting["kind"].as_str();
+                    if let Some(token_filter_name) = token_filter_name {
+                        // Append a token filter to the tokenizer.
+                        tokenizer.append_token_filter(TokenFilterLoader::load_from_value(
+                            token_filter_name,
+                            &token_filter_setting["args"],
+                        )?);
+                    }
+                }
+
+                Ok::<_, YomitanError>(Arc::new(tokenizer))
+            })
+            .await?;
 
         let mut out = vec![];
         let mut tokens = tokenizer.tokenize(text)?;
@@ -251,27 +249,31 @@ impl TokenizerMapper {
         Ok(out)
     }
 
-    fn get_segmenter(&self, lang: Lang) -> Result<Arc<Segmenter>, YomitanError> {
-        let mut segmenter_map = self.segmenter.lock()?;
-        if let Some(segmenter) = segmenter_map.get(&lang) {
-            return Ok(Arc::clone(segmenter));
-        }
-        let model = match lang {
-            Lang::Ja => "unidic", // more consistent minimal units than ipadic(-neologd) and much smaller than sudachidict
-            Lang::Zh => "cc-cedict", // cc-cedict may have better support traditional form better than jieba
-            Lang::Ko => "ko-dic",
-        };
+    async fn get_segmenter(&self, lang: Lang) -> Result<Arc<Segmenter>, YomitanError> {
+        let root_dir = self.root_dir.clone();
 
-        let dictionary = load_dictionary(
-            &self
-                .root_dir
-                .join(format!("lindera-{}", model))
-                .display()
-                .to_string(),
-        )?;
+        self.segmenter[&lang]
+            .get_or_try_init(|| async move {
+                spawn_blocking(move || {
+                    let model = match lang {
+                        Lang::Ja => "unidic", // more consistent minimal units than ipadic(-neologd) and much smaller than sudachidict
+                        Lang::Zh => "cc-cedict", // cc-cedict may have better support traditional form better than jieba
+                        Lang::Ko => "ko-dic",
+                    };
 
-        let segmenter = Arc::new(Segmenter::new(Mode::Normal, dictionary, None));
-        segmenter_map.insert(lang, Arc::clone(&segmenter));
-        Ok(segmenter)
+                    let dictionary = load_dictionary(
+                        &root_dir
+                            .join(format!("lindera-{}", model))
+                            .display()
+                            .to_string(),
+                    )?;
+
+                    Ok::<_, YomitanError>(Arc::new(Segmenter::new(Mode::Normal, dictionary, None)))
+                })
+                .await?
+                .map_err(YomitanError::from)
+            })
+            .await
+            .cloned()
     }
 }
