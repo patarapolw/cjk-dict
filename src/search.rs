@@ -7,7 +7,7 @@ use unicode_normalization::{IsNormalized, UnicodeNormalization, is_nfkc_quick};
 
 use crate::{
     error::YomitanError,
-    parser::YomitanReader,
+    parser::{YomitanIndex, YomitanReader},
     tokenize::{Lang, TokenizerMapper},
 };
 
@@ -79,12 +79,15 @@ impl YomitanSearch {
                 let mut tx = self.db.begin().await?;
 
                 let data_str = reader.clone().get_index_json_str().await?;
+                let data: YomitanIndex = serde_json::from_str(&data_str)?;
 
                 let r = sqlx::query(
-                    "INSERT INTO `index` (`path`, `data`)
-                    VALUES ($1, $2)",
+                    "INSERT INTO `index` (`path`, `L1`, `L2`, `data`)
+                    VALUES ($1, $2, $3, $4)",
                 )
                 .bind(&d)
+                .bind(data.source_language)
+                .bind(data.target_language)
                 .bind(data_str)
                 .execute(&mut *tx)
                 .await?;
@@ -110,46 +113,39 @@ impl YomitanSearch {
                 let mut term_stream = sqlx::query("SELECT *, rowid FROM term").fetch(&reader_db);
                 while let Some(row) = term_stream.try_next().await? {
                     let term: String = row.get("term");
-                    let p1_term = nfkc(&term).into_owned();
+                    let p1_term = normalize_text(&term);
                     let p2_term_ja = join_tokens(&term, Lang::Ja).await?;
                     let p3_term_zh = join_tokens(&term, Lang::Zh).await?;
                     let p4_term_ko = join_tokens(&term, Lang::Ko).await?;
 
                     let reading: String = row.get("reading");
-                    let p5_reading = nfkc(&term).into_owned();
-                    let p6_reading_ja = join_tokens(&reading, Lang::Ja).await?;
-                    let p7_reading_zh = join_tokens(&reading, Lang::Zh).await?;
-                    let p8_reading_ko = join_tokens(&reading, Lang::Ko).await?;
+                    let p5_reading = normalize_text(&reading);
 
-                    let p9_def_tags: Option<String> = row.get("def_tags");
-                    let p10_rules: Option<String> = row.get("rules");
-                    let p11_score: Option<i64> = row.get("score");
-                    let p12_sequence: Option<i64> = row.get("sequence");
-                    let p13_tags: Option<String> = row.get("tags");
+                    let p6_def_tags: Option<String> = row.get("def_tags");
+                    let p7_rules: Option<String> = row.get("rules");
+                    let p8_score: Option<i64> = row.get("score");
+                    let p9_sequence: Option<i64> = row.get("sequence");
+                    let p10_tags: Option<String> = row.get("tags");
 
                     let term_rowid: i64 = row.get("rowid");
 
                     sqlx::query(
                         "INSERT INTO `term` (
-                        `term`, `term_ja`, `term_zh`, `term_ko`,                -- 1,2,3,4
-                        `reading`, `reading_ja`, `reading_zh`, `reading_ko`,    -- 5,6,7,8
-                        `def_tags`, `rules`, `score`, `sequence`, `tags`,       -- 9,10,11,12,13
-                        `index_rowid`, `term_rowid`                             -- 14,15
-                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
+                        `term`, `term_ja`, `term_zh`, `term_ko`, `reading`,     -- 1,2,3,4,5
+                        `def_tags`, `rules`, `score`, `sequence`, `tags`,       -- 6,7,8,9,10
+                        `index_rowid`, `term_rowid`                             -- 11,12
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
                     )
                     .bind(p1_term)
                     .bind(p2_term_ja)
                     .bind(p3_term_zh)
                     .bind(p4_term_ko)
                     .bind(p5_reading)
-                    .bind(p6_reading_ja)
-                    .bind(p7_reading_zh)
-                    .bind(p8_reading_ko)
-                    .bind(p9_def_tags)
-                    .bind(p10_rules)
-                    .bind(p11_score)
-                    .bind(p12_sequence)
-                    .bind(p13_tags)
+                    .bind(p6_def_tags)
+                    .bind(p7_rules)
+                    .bind(p8_score)
+                    .bind(p9_sequence)
+                    .bind(p10_tags)
                     .bind(index_rowid)
                     .bind(term_rowid)
                     .execute(&mut *tx)
@@ -171,12 +167,16 @@ impl YomitanSearch {
     }
 }
 
-pub fn nfkc(text: &str) -> Cow<'_, str> {
+fn nfkc(text: &str) -> Cow<'_, str> {
     if is_nfkc_quick(text.chars()) == IsNormalized::Yes {
         Cow::Borrowed(text)
     } else {
         Cow::Owned(text.nfkc().collect())
     }
+}
+
+pub fn normalize_text(text: &str) -> String {
+    nfkc(text).to_uppercase()
 }
 
 #[derive(Default)]

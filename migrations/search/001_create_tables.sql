@@ -1,5 +1,8 @@
 CREATE TABLE "index" (
   "path"        TEXT NOT NULL PRIMARY KEY,  -- actual YomitanReader root_dir
+
+  L1            TEXT,                       -- data[$.sourceLanguage] or enforced by user
+  L2            TEXT,                       -- data[$.targetLanguage] or enforced by user
   "data"        TEXT_JSON NOT NULL
 );
 
@@ -10,9 +13,6 @@ CREATE TABLE term (
   term_ko     TEXT,
 
   reading     TEXT NOT NULL,  -- DEFAULT ''
-  reading_ja  TEXT,
-  reading_zh  TEXT,
-  reading_ko  TEXT,
 
   def_tags    TEXT, -- space-separated
   rules       TEXT, -- space-separated
@@ -36,9 +36,6 @@ CREATE VIRTUAL TABLE term_fts USING fts5 (
   term_zh,
   term_ko,
   reading     UNINDEXED,
-  reading_ja,
-  reading_zh,
-  reading_ko,
   def_tags,
   rules,
   score       UNINDEXED,  -- consider sorting non-TEXT outside
@@ -56,9 +53,6 @@ BEGIN
     term_ja,
     term_zh,
     term_ko,
-    reading_ja,
-    reading_zh,
-    reading_ko,
     def_tags,
     rules,
     tags,
@@ -66,9 +60,6 @@ BEGIN
     new.term_ja,
     new.term_zh,
     new.term_ko,
-    new.reading_ja,
-    new.reading_zh,
-    new.reading_ko,
     new.def_tags,
     new.rules,
     new.tags,
