@@ -14,6 +14,7 @@ pub enum YomitanError {
     JSONError(serde_json::Error),
     LinderaError(LinderaError),
     MutexPoisonedError(String),
+    UnsupportedLanguageError(String),
     Error(String),
 }
 
@@ -28,6 +29,7 @@ impl fmt::Display for YomitanError {
             Self::JSONError(e) => write!(f, "serde_json::Error: {e}"),
             Self::LinderaError(e) => write!(f, "LinderaError: {e}"),
             Self::MutexPoisonedError(e) => write!(f, "MutexPoisonedError: {e}"),
+            Self::UnsupportedLanguageError(e) => write!(f, "UnsupportedLanguageError: {e}"),
             Self::Error(e) => write!(f, "Error: {e}"),
         }
     }
