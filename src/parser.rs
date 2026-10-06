@@ -139,6 +139,10 @@ impl YomitanParser {
         Ok(Self { root_dir })
     }
 
+    pub fn from_dir(root_dir: PathBuf) -> Self {
+        Self { root_dir }
+    }
+
     pub async fn create_db(
         self,
         progress_callback: impl Fn(YomitanImportProgress),

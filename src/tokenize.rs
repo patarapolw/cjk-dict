@@ -37,16 +37,13 @@ impl Lang {
         Lang::ALL.iter().map(|&l| (l, OnceCell::new())).collect()
     }
 
-    pub fn from(value: &str) -> Result<Self, YomitanError> {
-        let out = match value {
-            "ja-JP" => Lang::Ja,
-            "ko-KR" => Lang::Ko,
-            "zh-CN" => Lang::Zh,
-            _ => {
-                return Err(YomitanError::Error("unsupported language".to_string()));
-            }
-        };
-        Ok(out)
+    pub fn from(value: &str) -> Option<Self> {
+        match value {
+            "ja-JP" => Some(Lang::Ja),
+            "ko-KR" => Some(Lang::Ko),
+            "zh-CN" => Some(Lang::Zh),
+            _ => None,
+        }
     }
 }
 
