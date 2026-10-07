@@ -56,6 +56,9 @@ static KO_STOP_TAGS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     .collect()
 });
 
+static KO_VERB_TAGS: LazyLock<HashSet<&'static str>> =
+    LazyLock::new(|| ["VV", "VA", "VX", "VCN"].into_iter().collect());
+
 pub struct TokenizerMapper {
     root_dir: PathBuf,
     segmenter: HashMap<Lang, OnceCell<Arc<Segmenter>>>,
@@ -169,7 +172,10 @@ impl TokenizerMapper {
 
         let mut out = vec![];
         let mut tokens = tokenizer.tokenize(text)?;
+        let mut is_ko_verb;
+
         'outer: for token in tokens.iter_mut() {
+            is_ko_verb = false;
             let surface = token.surface.to_string();
 
             // for some reasons, `[,-]` is considered by unidic to be 名詞, 普通名詞, サ変可能
@@ -206,11 +212,15 @@ impl TokenizerMapper {
                     }
                 }
                 Lang::Ko => {
+                    is_ko_verb = false;
                     let details = token.details();
 
                     if let Some(pos) = details.get(0) {
                         if KO_STOP_TAGS.contains(pos) {
                             continue 'outer;
+                        }
+                        if KO_VERB_TAGS.contains(pos) {
+                            is_ko_verb = true;
                         }
                     }
 
@@ -227,10 +237,17 @@ impl TokenizerMapper {
                                     if KO_STOP_TAGS.contains(pos) {
                                         continue;
                                     }
+                                    if KO_VERB_TAGS.contains(pos) {
+                                        is_ko_verb = true;
+                                    }
                                 }
 
                                 if let Some(t) = sub_tokens.get(0) {
-                                    out.push(t.to_string());
+                                    out.push(if is_ko_verb {
+                                        format!("{t}다")
+                                    } else {
+                                        t.to_string()
+                                    });
                                 }
                             }
                             continue 'outer;
@@ -240,7 +257,11 @@ impl TokenizerMapper {
                 _ => {}
             }
 
-            out.push(surface);
+            out.push(if is_ko_verb {
+                format!("{surface}다")
+            } else {
+                surface.to_string()
+            });
         }
 
         Ok(out)

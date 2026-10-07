@@ -8,9 +8,9 @@ CREATE TABLE "index" (
 
 CREATE TABLE term (
   term        TEXT NOT NULL,
-  term_ja     TEXT,
-  term_zh     TEXT,
-  term_ko     TEXT,
+  term_ja     TEXT NOT NULL,
+  term_zh     TEXT NOT NULL,
+  term_ko     TEXT NOT NULL,
 
   reading     TEXT NOT NULL,  -- DEFAULT ''
 
@@ -30,36 +30,30 @@ CREATE INDEX idx_term_reading ON term (reading);
 CREATE INDEX idx_term_score ON term (score);
 CREATE INDEX idx_term_sequence ON term ("sequence");
 
-CREATE VIRTUAL TABLE term_fts USING fts5 (
+CREATE VIEW term_tags AS
+SELECT
+  term, reading, rowid,
+  def_tags, rules, tags
+FROM term;
+
+CREATE VIRTUAL TABLE term_tags_fts USING fts5 (
   term        UNINDEXED,
-  term_ja,
-  term_zh,
-  term_ko,
   reading     UNINDEXED,
   def_tags,
   rules,
-  score       UNINDEXED,  -- consider sorting non-TEXT outside
-  "sequence"  UNINDEXED,
   tags,
-  index_rowid UNINDEXED,
-  content='term'
+  content='term_tags'
 );
 
 -- Triggers to keep the FTS index up to date.
 -- Other triggers (after update/delete) not used, expect table to be rebuilt or left as is.
-CREATE TRIGGER term_afer_insert AFTER INSERT ON term
+CREATE TRIGGER term_tags_afer_insert AFTER INSERT ON term
 BEGIN
-  INSERT INTO term_fts(
-    term_ja,
-    term_zh,
-    term_ko,
+  INSERT INTO term_tags_fts(
     def_tags,
     rules,
     tags,
   rowid) VALUES (
-    new.term_ja,
-    new.term_zh,
-    new.term_ko,
     new.def_tags,
     new.rules,
     new.tags,
