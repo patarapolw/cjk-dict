@@ -1,11 +1,15 @@
 CREATE VIEW term_ko AS
 SELECT
-  term, reading, rowid,
+  rowid,
+  index_rowid, term_rowid,  -- rowid columns help with JOIN
+  term, reading,            -- just for quick debug term_[lang]
   term_ko
 FROM term
 WHERE term_ko IS NOT NULL;
 
 CREATE VIRTUAL TABLE term_ko_fts USING fts5 (
+  index_rowid UNINDEXED,
+  term_rowid  UNINDEXED,
   term        UNINDEXED,
   reading     UNINDEXED,
   term_ko,

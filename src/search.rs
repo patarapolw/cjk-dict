@@ -112,7 +112,8 @@ impl YomitanSearch {
                             .tokenize(lang, text)
                             .await?
                             .join(" ")
-                            .non_empty_trimmed())
+                            .non_empty_trimmed()
+                            .map(|s| format!(" {s} ")))
                     };
 
                 let mut term_stream = sqlx::query("SELECT *, rowid FROM term").fetch(&reader_db);
@@ -124,7 +125,9 @@ impl YomitanSearch {
                     let p4_term_ko = join_tokens(&term, Lang::Ko).await?;
 
                     let reading: String = row.get("reading");
-                    let p5_reading = normalize_text(&reading).non_empty_trimmed();
+                    let p5_reading = normalize_text(&reading)
+                        .non_empty_trimmed()
+                        .map(|s| format!(" {s} "));
 
                     let p6_def_tags = row
                         .get::<Option<String>, _>("def_tags")
