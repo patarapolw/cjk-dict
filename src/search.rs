@@ -94,21 +94,26 @@ impl YomitanSearch {
 
                 let index_rowid = r.last_insert_rowid();
 
-                let join_tokens = async |text: &str, lang: Lang| -> Result<String, YomitanError> {
-                    if let Some(s_lang) = source_language {
-                        if s_lang != lang {
-                            return Ok(String::new());
+                let join_tokens =
+                    async |text: &str, lang: Lang| -> Result<Option<String>, YomitanError> {
+                        if let Some(s_lang) = source_language {
+                            if s_lang != lang {
+                                return Ok(None);
+                            }
                         }
-                    }
 
-                    if let Some(g_lang) = guess_lang(text) {
-                        if g_lang != lang {
-                            return Ok(String::new());
+                        if let Some(g_lang) = guess_lang(text) {
+                            if g_lang != lang {
+                                return Ok(None);
+                            }
                         }
-                    }
 
-                    Ok(tokenizer_mapper.tokenize(lang, text).await?.join(" "))
-                };
+                        Ok(tokenizer_mapper
+                            .tokenize(lang, text)
+                            .await?
+                            .join(" ")
+                            .non_empty_trimmed())
+                    };
 
                 let mut term_stream = sqlx::query("SELECT *, rowid FROM term").fetch(&reader_db);
                 while let Some(row) = term_stream.try_next().await? {
@@ -119,13 +124,22 @@ impl YomitanSearch {
                     let p4_term_ko = join_tokens(&term, Lang::Ko).await?;
 
                     let reading: String = row.get("reading");
-                    let p5_reading = normalize_text(&reading);
+                    let p5_reading = normalize_text(&reading).non_empty_trimmed();
 
-                    let p6_def_tags: Option<String> = row.get("def_tags");
-                    let p7_rules: Option<String> = row.get("rules");
+                    let p6_def_tags = row
+                        .get::<Option<String>, _>("def_tags")
+                        .non_empty_trimmed()
+                        .map(|s| format!(" {s} "));
+                    let p7_rules = row
+                        .get::<Option<String>, _>("rules")
+                        .non_empty_trimmed()
+                        .map(|s| format!(" {s} "));
                     let p8_score: Option<i64> = row.get("score");
                     let p9_sequence: Option<i64> = row.get("sequence");
-                    let p10_tags: Option<String> = row.get("tags");
+                    let p10_tags = row
+                        .get::<Option<String>, _>("tags")
+                        .non_empty_trimmed()
+                        .map(|s| format!(" {s} "));
 
                     let term_rowid: i64 = row.get("rowid");
 
@@ -226,5 +240,45 @@ pub fn guess_lang(text: &str) -> Option<Lang> {
         (0, h, _) if h > 0 => Some(Lang::Ko), // Hangul (even with Hanja) => Korean
         (0, 0, _) => None,                    // Han only: Chinese or Japanese, ambiguous
         _ => None,
+    }
+}
+
+pub trait NonEmpty: Sized {
+    fn non_empty_trimmed(self) -> Option<Self>;
+    fn non_empty(self) -> Option<Self>;
+}
+
+impl NonEmpty for String {
+    fn non_empty_trimmed(self) -> Option<Self> {
+        let t = self.trim();
+        (!t.is_empty()).then(|| t.to_owned()) // also strips surrounding whitespace
+    }
+    fn non_empty(self) -> Option<String> {
+        (!self.is_empty()).then_some(self)
+    }
+}
+
+pub trait OptionNonEmpty {
+    fn non_empty_trimmed(self) -> Self;
+    fn non_empty(self) -> Self;
+}
+
+impl OptionNonEmpty for Option<String> {
+    fn non_empty_trimmed(self) -> Self {
+        self.and_then(|s| {
+            let t = s.trim();
+            if t.is_empty() {
+                None
+            } else if t.len() == s.len() {
+                Some(s)
+            }
+            // already trimmed: reuse
+            else {
+                Some(t.to_owned())
+            }
+        })
+    }
+    fn non_empty(self) -> Self {
+        self.filter(|s| !s.is_empty())
     }
 }

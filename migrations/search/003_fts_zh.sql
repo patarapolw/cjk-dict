@@ -3,7 +3,7 @@ SELECT
   term, reading, rowid,
   term_zh
 FROM term
-WHERE term_zh != '';
+WHERE term_zh IS NOT NULL;
 
 CREATE VIRTUAL TABLE term_zh_fts USING fts5 (
   term        UNINDEXED,
@@ -15,7 +15,7 @@ CREATE VIRTUAL TABLE term_zh_fts USING fts5 (
 -- Triggers to keep the FTS index up to date.
 -- Other triggers (after update/delete) not used, expect table to be rebuilt or left as is.
 CREATE TRIGGER term_zh_afer_insert AFTER INSERT ON term
-WHEN new.term_zh != ''
+WHEN new.term_zh IS NOT NULL
 BEGIN
   INSERT INTO term_zh_fts(
     term_zh,
