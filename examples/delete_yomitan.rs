@@ -6,13 +6,9 @@ use yomitan_parser::{error::YomitanError, search::YomitanSearch};
 async fn main() -> Result<(), YomitanError> {
     let root_dir = Path::new("tmp");
 
-    let yomi = YomitanSearch::new(
-        root_dir.join("yomitan.db"),
-        vec!["jitenon-kotowaza", "jitsuyou", "Pixiv", "sankoku8", "smk8"],
-    )
-    .await?;
+    let yomi = YomitanSearch::new(root_dir.join("yomitan.db"), vec!["Pixiv"]).await?;
 
-    yomi.delete_dict("Pixiv", |s| {
+    yomi.delete("Pixiv", |s| {
         println!("{}", s);
     })
     .await?;

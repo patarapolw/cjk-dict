@@ -14,17 +14,11 @@ async fn main() -> Result<(), YomitanError> {
         "C:\\Users\\HP\\AppData\\Roaming\\cc.polv.cjk-explainer\\lindera",
     ));
 
-    let yomi = YomitanSearch::new(
-        root_dir.join("yomitan.db"),
-        vec![
-            "jitenon-kotowaza",
-            "jitsuyou",
-            "PixivLight",
-            "sankoku8",
-            "smk8",
-        ],
-    )
-    .await?;
+    let dicts = vec!["jitenon-kotowaza", "jitsuyou", "sankoku8", "smk8"];
+    let mut all_dicts = dicts.clone();
+    all_dicts.push("PixivLight");
+
+    let yomi = YomitanSearch::new(root_dir.join("yomitan.db"), all_dicts).await?;
 
     fn cb(p: YomitanSearchInitProgress) {
         if p.current % 10_000 == 0 {
@@ -32,14 +26,11 @@ async fn main() -> Result<(), YomitanError> {
         }
     }
 
-    yomi.import(vec!["PixivLight"], None, &tok, cb).await?;
-    yomi.import(
-        vec!["jitenon-kotowaza", "jitsuyou", "sankoku8", "smk8"],
-        Some(Lang::Ja),
-        &tok,
-        cb,
-    )
-    .await?;
+    yomi.import("PixivLight", None, &tok, cb).await?;
+
+    for dict in dicts {
+        yomi.import(dict, Some(Lang::Ja), &tok, cb).await?;
+    }
 
     Ok(())
 }
