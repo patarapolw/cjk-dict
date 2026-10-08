@@ -3,7 +3,7 @@ use std::{borrow::Cow, collections::HashMap, path::PathBuf};
 use futures::TryStreamExt;
 use serde::Serialize;
 use sqlx::{Pool, Row, Sqlite, SqlitePool, sqlite::SqliteConnectOptions};
-use tokio::fs::remove_dir_all;
+use tokio::fs::{File, remove_dir_all};
 use unicode_normalization::{IsNormalized, UnicodeNormalization, is_nfkc_quick};
 
 use crate::{
@@ -180,6 +180,8 @@ impl YomitanSearch {
 
             tx.commit().await?;
         }
+
+        File::create(reader.root_dir.join(".imported")).await?;
 
         Ok(self)
     }
