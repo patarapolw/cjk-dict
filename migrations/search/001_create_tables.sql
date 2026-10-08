@@ -21,7 +21,7 @@ CREATE TABLE term (
   "sequence"  INTEGER,
   tags        TEXT CHECK (tags      LIKE ' %_ '),
 
-  index_rowid     INTEGER NOT NULL REFERENCES "index" (rowid),
+  index_rowid     INTEGER NOT NULL REFERENCES "index" (rowid) ON DELETE CASCADE,
   term_rowid      INTEGER NOT NULL  -- REFERENCES dicts[i].term (rowid)
 );
 
@@ -29,3 +29,5 @@ CREATE INDEX idx_term_term ON term (term);
 CREATE INDEX idx_term_reading ON term (reading);
 CREATE INDEX idx_term_score ON term (score);
 CREATE INDEX idx_term_sequence ON term ("sequence");
+
+CREATE INDEX idx_term_index_rowid ON term (index_rowid);

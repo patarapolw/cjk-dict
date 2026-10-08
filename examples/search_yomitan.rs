@@ -16,7 +16,13 @@ async fn main() -> Result<(), YomitanError> {
 
     let yomi = YomitanSearch::new(
         root_dir.join("yomitan.db"),
-        vec!["jitenon-kotowaza", "jitsuyou", "Pixiv", "sankoku8", "smk8"],
+        vec![
+            "jitenon-kotowaza",
+            "jitsuyou",
+            "PixivLight",
+            "sankoku8",
+            "smk8",
+        ],
     )
     .await?;
 
@@ -26,7 +32,7 @@ async fn main() -> Result<(), YomitanError> {
         }
     }
 
-    yomi.import(vec!["Pixiv"], None, &tok, cb).await?;
+    yomi.import(vec!["PixivLight"], None, &tok, cb).await?;
     yomi.import(
         vec!["jitenon-kotowaza", "jitsuyou", "sankoku8", "smk8"],
         Some(Lang::Ja),

@@ -3,6 +3,7 @@ use std::{borrow::Cow, collections::HashMap, path::PathBuf};
 use futures::TryStreamExt;
 use serde::Serialize;
 use sqlx::{Pool, Row, Sqlite, SqlitePool, sqlite::SqliteConnectOptions};
+use tokio::fs::remove_dir_all;
 use unicode_normalization::{IsNormalized, UnicodeNormalization, is_nfkc_quick};
 
 use crate::{
@@ -181,6 +182,72 @@ impl YomitanSearch {
         }
 
         Ok(())
+    }
+
+    pub async fn delete_dict(&self, dict: &str, cb: impl Fn(String)) -> Result<bool, YomitanError> {
+        let mut tx = self.db.begin().await?;
+
+        // throws Error and exit if the row doesn't exist.
+        let rowid: i64 = {
+            let row = sqlx::query("SELECT rowid FROM `index` WHERE `path` = $1")
+                .bind(dict)
+                .fetch_one(&mut *tx)
+                .await?;
+            row.get(0)
+        };
+
+        let reader = self.dicts[dict].clone();
+
+        if reader.root_dir.exists() && reader.root_dir.is_dir() {
+            reader.db.close().await;
+            remove_dir_all(reader.root_dir).await?;
+
+            cb(format!("closed and deleted {dict}"))
+        } else {
+            return Err(YomitanError::from(format!(
+                "Yomitan dict dir does not exist: {:?}",
+                reader.root_dir
+            )));
+        }
+
+        const FTS: [(&str, &[&str]); 4] = [
+            ("tags", &["def_tags", "rules", "tags"]),
+            ("ja", &["term_ja"]),
+            ("zh", &["term_zh"]),
+            ("ko", &["term_ko"]),
+        ];
+
+        // BEFORE deleting from `term`
+        for (t, cols) in FTS {
+            let cols = cols.join(", ");
+            sqlx::query(&format!(
+                "INSERT INTO term_{t}_fts(term_{t}_fts, rowid, {cols})
+                SELECT 'delete', rowid, {cols} FROM term_{t} WHERE index_rowid = $1"
+            ))
+            .bind(rowid)
+            .execute(&mut *tx)
+            .await?;
+
+            cb(format!("cleared term_{t}_fts for {dict}"));
+        }
+
+        sqlx::query("DELETE FROM term WHERE index_rowid = $1")
+            .bind(rowid)
+            .execute(&mut *tx)
+            .await?;
+
+        cb(format!("deleted terms for {dict}"));
+
+        sqlx::query("DELETE FROM `index` WHERE rowid = $1")
+            .bind(rowid)
+            .execute(&mut *tx)
+            .await?;
+
+        cb(format!("deleted index for {dict}, awaiting commit"));
+
+        tx.commit().await?;
+
+        Ok(true)
     }
 }
 

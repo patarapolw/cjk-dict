@@ -385,10 +385,6 @@ impl YomitanReader {
         Self { root_dir, db }
     }
 
-    pub async fn close(self) {
-        self.db.close().await;
-    }
-
     pub async fn get_index_json_str(self) -> Result<String, YomitanError> {
         Ok(read_to_string(self.root_dir.join("index.json")).await?)
     }
