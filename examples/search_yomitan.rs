@@ -18,7 +18,7 @@ async fn main() -> Result<(), YomitanError> {
     let mut all_dicts = dicts.clone();
     all_dicts.push("PixivLight");
 
-    let yomi = YomitanSearch::new(root_dir.join("yomitan.db"), all_dicts).await?;
+    let yomi = YomitanSearch::new(root_dir.join("search.db"), all_dicts).await?;
 
     fn cb(p: YomitanSearchInitProgress) {
         if p.current % 10_000 == 0 {

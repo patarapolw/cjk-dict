@@ -98,9 +98,12 @@ impl YomitanSearch {
 
             let join_tokens =
                 async |text: &str, lang: Lang| -> Result<Option<String>, YomitanError> {
+                    let mut preserve_text = false;
                     if let Some(s_lang) = source_language {
                         if s_lang != lang {
                             return Ok(None);
+                        } else {
+                            preserve_text = true;
                         }
                     }
 
@@ -115,6 +118,13 @@ impl YomitanSearch {
                         .await?
                         .join(" ")
                         .non_empty_trimmed()
+                        .or_else(|| {
+                            if preserve_text {
+                                Some(text.to_string())
+                            } else {
+                                None
+                            }
+                        })
                         .map(|s| format!(" {s} ")))
                 };
 
@@ -220,27 +230,6 @@ impl YomitanSearch {
                 "Yomitan dict dir does not exist: {:?}",
                 reader.root_dir
             )));
-        }
-
-        const FTS: [(&str, &[&str]); 4] = [
-            ("tags", &["def_tags", "rules", "tags"]),
-            ("ja", &["term_ja"]),
-            ("zh", &["term_zh"]),
-            ("ko", &["term_ko"]),
-        ];
-
-        // BEFORE deleting from `term`
-        for (t, cols) in FTS {
-            let cols = cols.join(", ");
-            sqlx::query(&format!(
-                "INSERT INTO term_{t}_fts(term_{t}_fts, rowid, {cols})
-                SELECT 'delete', rowid, {cols} FROM term_{t} WHERE index_rowid = $1"
-            ))
-            .bind(rowid)
-            .execute(&mut *tx)
-            .await?;
-
-            cb(format!("cleared term_{t}_fts for {dict}"));
         }
 
         sqlx::query("DELETE FROM term WHERE index_rowid = $1")
