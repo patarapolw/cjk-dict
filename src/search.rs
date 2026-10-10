@@ -38,6 +38,7 @@ impl YomitanSearch {
 
         let db = SqlitePool::connect_with(options).await?;
         sqlx::migrate!("migrations/search").run(&db).await?;
+        println!("migrated YomitanSearch");
 
         let mut dicts = HashMap::new();
 
