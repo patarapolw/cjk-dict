@@ -1,8 +1,12 @@
-use std::{borrow::Cow, collections::HashMap, path::PathBuf};
+use std::{borrow::Cow, collections::HashMap, path::PathBuf, time::Duration};
 
 use futures::TryStreamExt;
+use itertools::Itertools;
 use serde::Serialize;
-use sqlx::{Pool, Row, Sqlite, SqlitePool, sqlite::SqliteConnectOptions};
+use sqlx::{
+    Pool, Row, Sqlite, SqlitePool,
+    sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous},
+};
 use tokio::fs::{File, remove_dir_all};
 use unicode_normalization::{IsNormalized, UnicodeNormalization, is_nfkc_quick};
 
@@ -10,6 +14,7 @@ use crate::{
     error::YomitanError,
     parser::{YomitanIndex, YomitanReader},
     tokenize::{Lang, TokenizerMapper},
+    util::{NonEmpty, OptionNonEmpty},
 };
 
 pub struct YomitanSearch {
@@ -30,7 +35,13 @@ impl YomitanSearch {
         let options = SqliteConnectOptions::new()
             .filename(db_path.clone())
             .create_if_missing(true)
-            .foreign_keys(false);
+            .journal_mode(SqliteJournalMode::Wal)
+            .synchronous(SqliteSynchronous::Normal)
+            .busy_timeout(Duration::from_secs(5))
+            .foreign_keys(false)
+            .pragma("cache_size", "-64000") // approximately 64 MiB
+            .pragma("temp_store", "MEMORY")
+            .pragma("mmap_size", "268435456"); // 256 MiB
 
         let root_dir = db_path
             .parent()
@@ -97,45 +108,19 @@ impl YomitanSearch {
 
             let index_rowid = r.last_insert_rowid();
 
-            let join_tokens =
-                async |text: &str, lang: Lang| -> Result<Option<String>, YomitanError> {
-                    let mut preserve_text = false;
-                    if let Some(s_lang) = source_language {
-                        if s_lang != lang {
-                            return Ok(None);
-                        } else {
-                            preserve_text = true;
-                        }
-                    }
-
-                    if let Some(g_lang) = guess_lang(text) {
-                        if g_lang != lang {
-                            return Ok(None);
-                        }
-                    }
-
-                    Ok(tokenizer_mapper
-                        .tokenize(lang, text)
-                        .await?
-                        .join(" ")
-                        .non_empty_trimmed()
-                        .or_else(|| {
-                            if preserve_text {
-                                Some(text.to_string())
-                            } else {
-                                None
-                            }
-                        })
-                        .map(|s| format!(" {s} ")))
-                };
-
             let mut term_stream = sqlx::query("SELECT *, rowid FROM term").fetch(&reader_db);
             while let Some(row) = term_stream.try_next().await? {
                 let term: String = row.get("term");
                 let p1_term = normalize_text(&term);
-                let p2_term_ja = join_tokens(&term, Lang::Ja).await?;
-                let p3_term_zh = join_tokens(&term, Lang::Zh).await?;
-                let p4_term_ko = join_tokens(&term, Lang::Ko).await?;
+                let p2_term_ja = tokenizer_mapper
+                    .join_tokens(&term, Lang::Ja, &source_language)
+                    .await?;
+                let p3_term_zh = tokenizer_mapper
+                    .join_tokens(&term, Lang::Zh, &source_language)
+                    .await?;
+                let p4_term_ko = tokenizer_mapper
+                    .join_tokens(&term, Lang::Ko, &source_language)
+                    .await?;
 
                 let reading: String = row.get("reading");
                 let p5_reading = normalize_text(&reading)
@@ -151,21 +136,45 @@ impl YomitanSearch {
                     .non_empty_trimmed()
                     .map(|s| format!(" {s} "));
                 let p8_score: Option<i64> = row.get("score");
-                let p9_sequence: Option<i64> = row.get("sequence");
-                let p10_tags = row
+                let p9_tags = row
                     .get::<Option<String>, _>("tags")
                     .non_empty_trimmed()
                     .map(|s| format!(" {s} "));
 
                 let term_rowid: i64 = row.get("rowid");
 
-                sqlx::query(
-                    "INSERT INTO `term` (
-                        `term`, `term_ja`, `term_zh`, `term_ko`, `reading`,     -- 1,2,3,4,5
-                        `def_tags`, `rules`, `score`, `sequence`, `tags`,       -- 6,7,8,9,10
-                        `index_rowid`, `term_rowid`                             -- 11,12
-                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
-                )
+                let cols = [
+                    "term", "term_ja", "term_zh", "term_ko", "reading", "def_tags", "rules",
+                    "score", "tags",
+                ];
+                fn update_space_sep(c: &str) -> String {
+                    format!(
+                        r#"
+                    "{c}" = IIF("{c}" = excluded.{c}, "{c}", NULLIF(
+                        FORMAT( ' %s %s ', TRIM("{c}"), TRIM(excluded.{c}) ),
+                        '   '))"#
+                    )
+                }
+
+                sqlx::query(&format!(
+                    "INSERT INTO `term_search` ({}, ref)
+                    VALUES ({}, json_array(json_object(
+                        'dict_id', $10,
+                        'term_id', $11,
+                        'score', $9
+                    )))
+                    ON CONFLICT DO UPDATE SET {},
+                        ref = json_insert(ref, '$[#]', json_extract(excluded.ref, '$[0]'))
+                ",
+                    cols.map(|c| format!("{c}")).join(","),
+                    cols.iter()
+                        .enumerate()
+                        .map(|(i, _)| format!("${}", i + 1))
+                        .join(","),
+                    ["def_tags", "rules", "tags"]
+                        .map(update_space_sep)
+                        .join(",")
+                ))
                 .bind(p1_term)
                 .bind(p2_term_ja)
                 .bind(p3_term_zh)
@@ -174,8 +183,7 @@ impl YomitanSearch {
                 .bind(p6_def_tags)
                 .bind(p7_rules)
                 .bind(p8_score)
-                .bind(p9_sequence)
-                .bind(p10_tags)
+                .bind(p9_tags)
                 .bind(index_rowid)
                 .bind(term_rowid)
                 .execute(&mut *tx)
@@ -233,10 +241,45 @@ impl YomitanSearch {
             )));
         }
 
-        sqlx::query("DELETE FROM term WHERE index_rowid = $1")
-            .bind(rowid)
+        sqlx::query(
+            "
+        CREATE TEMP TABLE ds_link (
+            dict_id INTEGER NOT NULL,
+            search_id INTEGER NOT NULL,
+            PRIMARY KEY (dict_id, search_id)
+        );
+        ",
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query(
+            "
+        INSERT INTO ds_link (dict_id, search_id)
+        SELECT json_extract(json_each.value, '$.dict_id'), term_search.rowid
+        FROM term_search, json_each(ref)
+        WHERE TRUE
+        ON CONFLICT DO NOTHING;
+        ",
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query("DELETE FROM ds_link WHERE dict_id = 1;")
             .execute(&mut *tx)
             .await?;
+
+        sqlx::query(
+            "
+        DELETE FROM term_search WHERE rowid NOT IN (
+            SELECT search_id FROM ds_link
+        );
+        ",
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query("DROP TABLE ds_link;").execute(&mut *tx).await?;
 
         cb(format!("deleted terms for {dict}"));
 
@@ -263,94 +306,4 @@ fn nfkc(text: &str) -> Cow<'_, str> {
 
 pub fn normalize_text(text: &str) -> String {
     nfkc(text).to_uppercase()
-}
-
-#[derive(Default)]
-struct ScriptCounts {
-    kana: usize,
-    hangul: usize,
-    han: usize,
-}
-
-fn count_scripts(text: &str) -> ScriptCounts {
-    let mut c = ScriptCounts::default();
-    for ch in text.chars() {
-        match ch as u32 {
-            // Hiragana, Katakana, Katakana Phonetic Extensions, half-width katakana
-            0x3041..=0x3096
-            | 0x309D..=0x309F
-            | 0x30A1..=0x30FA
-            | 0x30FD..=0x30FF
-            | 0x31F0..=0x31FF
-            | 0xFF66..=0xFF9F => c.kana += 1,
-
-            // Hangul syllables, Jamo, Compatibility Jamo, Jamo Extended-A/B
-            0xAC00..=0xD7A3
-            | 0x1100..=0x11FF
-            | 0x3130..=0x318F
-            | 0xA960..=0xA97F
-            | 0xD7B0..=0xD7FF => c.hangul += 1,
-
-            // CJK ideographs: Unified, Extension A, Extension B+, Compatibility
-            0x4E00..=0x9FFF | 0x3400..=0x4DBF | 0x20000..=0x2FA1F | 0xF900..=0xFAFF => c.han += 1,
-
-            _ => {}
-        }
-    }
-    c
-}
-
-pub fn guess_lang(text: &str) -> Option<Lang> {
-    let c = count_scripts(text);
-    match (c.kana, c.hangul, c.han) {
-        (0, 0, 0) => None, // no CJK at all
-        (k, h, _) if k > 0 && h > 0 => {
-            // mixed: go with the larger share
-            Some(if k >= h { Lang::Ja } else { Lang::Ko })
-        }
-        (k, 0, _) if k > 0 => Some(Lang::Ja), // any kana => Japanese
-        (0, h, _) if h > 0 => Some(Lang::Ko), // Hangul (even with Hanja) => Korean
-        (0, 0, _) => None,                    // Han only: Chinese or Japanese, ambiguous
-        _ => None,
-    }
-}
-
-pub trait NonEmpty: Sized {
-    fn non_empty_trimmed(self) -> Option<Self>;
-    fn non_empty(self) -> Option<Self>;
-}
-
-impl NonEmpty for String {
-    fn non_empty_trimmed(self) -> Option<Self> {
-        let t = self.trim();
-        (!t.is_empty()).then(|| t.to_owned()) // also strips surrounding whitespace
-    }
-    fn non_empty(self) -> Option<String> {
-        (!self.is_empty()).then_some(self)
-    }
-}
-
-pub trait OptionNonEmpty {
-    fn non_empty_trimmed(self) -> Self;
-    fn non_empty(self) -> Self;
-}
-
-impl OptionNonEmpty for Option<String> {
-    fn non_empty_trimmed(self) -> Self {
-        self.and_then(|s| {
-            let t = s.trim();
-            if t.is_empty() {
-                None
-            } else if t.len() == s.len() {
-                Some(s)
-            }
-            // already trimmed: reuse
-            else {
-                Some(t.to_owned())
-            }
-        })
-    }
-    fn non_empty(self) -> Self {
-        self.filter(|s| !s.is_empty())
-    }
 }

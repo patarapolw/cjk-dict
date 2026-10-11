@@ -11,7 +11,7 @@ use lindera_analysis::{
 use serde_json::json;
 use tokio::{sync::OnceCell, task::spawn_blocking};
 
-use crate::error::YomitanError;
+use crate::{error::YomitanError, util::NonEmpty};
 
 #[derive(Eq, PartialEq, Hash, Clone, Copy)]
 pub enum Lang {
@@ -31,7 +31,7 @@ impl std::fmt::Display for Lang {
 }
 
 impl Lang {
-    const ALL: [Lang; 3] = [Lang::Ja, Lang::Ko, Lang::Zh];
+    pub const ALL: [Lang; 3] = [Lang::Ja, Lang::Ko, Lang::Zh];
 
     pub fn new_oncecell_map<T>() -> HashMap<Lang, OnceCell<T>> {
         Lang::ALL.iter().map(|&l| (l, OnceCell::new())).collect()
@@ -293,5 +293,93 @@ impl TokenizerMapper {
             })
             .await
             .cloned()
+    }
+
+    pub(crate) async fn join_tokens(
+        &self,
+        text: &str,
+        for_lang: Lang,
+        dict_lang: &Option<Lang>,
+    ) -> Result<Option<String>, YomitanError> {
+        let mut preserve_text = false;
+        if let Some(s_lang) = dict_lang {
+            if *s_lang != for_lang {
+                return Ok(None);
+            } else {
+                preserve_text = true;
+            }
+        }
+
+        if let Some(g_lang) = guess_lang(text) {
+            if g_lang != for_lang {
+                return Ok(None);
+            }
+        }
+
+        let out = self
+            .tokenize(for_lang, text)
+            .await?
+            .join(" ")
+            .non_empty_trimmed()
+            .or_else(|| {
+                if preserve_text {
+                    Some(format!(" {text} "))
+                } else {
+                    None
+                }
+            })
+            .map(|s| format!(" {s} "));
+
+        Ok(out)
+    }
+}
+
+#[derive(Default)]
+struct ScriptCounts {
+    kana: usize,
+    hangul: usize,
+    han: usize,
+}
+
+fn count_scripts(text: &str) -> ScriptCounts {
+    let mut c = ScriptCounts::default();
+    for ch in text.chars() {
+        match ch as u32 {
+            // Hiragana, Katakana, Katakana Phonetic Extensions, half-width katakana
+            0x3041..=0x3096
+            | 0x309D..=0x309F
+            | 0x30A1..=0x30FA
+            | 0x30FD..=0x30FF
+            | 0x31F0..=0x31FF
+            | 0xFF66..=0xFF9F => c.kana += 1,
+
+            // Hangul syllables, Jamo, Compatibility Jamo, Jamo Extended-A/B
+            0xAC00..=0xD7A3
+            | 0x1100..=0x11FF
+            | 0x3130..=0x318F
+            | 0xA960..=0xA97F
+            | 0xD7B0..=0xD7FF => c.hangul += 1,
+
+            // CJK ideographs: Unified, Extension A, Extension B+, Compatibility
+            0x4E00..=0x9FFF | 0x3400..=0x4DBF | 0x20000..=0x2FA1F | 0xF900..=0xFAFF => c.han += 1,
+
+            _ => {}
+        }
+    }
+    c
+}
+
+pub fn guess_lang(text: &str) -> Option<Lang> {
+    let c = count_scripts(text);
+    match (c.kana, c.hangul, c.han) {
+        (0, 0, 0) => None, // no CJK at all
+        (k, h, _) if k > 0 && h > 0 => {
+            // mixed: go with the larger share
+            Some(if k >= h { Lang::Ja } else { Lang::Ko })
+        }
+        (k, 0, _) if k > 0 => Some(Lang::Ja), // any kana => Japanese
+        (0, h, _) if h > 0 => Some(Lang::Ko), // Hangul (even with Hanja) => Korean
+        (0, 0, _) => None,                    // Han only: Chinese or Japanese, ambiguous
+        _ => None,
     }
 }

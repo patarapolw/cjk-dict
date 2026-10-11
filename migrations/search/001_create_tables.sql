@@ -6,7 +6,7 @@ CREATE TABLE "index" (
   "data"        TEXT_JSON NOT NULL
 );
 
-CREATE TABLE term (
+CREATE TABLE term_search (
   term        TEXT NOT NULL,
   term_ja     TEXT CHECK (term_ja   LIKE ' %_ '),
   term_zh     TEXT CHECK (term_zh   LIKE ' %_ '),
@@ -17,17 +17,13 @@ CREATE TABLE term (
   def_tags    TEXT CHECK (def_tags  LIKE ' %_ '), -- space-separated, accept NULL
   rules       TEXT CHECK (rules     LIKE ' %_ '),
   score       INTEGER,
-  -- glossary -- don't include in search table at all
-  "sequence"  INTEGER,
+
   tags        TEXT CHECK (tags      LIKE ' %_ '),
 
-  index_rowid     INTEGER NOT NULL REFERENCES "index" (rowid) ON DELETE CASCADE,
-  term_rowid      INTEGER NOT NULL  -- REFERENCES dicts[i].term (rowid)
+  "ref"       TEXT_JSON NOT NULL                  -- { dict_id: u64, term_id: u64, score: int | null }[]
 );
 
-CREATE INDEX idx_term_term ON term (term);
-CREATE INDEX idx_term_reading ON term (reading);
-CREATE INDEX idx_term_score ON term (score);
-CREATE INDEX idx_term_sequence ON term ("sequence");
-
-CREATE INDEX idx_term_index_rowid ON term (index_rowid);
+CREATE UNIQUE INDEX idx_u_term_search ON term_search (
+  term, reading,
+  (term_ja IS NULL), (term_zh IS NULL), (term_ko IS NULL)
+);
