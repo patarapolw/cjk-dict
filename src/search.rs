@@ -243,11 +243,12 @@ impl YomitanSearch {
 
         sqlx::query(
             "
-        CREATE TEMP TABLE ds_link (
-            dict_id INTEGER NOT NULL,
-            search_id INTEGER NOT NULL,
-            PRIMARY KEY (dict_id, search_id)
-        );
+        CREATE TEMP TABLE ds_link AS
+        SELECT
+            term_search.rowid search_id,
+            json_extract(json_each.value, '$.dict_id') dict_id,
+            json_each.value `data`
+        FROM term_search, json_each(ref);
         ",
         )
         .execute(&mut *tx)
@@ -255,19 +256,14 @@ impl YomitanSearch {
 
         sqlx::query(
             "
-        INSERT INTO ds_link (dict_id, search_id)
-        SELECT json_extract(json_each.value, '$.dict_id'), term_search.rowid
-        FROM term_search, json_each(ref)
-        WHERE TRUE
-        ON CONFLICT DO NOTHING;
+        DELETE FROM ds_link
+        WHERE dict_id = $1
+        OR dict_id NOT IN (SELECT rowid FROM `index`);
         ",
         )
+        .bind(rowid)
         .execute(&mut *tx)
         .await?;
-
-        sqlx::query("DELETE FROM ds_link WHERE dict_id = 1;")
-            .execute(&mut *tx)
-            .await?;
 
         sqlx::query(
             "
@@ -279,7 +275,20 @@ impl YomitanSearch {
         .execute(&mut *tx)
         .await?;
 
-        sqlx::query("DROP TABLE ds_link;").execute(&mut *tx).await?;
+        sqlx::query(
+            "
+        UPDATE term_search
+        SET ref = d.ref
+        FROM (
+            SELECT search_id, json_group_array(`data`) ref FROM ds_link GROUP BY search_id
+        ) d
+        WHERE term_search.rowid = d.search_id;
+        ",
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        sqlx::query("DROP TABLE ds_link").execute(&mut *tx).await?;
 
         cb(format!("deleted terms for {dict}"));
 
