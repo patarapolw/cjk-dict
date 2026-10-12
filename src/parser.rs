@@ -162,7 +162,8 @@ impl YomitanParser {
             .foreign_keys(false)
             .pragma("cache_size", "-64000") // approximately 64 MiB
             .pragma("temp_store", "MEMORY")
-            .pragma("mmap_size", "268435456"); // 256 MiB
+            .pragma("mmap_size", "268435456") // 256 MiB
+            .optimize_on_close(true, None);
 
         let db = SqlitePool::connect_with(options).await?;
 

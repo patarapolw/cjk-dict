@@ -41,7 +41,8 @@ impl YomitanSearch {
             .foreign_keys(false)
             .pragma("cache_size", "-64000") // approximately 64 MiB
             .pragma("temp_store", "MEMORY")
-            .pragma("mmap_size", "268435456"); // 256 MiB
+            .pragma("mmap_size", "268435456") // 256 MiB
+            .optimize_on_close(true, None);
 
         let root_dir = db_path
             .parent()
@@ -95,18 +96,17 @@ impl YomitanSearch {
             let data_str = reader.clone().get_index_json_str().await?;
             let data: YomitanIndex = serde_json::from_str(&data_str)?;
 
-            let r = sqlx::query(
+            let index_id: i64 = sqlx::query_scalar(
                 "INSERT INTO `index` (`path`, `L1`, `L2`, `data`)
-                    VALUES ($1, $2, $3, $4)",
+                    VALUES ($1, $2, $3, $4)
+                    RETURNING rowid",
             )
             .bind(dict)
             .bind(data.source_language)
             .bind(data.target_language)
             .bind(data_str)
-            .execute(&mut *tx)
+            .fetch_one(&mut *tx)
             .await?;
-
-            let index_rowid = r.last_insert_rowid();
 
             let mut term_stream = sqlx::query("SELECT *, rowid FROM term").fetch(&reader_db);
             while let Some(row) = term_stream.try_next().await? {
@@ -179,7 +179,7 @@ impl YomitanSearch {
                     "INSERT INTO term_link (dict_id, search_id, term_id, score)
                     VALUES ($1, $2, $3, $4)",
                 )
-                .bind(index_rowid)
+                .bind(index_id)
                 .bind(search_id)
                 .bind(term_rowid)
                 .bind(p8_score)
@@ -216,13 +216,10 @@ impl YomitanSearch {
         let mut tx = self.db.begin().await?;
 
         // throws Error and exit if the row doesn't exist.
-        let rowid: i64 = {
-            let row = sqlx::query("SELECT rowid FROM `index` WHERE `path` = $1")
-                .bind(dict)
-                .fetch_one(&mut *tx)
-                .await?;
-            row.get(0)
-        };
+        let index_id: i64 = sqlx::query_scalar("SELECT id FROM `index` WHERE `path` = $1")
+            .bind(dict)
+            .fetch_one(&mut *tx)
+            .await?;
 
         let reader = self.dicts[dict].clone();
 
@@ -242,16 +239,16 @@ impl YomitanSearch {
             "
         DELETE FROM term_link
         WHERE dict_id = $1
-        OR dict_id NOT IN (SELECT rowid FROM `index`);
+        OR dict_id NOT IN (SELECT id FROM `index`);
         ",
         )
-        .bind(rowid)
+        .bind(index_id)
         .execute(&mut *tx)
         .await?;
 
         sqlx::query(
             "
-        DELETE FROM term_search WHERE rowid NOT IN (
+        DELETE FROM term_search WHERE id NOT IN (
             SELECT search_id FROM term_link
         );
         ",
@@ -261,8 +258,8 @@ impl YomitanSearch {
 
         cb(format!("deleted terms for {dict}"));
 
-        sqlx::query("DELETE FROM `index` WHERE rowid = $1")
-            .bind(rowid)
+        sqlx::query("DELETE FROM `index` WHERE id = $1")
+            .bind(index_id)
             .execute(&mut *tx)
             .await?;
 

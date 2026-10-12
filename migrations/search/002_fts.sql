@@ -10,6 +10,7 @@ CREATE VIRTUAL TABLE term_search_fts USING fts5 (
   "tags",
   "data"  UNINDEXED,
   content='term_search',
+  content_rowid='id',
   tokenize="unicode61 tokenchars '-'"
 );
 

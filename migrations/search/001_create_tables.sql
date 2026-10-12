@@ -34,12 +34,12 @@ CREATE UNIQUE INDEX idx_u_term_search ON term_search (
 CREATE INDEX idx_term_search_score ON term_search (score);
 
 CREATE TABLE term_link (
-  dict_id     INTEGER NOT NULL REFERENCES "index" (id),
+  dict_id     INTEGER NOT NULL REFERENCES "index" (id) ON DELETE CASCADE,
   search_id   INTEGER NOT NULL REFERENCES term_search (id),
   term_id     INTEGER NOT NULL,   -- REFERENCES dict[i].term (rowid)
   score       INTEGER,            -- actual score
   "data"      TEXT_JSON,          -- for adding no-SQL without changing schema
   PRIMARY KEY (dict_id, term_id)  -- prevent from adding the same term twice
-);
+) WITHOUT rowid;
 
 CREATE INDEX idx_term_link_search_id ON term_link (search_id);
