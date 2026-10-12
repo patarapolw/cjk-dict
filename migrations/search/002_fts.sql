@@ -8,13 +8,13 @@ CREATE VIRTUAL TABLE term_search_fts USING fts5 (
   "rules",
   "score"  UNINDEXED,
   "tags",
-  "ref"  UNINDEXED,
+  "data"  UNINDEXED,
   content='term_search',
   tokenize="unicode61 tokenchars '-'"
 );
 
-CREATE TRIGGER t_term_search_after_insert
-AFTER INSERT ON "term_search"
+CREATE TRIGGER t_term_search_after_insert AFTER INSERT
+ON "term_search"
 BEGIN
   INSERT INTO term_search_fts (
     "term_ja","term_zh","term_ko","reading","def_tags","rules","tags",
@@ -25,8 +25,8 @@ BEGIN
   );
 END;
 
-CREATE TRIGGER t_term_search_after_delete
-AFTER DELETE ON "term_search"
+CREATE TRIGGER t_term_search_after_delete AFTER DELETE
+ON "term_search"
 BEGIN
   INSERT INTO term_search_fts (
     "term_ja","term_zh","term_ko","reading","def_tags","rules","tags",
@@ -37,8 +37,9 @@ BEGIN
   );
 END;
 
-CREATE TRIGGER t_term_search_after_update
-AFTER UPDATE ON "term_search"
+CREATE TRIGGER t_term_search_after_update AFTER UPDATE
+OF "term_ja","term_zh","term_ko","reading","def_tags","rules","tags"
+ON "term_search"
 BEGIN
   INSERT INTO term_search_fts (
     "term_ja","term_zh","term_ko","reading","def_tags","rules","tags",

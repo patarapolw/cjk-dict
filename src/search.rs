@@ -114,63 +114,51 @@ impl YomitanSearch {
                 let p1_term = normalize_text(&term);
                 let p2_term_ja = tokenizer_mapper
                     .join_tokens(&term, Lang::Ja, &source_language)
-                    .await?;
+                    .await?
+                    .unwrap_or(String::new());
                 let p3_term_zh = tokenizer_mapper
                     .join_tokens(&term, Lang::Zh, &source_language)
-                    .await?;
+                    .await?
+                    .unwrap_or(String::new());
                 let p4_term_ko = tokenizer_mapper
                     .join_tokens(&term, Lang::Ko, &source_language)
-                    .await?;
+                    .await?
+                    .unwrap_or(String::new());
 
                 let reading: String = row.get("reading");
                 let p5_reading = normalize_text(&reading)
                     .non_empty_trimmed()
-                    .map(|s| format!(" {s} "));
+                    .map(|s| format!(" {s} "))
+                    .unwrap_or(String::new());
 
-                let p6_def_tags = row
-                    .get::<Option<String>, _>("def_tags")
-                    .non_empty_trimmed()
-                    .map(|s| format!(" {s} "));
-                let p7_rules = row
-                    .get::<Option<String>, _>("rules")
-                    .non_empty_trimmed()
-                    .map(|s| format!(" {s} "));
+                let p6_def_tags = row.get::<Option<String>, _>("def_tags").non_empty_trimmed();
+                let p7_rules = row.get::<Option<String>, _>("rules").non_empty_trimmed();
                 let p8_score: Option<i64> = row.get("score");
-                let p9_tags = row
-                    .get::<Option<String>, _>("tags")
-                    .non_empty_trimmed()
-                    .map(|s| format!(" {s} "));
+                let p9_tags = row.get::<Option<String>, _>("tags").non_empty_trimmed();
 
                 let term_rowid: i64 = row.get("rowid");
 
-                let cols = [
+                const COLS: [&str; 9] = [
                     "term", "term_ja", "term_zh", "term_ko", "reading", "def_tags", "rules",
                     "score", "tags",
                 ];
                 fn update_space_sep(c: &str) -> String {
                     format!(
-                        r#"
-                    "{c}" = IIF("{c}" = excluded.{c}, "{c}", NULLIF(
-                        FORMAT( ' %s %s ', TRIM("{c}"), TRIM(excluded.{c}) ),
-                        '   '))"#
+                        r#""{c}" = CASE
+                            WHEN "{c}" IS excluded.{c} THEN "{c}"
+                            ELSE NULLIF(trim(printf('%s %s', "{c}", excluded.{c})), '')
+                        END"#
                     )
                 }
 
-                sqlx::query(&format!(
-                    "INSERT INTO `term_search` ({}, ref)
-                    VALUES ({}, json_array(json_object(
-                        'dict_id', $10,
-                        'term_id', $11,
-                        'score', $9
-                    )))
-                    ON CONFLICT DO UPDATE SET {},
-                        ref = json_insert(ref, '$[#]', json_extract(excluded.ref, '$[0]'))
+                let search_id: i64 = sqlx::query_scalar(&format!(
+                    "INSERT INTO `term_search` ({})
+                    VALUES ({})
+                    ON CONFLICT DO UPDATE SET {}
+                    RETURNING rowid;
                 ",
-                    cols.map(|c| format!("{c}")).join(","),
-                    cols.iter()
-                        .enumerate()
-                        .map(|(i, _)| format!("${}", i + 1))
-                        .join(","),
+                    COLS.map(|c| format!("{c}")).join(","),
+                    (1..=COLS.len()).map(|i| format!("${i}")).join(","),
                     ["def_tags", "rules", "tags"]
                         .map(update_space_sep)
                         .join(",")
@@ -184,8 +172,17 @@ impl YomitanSearch {
                 .bind(p7_rules)
                 .bind(p8_score)
                 .bind(p9_tags)
+                .fetch_one(&mut *tx)
+                .await?;
+
+                sqlx::query(
+                    "INSERT INTO term_link (dict_id, search_id, term_id, score)
+                    VALUES ($1, $2, $3, $4)",
+                )
                 .bind(index_rowid)
+                .bind(search_id)
                 .bind(term_rowid)
+                .bind(p8_score)
                 .execute(&mut *tx)
                 .await?;
 
@@ -243,20 +240,7 @@ impl YomitanSearch {
 
         sqlx::query(
             "
-        CREATE TEMP TABLE ds_link AS
-        SELECT
-            term_search.rowid search_id,
-            json_extract(json_each.value, '$.dict_id') dict_id,
-            json_each.value `data`
-        FROM term_search, json_each(ref);
-        ",
-        )
-        .execute(&mut *tx)
-        .await?;
-
-        sqlx::query(
-            "
-        DELETE FROM ds_link
+        DELETE FROM term_link
         WHERE dict_id = $1
         OR dict_id NOT IN (SELECT rowid FROM `index`);
         ",
@@ -268,27 +252,12 @@ impl YomitanSearch {
         sqlx::query(
             "
         DELETE FROM term_search WHERE rowid NOT IN (
-            SELECT search_id FROM ds_link
+            SELECT search_id FROM term_link
         );
         ",
         )
         .execute(&mut *tx)
         .await?;
-
-        sqlx::query(
-            "
-        UPDATE term_search
-        SET ref = d.ref
-        FROM (
-            SELECT search_id, json_group_array(`data`) ref FROM ds_link GROUP BY search_id
-        ) d
-        WHERE term_search.rowid = d.search_id;
-        ",
-        )
-        .execute(&mut *tx)
-        .await?;
-
-        sqlx::query("DROP TABLE ds_link").execute(&mut *tx).await?;
 
         cb(format!("deleted terms for {dict}"));
 

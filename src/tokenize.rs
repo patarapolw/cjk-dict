@@ -316,21 +316,18 @@ impl TokenizerMapper {
             }
         }
 
-        let out = self
+        Ok(self
             .tokenize(for_lang, text)
             .await?
             .join(" ")
             .non_empty_trimmed()
             .or_else(|| {
                 if preserve_text {
-                    Some(format!(" {text} "))
+                    Some(text.to_string())
                 } else {
                     None
                 }
-            })
-            .map(|s| format!(" {s} "));
-
-        Ok(out)
+            }))
     }
 }
 

@@ -1,29 +1,45 @@
 CREATE TABLE "index" (
-  "path"        TEXT NOT NULL PRIMARY KEY,  -- actual YomitanReader root_dir
+  id          INTEGER PRIMARY KEY,
+  "path"      TEXT NOT NULL,  -- actual YomitanReader root_dir
 
-  L1            TEXT,                       -- data[$.sourceLanguage] or enforced by user
-  L2            TEXT,                       -- data[$.targetLanguage] or enforced by user
-  "data"        TEXT_JSON NOT NULL
+  L1          TEXT,           -- data[$.sourceLanguage] or enforced by user
+  L2          TEXT,           -- data[$.targetLanguage] or enforced by user
+  "data"      TEXT_JSON,      -- originally for index.json
+  UNIQUE ("path")
 );
 
 CREATE TABLE term_search (
+  id          INTEGER PRIMARY KEY,
   term        TEXT NOT NULL,
-  term_ja     TEXT CHECK (term_ja   LIKE ' %_ '),
-  term_zh     TEXT CHECK (term_zh   LIKE ' %_ '),
-  term_ko     TEXT CHECK (term_ko   LIKE ' %_ '),
+  term_ja     TEXT NOT NULL DEFAULT '', -- space-separated, unique check
+  term_zh     TEXT NOT NULL DEFAULT '', -- space-separated, unique check
+  term_ko     TEXT NOT NULL DEFAULT '', -- space-separated, unique check
 
-  reading     TEXT CHECK (reading   LIKE ' %_ '), -- could be helpful for ' Pin[1-5] Yin[1-5] '
+  reading     TEXT NOT NULL DEFAULT '' CHECK (reading = '' OR reading LIKE ' %_ '), -- could be helpful for ' Pin[1-5] Yin[1-5] '
 
-  def_tags    TEXT CHECK (def_tags  LIKE ' %_ '), -- space-separated, accept NULL
-  rules       TEXT CHECK (rules     LIKE ' %_ '),
-  score       INTEGER,
+  def_tags    TEXT, -- space-separated, accept NULL
+  rules       TEXT, -- space-separated, accept NULL
+  score       INTEGER,  -- max score
 
-  tags        TEXT CHECK (tags      LIKE ' %_ '),
+  tags        TEXT, -- space-separated, accept NULL
 
-  "ref"       TEXT_JSON NOT NULL                  -- { dict_id: u64, term_id: u64, score: int | null }[]
+  "data"      TEXT_JSON   -- for adding no-SQL without changing schema
 );
 
 CREATE UNIQUE INDEX idx_u_term_search ON term_search (
   term, reading,
-  (term_ja IS NULL), (term_zh IS NULL), (term_ko IS NULL)
+  (term_ja != ''), (term_zh != ''), (term_ko != '')
 );
+
+CREATE INDEX idx_term_search_score ON term_search (score);
+
+CREATE TABLE term_link (
+  dict_id     INTEGER NOT NULL REFERENCES "index" (id),
+  search_id   INTEGER NOT NULL REFERENCES term_search (id),
+  term_id     INTEGER NOT NULL,   -- REFERENCES dict[i].term (rowid)
+  score       INTEGER,            -- actual score
+  "data"      TEXT_JSON,          -- for adding no-SQL without changing schema
+  PRIMARY KEY (dict_id, term_id)  -- prevent from adding the same term twice
+);
+
+CREATE INDEX idx_term_link_search_id ON term_link (search_id);
