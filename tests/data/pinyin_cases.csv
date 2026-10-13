@@ -1,0 +1,13 @@
+mode,input,expected,note
+dict,Chángān,chang2 an1,syllable split without apostrophe
+dict,Cháng'ān,chang2 an1,apostrophe
+dict,pin yin,pin5 yin5,toneless = neutral
+dict,pin0 yin5,pin5 yin5,explicit 0 = neutral
+dict,pin1yin1,pin1 yin1,digit ends a syllable
+dict,hello,NONE,not pinyin
+dict,,NONE,empty input
+query,pin yin,pin yin,bare = any tone
+query,pin1 yin,pin1 yin,
+query,māma,ma1 ma5,unmarked inside a marked word is neutral
+colon,nǚ,nu:3,CC-CEDICT spelling
+colon,lv4,lu:4,

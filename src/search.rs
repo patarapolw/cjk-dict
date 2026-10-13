@@ -13,6 +13,7 @@ use unicode_normalization::{IsNormalized, UnicodeNormalization, is_nfkc_quick};
 use crate::{
     error::YomitanError,
     parser::{YomitanIndex, YomitanReader},
+    pinyin::{Opts, normalize_pinyin},
     tokenize::{Lang, TokenizerMapper},
     util::{NonEmpty, OptionNonEmpty},
 };
@@ -125,7 +126,14 @@ impl YomitanSearch {
                     .await?
                     .unwrap_or(String::new());
 
-                let reading: String = row.get("reading");
+                let reading_str: &str = row.get("reading");
+                let reading = if source_language == Some(Lang::Zh) {
+                    normalize_pinyin(reading_str, Opts::DICT)
+                        .unwrap_or_else(|| reading_str.to_string())
+                } else {
+                    reading_str.to_string()
+                };
+
                 let p5_reading = normalize_text(&reading)
                     .non_empty_trimmed()
                     .map(|s| format!(" {s} "))
