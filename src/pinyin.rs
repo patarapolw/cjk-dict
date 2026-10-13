@@ -168,7 +168,15 @@ pub fn expand_pinyin(input: &str) -> Vec<String> {
 mod tests {
     use super::*;
 
-    fn check(input: &str, expected: &[&str]) {
+    fn check_normalize(input: &str, expected: Option<&str>) {
+        assert_eq!(
+            normalize_pinyin(input).as_deref(),
+            expected,
+            "input: {input:?}"
+        );
+    }
+
+    fn check_expand(input: &str, expected: &[&str]) {
         assert_eq!(
             expand_pinyin(input),
             expected
@@ -180,13 +188,86 @@ mod tests {
     }
 
     #[test]
+    fn normalizes_tone_marks_and_boundaries() {
+        for (input, expected) in [
+            ("Chángān", "chang2 an1"),
+            ("Cháng'ān", "chang2 an1"),
+            ("Xīān", "xi1 an1"),
+            ("Tiān'ānmén", "tian1 an1 men2"),
+            ("Zhōngguó", "zhong1 guo2"),
+            ("māma", "ma1 ma5"),
+        ] {
+            check_normalize(input, Some(expected));
+        }
+    }
+
+    #[test]
+    fn normalizes_toneless_syllables_to_neutral_tone() {
+        for (input, expected) in [
+            ("pin yin", "pin5 yin5"),
+            ("pin0 yin5", "pin5 yin5"),
+            ("pinyin", "pin5 yin5"),
+        ] {
+            check_normalize(input, Some(expected));
+        }
+    }
+
+    #[test]
+    fn normalizes_umlaut_spellings() {
+        for input in ["nǚ", "nü3", "nu:3", "nv3", "NÜ3"] {
+            check_normalize(input, Some("nv3"));
+        }
+        check_normalize("lüè", Some("lve4"));
+        check_normalize("lǜe", Some("lve4"));
+    }
+
+    #[test]
+    fn digits_end_syllables_and_zero_means_neutral_tone() {
+        for (input, expected) in [
+            ("pin1yin1", "pin1 yin1"),
+            ("Bei3 jing1", "bei3 jing1"),
+            ("yi1 hui4 r5", "yi1 hui4 r5"),
+            ("pin0 yin", "pin5 yin5"),
+        ] {
+            check_normalize(input, Some(expected));
+        }
+    }
+
+    #[test]
+    fn normalize_rejects_non_pinyin_and_query_operators() {
+        for input in ["hello", "", "pin6", "1", "12", "AND", "OR"] {
+            check_normalize(input, None);
+        }
+    }
+
+    #[test]
+    fn normalize_is_idempotent() {
+        for input in [
+            "Chángān",
+            "nǚ",
+            "Xī'ān",
+            "Xī ān",
+            "lv4",
+            "pin0 yin5",
+            "pin1 yin5",
+        ] {
+            let once = normalize_pinyin(input).unwrap();
+            assert_eq!(
+                normalize_pinyin(&once).as_deref(),
+                Some(once.as_str()),
+                "input: {input:?}"
+            );
+        }
+    }
+
+    #[test]
     fn tone_marks_and_boundaries() {
-        check("Chángān", &["chang2 an1"]);
-        check("Cháng'ān", &["chang2 an1"]);
-        check("Xīān", &["xi1 an1"]);
-        check("Tiān'ānmén", &["tian1 an1 men2"]);
-        check("Zhōngguó", &["zhong1 guo2"]);
-        check(
+        check_expand("Chángān", &["chang2 an1"]);
+        check_expand("Cháng'ān", &["chang2 an1"]);
+        check_expand("Xīān", &["xi1 an1"]);
+        check_expand("Tiān'ānmén", &["tian1 an1 men2"]);
+        check_expand("Zhōngguó", &["zhong1 guo2"]);
+        check_expand(
             "māma",
             &["ma1 ma1", "ma1 ma2", "ma1 ma3", "ma1 ma4", "ma1 ma5"],
         );
@@ -204,8 +285,8 @@ mod tests {
             all_combinations.last().map(String::as_str),
             Some("pin5 yin5")
         );
-        check("pin0 yin5", &["pin5 yin5"]);
-        check(
+        check_expand("pin0 yin5", &["pin5 yin5"]);
+        check_expand(
             "pin0 yin",
             &[
                 "pin5 yin1",
@@ -215,7 +296,7 @@ mod tests {
                 "pin5 yin5",
             ],
         );
-        check(
+        check_expand(
             "pin1 yin",
             &[
                 "pin1 yin1",
@@ -225,26 +306,26 @@ mod tests {
                 "pin1 yin5",
             ],
         );
-        check("pin1yin1", &["pin1 yin1"]);
-        check("Bei3 jing1", &["bei3 jing1"]);
-        check("yi1 hui4 r5", &["yi1 hui4 r5"]);
+        check_expand("pin1yin1", &["pin1 yin1"]);
+        check_expand("Bei3 jing1", &["bei3 jing1"]);
+        check_expand("yi1 hui4 r5", &["yi1 hui4 r5"]);
         assert_eq!(expand_pinyin("pinyin"), all_combinations);
     }
 
     #[test]
     fn umlaut_spellings_are_accepted_and_normalized() {
         for input in ["nǚ", "nü3", "nu:3", "nv3", "NÜ3"] {
-            check(input, &["nv3"]);
+            check_expand(input, &["nv3"]);
         }
-        check("nü", &["nv1", "nv2", "nv3", "nv4", "nv5"]);
-        check("lüè", &["lve4"]);
-        check("lǜe", &["lve4"]);
+        check_expand("nü", &["nv1", "nv2", "nv3", "nv4", "nv5"]);
+        check_expand("lüè", &["lve4"]);
+        check_expand("lǜe", &["lve4"]);
     }
 
     #[test]
     fn rejects_non_pinyin_including_query_operators() {
         for input in ["hello", "", "pin6", "1", "12", "AND", "OR"] {
-            check(input, &[]);
+            check_expand(input, &[]);
         }
     }
 
@@ -267,10 +348,5 @@ mod tests {
                 );
             }
         }
-    }
-
-    #[test]
-    fn expands_pinyin_tone_combinations() {
-        assert_eq!(expand_pinyin("pin yin").len(), 25);
     }
 }
