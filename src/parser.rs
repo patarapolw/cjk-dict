@@ -208,13 +208,15 @@ impl YomitanParser {
             rs.sort_by_key(|r| r.0);
 
             let total = rs.len();
+            let mut current = 0;
 
-            for (idx, path) in rs {
+            for (_, path) in rs {
                 progress_callback(YomitanImportProgress {
                     bank: bank_name.to_string(),
-                    current: *idx,
+                    current,
                     total,
                 });
+                current += 1;
 
                 let json_str = tokio::fs::read_to_string(&path).await?;
 
