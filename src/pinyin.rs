@@ -70,8 +70,9 @@ fn segment(run: &[Letters]) -> Option<Vec<&[Letters]>> {
 pub enum Toneless {
     /// toneless syllable = neutral tone 5 (dictionary data)
     Neutral,
-    /// toneless syllable stays bare, meaning "any tone" (user queries)
-    AnyTone,
+    /// user queries, expanded in a bracket connected with OR (user queries)
+    /// e.g. (yin1 OR yin2 OR yin3 OR yin4 OR yin5)
+    Expand,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -94,12 +95,12 @@ impl Opts {
         umlaut: Umlaut::V,
     };
     pub const QUERY: Opts = Opts {
-        toneless: Toneless::AnyTone,
+        toneless: Toneless::Expand,
         umlaut: Umlaut::V,
     };
 }
 
-fn render(syl: &[Letters], explicit: Option<u8>, word_marked: bool, o: Opts) -> String {
+fn render(syl: &[Letters], explicit: Option<u8>, o: Opts) -> String {
     let letters: String = syl.iter().map(|&(c, _)| c).collect();
     let letters = match o.umlaut {
         Umlaut::Colon => letters.replace('ü', "u:"),
@@ -108,8 +109,9 @@ fn render(syl: &[Letters], explicit: Option<u8>, word_marked: bool, o: Opts) -> 
     let tone = explicit.or_else(|| syl.iter().map(|&(_, t)| t).find(|&t| t > 0));
     match tone {
         Some(t) => format!("{letters}{t}"),
-        // inside a word that has tone marks, an unmarked syllable is neutral
-        None if o.toneless == Toneless::AnyTone && !word_marked => letters,
+        None if o.toneless == Toneless::Expand => {
+            format!("({s}1 OR {s}2 OR {s}3 OR {s}4 OR {s}5)", s = letters)
+        }
         None => format!("{letters}5"),
     }
 }
@@ -149,12 +151,11 @@ pub fn normalize_pinyin(input: &str, opts: Opts) -> Option<String> {
                 if !run.iter().all(|&(l, _)| l.is_alphabetic()) {
                     return None;
                 }
-                out.push(render(&run, Some(tone), true, opts)); // letters taken as written
+                out.push(render(&run, Some(tone), opts)); // letters taken as written
             }
             None => {
-                let word_marked = run.iter().any(|&(_, t)| t > 0);
                 for syl in segment(&run)? {
-                    out.push(render(syl, None, word_marked, opts));
+                    out.push(render(syl, None, opts));
                 }
             }
         }
@@ -213,11 +214,27 @@ mod tests {
         check(
             Opts::QUERY,
             &[
-                ("pin yin", Some("pin yin")),
-                ("pin1 yin", Some("pin1 yin")),
-                ("pin0 yin", Some("pin5 yin")), // explicit 0 is a real neutral tone
-                ("pinyin", Some("pin yin")),
-                ("nü", Some("nv")),
+                (
+                    "pin yin",
+                    Some(
+                        "(pin1 OR pin2 OR pin3 OR pin4 OR pin5) (yin1 OR yin2 OR yin3 OR yin4 OR yin5)",
+                    ),
+                ),
+                (
+                    "pin1 yin",
+                    Some("pin1 (yin1 OR yin2 OR yin3 OR yin4 OR yin5)"),
+                ),
+                (
+                    "pin0 yin",
+                    Some("pin5 (yin1 OR yin2 OR yin3 OR yin4 OR yin5)"),
+                ), // explicit 0 is a real neutral tone
+                (
+                    "pinyin",
+                    Some(
+                        "(pin1 OR pin2 OR pin3 OR pin4 OR pin5) (yin1 OR yin2 OR yin3 OR yin4 OR yin5)",
+                    ),
+                ),
+                ("nü", Some("(nv1 OR nv2 OR nv3 OR nv4 OR nv5)")),
             ],
         );
     }
@@ -227,8 +244,11 @@ mod tests {
         check(
             Opts::QUERY,
             &[
-                ("māma", Some("ma1 ma5")),
-                ("xǐhuan", Some("xi3 huan5")),
+                ("māma", Some("ma1 (ma1 OR ma2 OR ma3 OR ma4 OR ma5)")),
+                (
+                    "xǐhuan",
+                    Some("xi3 (huan1 OR huan2 OR huan3 OR huan4 OR huan5)"),
+                ),
                 ("Chángān", Some("chang2 an1")),
             ],
         );
@@ -266,6 +286,8 @@ mod tests {
                     ("pin6", None),
                     ("1", None),
                     ("12", None),
+                    ("AND", None),
+                    ("OR", None),
                 ],
             );
         }
@@ -277,12 +299,11 @@ mod tests {
             for s in [
                 "Chángān",
                 "nǚ",
-                "pin yin",
                 "Xī'ān",
-                "māma",
+                "Xī ān",
                 "lv4",
                 "pin0 yin5",
-                "pin1 yin",
+                "pin1 yin5",
             ] {
                 let once = normalize_pinyin(s, opts).unwrap();
                 assert_eq!(
