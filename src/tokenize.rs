@@ -177,11 +177,25 @@ impl TokenizerMapper {
             })
             .await?;
 
-        let mut out = vec![];
+        let mut out: Vec<String> = vec![];
         let mut tokens = tokenizer.tokenize(text)?;
+        let mut number_end = None;
 
         for token in tokens.iter_mut() {
             let surface = token.surface.to_string();
+            if !surface.is_empty() && surface.chars().all(char::is_numeric) {
+                if number_end == Some(token.byte_start) {
+                    if let Some(number) = out.last_mut() {
+                        number.push_str(&surface);
+                    }
+                } else {
+                    out.push(surface);
+                }
+                number_end = Some(token.byte_end);
+                continue;
+            }
+
+            number_end = None;
             let details = token.details();
             out.extend(terms_for_token(lang, &surface, &details));
         }
@@ -237,9 +251,11 @@ impl TokenizerMapper {
 /// `details` are the dictionary fields after the surface; index 0 is the part of speech.
 fn terms_for_token(lang: Lang, surface: &str, details: &[&str]) -> Vec<String> {
     // for some reasons, `[,-]` is considered by unidic to be 名詞, 普通名詞, サ変可能
-    // filter out numbers too
-    if !surface.chars().any(char::is_alphabetic) {
+    if !surface.chars().any(char::is_alphanumeric) {
         return vec![];
+    }
+    if surface.chars().all(char::is_numeric) {
+        return vec![surface.to_string()];
     }
 
     let mut is_ko_verb = false;
@@ -634,11 +650,19 @@ mod tests {
     }
 
     #[test]
-    fn tokens_without_letters_are_dropped_in_every_language() {
+    fn punctuation_only_tokens_are_dropped_and_numbers_are_kept_in_every_language() {
         for lang in Lang::ALL {
-            for surface in [",", "-", "。", "123", "２０２６", " ", "…"] {
+            for surface in [",", "-", "。", " ", "…"] {
                 let out = terms_for_token(lang, surface, &det(&[(POS, "名詞")]));
                 assert!(out.is_empty(), "{lang} {surface:?} -> {out:?}");
+            }
+
+            for surface in ["123", "２０２６"] {
+                assert_eq!(
+                    terms_for_token(lang, surface, &det(&[(POS, "名詞")])),
+                    vec![surface],
+                    "{lang} {surface:?}"
+                );
             }
         }
     }
@@ -838,11 +862,19 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs LINDERA_DICT_DIR"]
-    async fn dict_ja_drops_numbers_and_punctuation() {
+    async fn dict_ja_keeps_numbers_and_drops_punctuation() {
         let m = real_mapper();
         assert_eq!(
             m.tokenize(Lang::Ja, "2026年10月14日").await.unwrap(),
-            ["年", "月", "日"]
+            ["2026", "年", "10", "月", "14", "日"]
+        );
+        assert_eq!(
+            m.tokenize(Lang::Ja, "2026-10").await.unwrap(),
+            ["2026", "10"]
+        );
+        assert_eq!(
+            m.tokenize(Lang::Ja, "２０２６").await.unwrap(),
+            ["2026"]
         );
         assert!(m.tokenize(Lang::Ja, "。。").await.unwrap().is_empty());
     }
