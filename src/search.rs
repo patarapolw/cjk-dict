@@ -3,11 +3,12 @@ use std::{borrow::Cow, collections::HashMap, path::PathBuf, time::Duration};
 use futures::TryStreamExt;
 use itertools::Itertools;
 use serde::Serialize;
+use serde_json::json;
 use sqlx::{
     Pool, Row, Sqlite, SqlitePool,
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous},
 };
-use tokio::fs::{File, remove_dir_all};
+use tokio::fs::{self, read_to_string, remove_dir_all};
 use unicode_normalization::{IsNormalized, UnicodeNormalization, is_nfkc_quick};
 
 use crate::{
@@ -74,40 +75,74 @@ impl YomitanSearch {
         tokenizer_mapper: &TokenizerMapper,
         progress_callback: impl Fn(YomitanSearchInitProgress),
     ) -> Result<&Self, YomitanError> {
-        let reader = self.dicts[dict].clone();
-
-        let result = sqlx::query("SELECT `path` FROM `index` WHERE `path` = $1")
+        let index_id: Option<i64> = sqlx::query_scalar("SELECT id FROM `index` WHERE `path` = $1")
             .bind(dict)
             .fetch_optional(&self.db)
             .await?;
-        if result.is_none() {
-            let reader_db = reader.clone().db;
+        let existing_total = match index_id {
+            Some(index_id) => {
+                let existing_total: Option<i64> =
+                    sqlx::query_scalar("SELECT count(1) FROM term_link WHERE dict_id = $1")
+                        .bind(index_id)
+                        .fetch_optional(&self.db)
+                        .await?;
+                existing_total
+            }
+            None => None,
+        };
 
-            let total: i64 = match sqlx::query("SELECT count(1) FROM term")
-                .fetch_optional(&reader_db)
+        let reader = self.dicts[dict].clone();
+        let reader_db = reader.clone().db;
+
+        let stats_path = &reader.root_dir.join("stats.json");
+        let total: i64 = if stats_path.exists() {
+            let stats_text: String = read_to_string(stats_path).await?;
+            let stats_json: serde_json::Value = serde_json::from_str(&stats_text)?;
+            stats_json
+                .get("term")
+                .map(|v| v.as_i64().unwrap_or(0))
+                .unwrap_or(0)
+        } else {
+            sqlx::query_scalar("SELECT count(1) FROM term")
+                .fetch_one(&reader_db)
                 .await?
-            {
-                Some(r) => r.get(0),
-                _ => return Ok(self),
-            };
-            let mut current: i64 = 0;
+        };
 
+        if let Some(existing_total) = existing_total
+            && existing_total == total
+        {
+        } else {
+            let mut current: i64 = 0;
             let mut tx = self.db.begin().await?;
 
-            let data_str = reader.clone().get_index_json_str().await?;
-            let data: YomitanIndex = serde_json::from_str(&data_str)?;
+            let index_id = match index_id {
+                Some(index_id) => {
+                    sqlx::query("DELETE FROM term_link WHERE dict_id = $1")
+                        .bind(index_id)
+                        .execute(&mut *tx)
+                        .await?;
 
-            let index_id: i64 = sqlx::query_scalar(
-                "INSERT INTO `index` (`path`, `L1`, `L2`, `data`)
-                    VALUES ($1, $2, $3, $4)
-                    RETURNING rowid",
-            )
-            .bind(dict)
-            .bind(data.source_language)
-            .bind(data.target_language)
-            .bind(data_str)
-            .fetch_one(&mut *tx)
-            .await?;
+                    index_id
+                }
+                None => {
+                    let data_str = reader.clone().get_index_json_str().await?;
+                    let data: YomitanIndex = serde_json::from_str(&data_str)?;
+
+                    let index_id: i64 = sqlx::query_scalar(
+                        "INSERT INTO `index` (`path`, `L1`, `L2`, `data`)
+                            VALUES ($1, $2, $3, $4)
+                            RETURNING rowid",
+                    )
+                    .bind(dict)
+                    .bind(data.source_language)
+                    .bind(data.target_language)
+                    .bind(data_str)
+                    .fetch_one(&mut *tx)
+                    .await?;
+
+                    index_id
+                }
+            };
 
             let mut term_stream = sqlx::query("SELECT *, rowid FROM term").fetch(&reader_db);
             while let Some(row) = term_stream.try_next().await? {
@@ -204,7 +239,8 @@ impl YomitanSearch {
             tx.commit().await?;
         }
 
-        File::create(reader.root_dir.join(".imported")).await?;
+        let stats_str = serde_json::to_string(&json!({ "term": total }))?;
+        fs::write(stats_path, stats_str).await?;
 
         Ok(self)
     }
