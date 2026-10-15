@@ -8,7 +8,7 @@ use sqlx::{
     Pool, Row, Sqlite, SqlitePool,
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous},
 };
-use tokio::fs::{self, read_to_string, remove_dir_all};
+use tokio::fs::{self, read_dir, read_to_string, remove_dir_all};
 use unicode_normalization::{IsNormalized, UnicodeNormalization, is_nfkc_quick};
 
 use crate::{
@@ -68,50 +68,145 @@ impl YomitanSearch {
         })
     }
 
+    pub async fn cleanup(
+        &mut self,
+        tokenizer_mapper: &TokenizerMapper,
+        progress_callback: &impl Fn(YomitanSearchInitProgress),
+        delete_callback: &impl Fn(String),
+    ) -> Result<(), YomitanError> {
+        let mut existing_folders: Vec<String> = vec![];
+
+        let dict_root = &self.root_dir.join("yomitan");
+        let mut entries = read_dir(dict_root).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            if !entry.file_type().await?.is_dir() {
+                continue;
+            }
+
+            let entry_path = &entry
+                .path()
+                .strip_prefix(&self.root_dir)?
+                .to_string_lossy()
+                .replace('\\', "/");
+
+            existing_folders.push(entry_path.to_string());
+            self.add(entry_path);
+        }
+
+        let dict_term_count = self.dict_term_count(None).await?;
+
+        let mut to_be_deleted: Vec<String> = existing_folders
+            .into_iter()
+            .filter(|s| dict_term_count.get(&s.to_string()).is_none())
+            .collect();
+
+        for (dict, _) in dict_term_count {
+            let r = self
+                .import(&dict, None, tokenizer_mapper, progress_callback)
+                .await?;
+            if r.is_none() {
+                to_be_deleted.push(dict);
+            }
+        }
+
+        self.delete_many(
+            to_be_deleted.iter().map(String::as_str).collect(),
+            delete_callback,
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    async fn dict_term_count(
+        &self,
+        dicts: Option<Vec<&str>>,
+    ) -> Result<HashMap<String, (Option<i64>, Option<i64>)>, YomitanError> {
+        let existing_indexes: Vec<(i64, String)> = sqlx::query_as("SELECT id, `path` FROM `index`")
+            .fetch_all(&self.db)
+            .await?;
+        let existing_indexes = if let Some(dicts) = dicts
+            && !dicts.is_empty()
+        {
+            existing_indexes
+                .into_iter()
+                .filter(|r| dicts.contains(&r.1.as_str()))
+                .collect()
+        } else {
+            existing_indexes
+        };
+
+        let mut status: HashMap<String, (Option<i64>, Option<i64>)> = existing_indexes
+            .iter()
+            .map(|r| (r.1.clone(), (None, None)))
+            .collect();
+
+        for (index_id, dict) in existing_indexes {
+            let existing_total: Option<i64> =
+                sqlx::query_scalar("SELECT count(1) FROM term_link WHERE dict_id = $1")
+                    .bind(index_id)
+                    .fetch_optional(&self.db)
+                    .await?;
+
+            let reader = match self.dicts.get(&dict) {
+                Some(d) => d.clone(),
+                None => {
+                    status.remove(&dict);
+                    continue;
+                }
+            };
+
+            let reader_db = reader.clone().db;
+
+            let stats_path = &reader.root_dir.join("stats.json");
+            let total: i64 = if stats_path.exists() {
+                let stats_text: String = read_to_string(stats_path).await?;
+                let stats_json: serde_json::Value = serde_json::from_str(&stats_text)?;
+                stats_json
+                    .get("term")
+                    .map(|v| v.as_i64().unwrap_or(0))
+                    .unwrap_or(0)
+            } else {
+                sqlx::query_scalar("SELECT count(1) FROM term")
+                    .fetch_one(&reader_db)
+                    .await?
+            };
+
+            status.insert(dict, (Some(total), existing_total));
+        }
+
+        Ok(status)
+    }
+
     pub async fn import(
         &self,
         dict: &str,
         source_language: Option<Lang>,
         tokenizer_mapper: &TokenizerMapper,
         progress_callback: impl Fn(YomitanSearchInitProgress),
-    ) -> Result<&Self, YomitanError> {
-        let index_id: Option<i64> = sqlx::query_scalar("SELECT id FROM `index` WHERE `path` = $1")
-            .bind(dict)
-            .fetch_optional(&self.db)
-            .await?;
-        let existing_total = match index_id {
-            Some(index_id) => {
-                let existing_total: Option<i64> =
-                    sqlx::query_scalar("SELECT count(1) FROM term_link WHERE dict_id = $1")
-                        .bind(index_id)
-                        .fetch_optional(&self.db)
-                        .await?;
-                existing_total
-            }
-            None => None,
+    ) -> Result<Option<&Self>, YomitanError> {
+        let reader = match self.dicts.get(dict) {
+            Some(r) => r,
+            None => return Ok(None),
         };
-
-        let reader = self.dicts[dict].clone();
         let reader_db = reader.clone().db;
 
-        let stats_path = &reader.root_dir.join("stats.json");
-        let total: i64 = if stats_path.exists() {
-            let stats_text: String = read_to_string(stats_path).await?;
-            let stats_json: serde_json::Value = serde_json::from_str(&stats_text)?;
-            stats_json
-                .get("term")
-                .map(|v| v.as_i64().unwrap_or(0))
-                .unwrap_or(0)
-        } else {
-            sqlx::query_scalar("SELECT count(1) FROM term")
-                .fetch_one(&reader_db)
-                .await?
-        };
+        let (total, existing_total) = self.dict_term_count(Some(vec![dict])).await?[dict];
+        let mut total = total.unwrap_or(0);
 
-        if let Some(existing_total) = existing_total
-            && existing_total == total
-        {
-        } else {
+        if Some(total) != existing_total {
+            let existing_index: Option<(i64, String)> =
+                sqlx::query_as("SELECT id, L1 FROM `index` WHERE `path` = $1")
+                    .bind(dict)
+                    .fetch_optional(&self.db)
+                    .await?;
+
+            let index_id = existing_index.as_ref().map(|r| r.0);
+            let source_language = existing_index
+                .map(|r| Lang::from(&r.1))
+                .flatten()
+                .or(source_language);
+
             let mut current: i64 = 0;
             let mut tx = self.db.begin().await?;
 
@@ -236,13 +331,16 @@ impl YomitanSearch {
                 })
             }
 
+            total = current;
+
             tx.commit().await?;
         }
 
+        let stats_path = &reader.root_dir.join("stats.json");
         let stats_str = serde_json::to_string(&json!({ "term": total }))?;
         fs::write(stats_path, stats_str).await?;
 
-        Ok(self)
+        Ok(Some(self))
     }
 
     /// returns true if a new dict was added, false if replaced otherwise
@@ -255,58 +353,77 @@ impl YomitanSearch {
             .is_none()
     }
 
-    pub async fn delete(&self, dict: &str, cb: impl Fn(String)) -> Result<bool, YomitanError> {
+    pub async fn delete(
+        &self,
+        dict: &str,
+        delete_callback: impl Fn(String),
+    ) -> Result<bool, YomitanError> {
+        self.delete_many(vec![dict], delete_callback).await
+    }
+
+    pub async fn delete_many(
+        &self,
+        dicts: Vec<&str>,
+        delete_callback: impl Fn(String),
+    ) -> Result<bool, YomitanError> {
         let mut tx = self.db.begin().await?;
 
-        // throws Error and exit if the row doesn't exist.
-        let index_id: i64 = sqlx::query_scalar("SELECT id FROM `index` WHERE `path` = $1")
-            .bind(dict)
-            .fetch_one(&mut *tx)
-            .await?;
+        for dict in dicts {
+            let reader = self.dicts[dict].clone();
 
-        let reader = self.dicts[dict].clone();
+            if reader.root_dir.exists() && reader.root_dir.is_dir() {
+                reader.db.close().await;
+                remove_dir_all(reader.root_dir).await?;
 
-        if reader.root_dir.exists() && reader.root_dir.is_dir() {
-            reader.db.close().await;
-            remove_dir_all(reader.root_dir).await?;
+                delete_callback(format!("closed and deleted {dict}"))
+            } else {
+                return Err(YomitanError::from(format!(
+                    "Yomitan dict dir does not exist: {:?}",
+                    reader.root_dir
+                )));
+            }
 
-            cb(format!("closed and deleted {dict}"))
-        } else {
-            return Err(YomitanError::from(format!(
-                "Yomitan dict dir does not exist: {:?}",
-                reader.root_dir
-            )));
-        }
+            let index_id: Option<i64> =
+                sqlx::query_scalar("SELECT id FROM `index` WHERE `path` = $1")
+                    .bind(dict)
+                    .fetch_optional(&mut *tx)
+                    .await?;
 
-        sqlx::query(
-            "
-        DELETE FROM term_link
-        WHERE dict_id = $1
-        OR dict_id NOT IN (SELECT id FROM `index`);
-        ",
-        )
-        .bind(index_id)
-        .execute(&mut *tx)
-        .await?;
+            let index_id = match index_id {
+                Some(i) => i,
+                None => continue,
+            };
 
-        sqlx::query(
-            "
-        DELETE FROM term_search WHERE id NOT IN (
-            SELECT search_id FROM term_link
-        );
-        ",
-        )
-        .execute(&mut *tx)
-        .await?;
-
-        cb(format!("deleted terms for {dict}"));
-
-        sqlx::query("DELETE FROM `index` WHERE id = $1")
+            sqlx::query(
+                "
+            DELETE FROM term_link
+            WHERE dict_id = $1
+            OR dict_id NOT IN (SELECT id FROM `index`);
+            ",
+            )
             .bind(index_id)
             .execute(&mut *tx)
             .await?;
 
-        cb(format!("deleted index for {dict}, awaiting commit"));
+            sqlx::query(
+                "
+            DELETE FROM term_search WHERE id NOT IN (
+                SELECT search_id FROM term_link
+            );
+            ",
+            )
+            .execute(&mut *tx)
+            .await?;
+
+            delete_callback(format!("deleted terms for {dict}"));
+
+            sqlx::query("DELETE FROM `index` WHERE id = $1")
+                .bind(index_id)
+                .execute(&mut *tx)
+                .await?;
+
+            delete_callback(format!("deleted index for {dict}, awaiting commit"));
+        }
 
         tx.commit().await?;
 

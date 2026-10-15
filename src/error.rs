@@ -1,4 +1,4 @@
-use std::{error::Error, fmt, sync::PoisonError};
+use std::{error::Error, fmt, path::StripPrefixError, sync::PoisonError};
 
 use lindera::error::LinderaError;
 use sqlx::migrate::MigrateError;
@@ -14,6 +14,7 @@ pub enum YomitanError {
     JSONError(serde_json::Error),
     LinderaError(LinderaError),
     MutexPoisonedError(String),
+    PathStripPrefixError(StripPrefixError),
     UnsupportedLanguageError(String),
     Error(String),
 }
@@ -29,6 +30,7 @@ impl fmt::Display for YomitanError {
             Self::JSONError(e) => write!(f, "serde_json::Error: {e}"),
             Self::LinderaError(e) => write!(f, "LinderaError: {e}"),
             Self::MutexPoisonedError(e) => write!(f, "MutexPoisonedError: {e}"),
+            Self::PathStripPrefixError(e) => write!(f, "PathStripPrefixError: {e}"),
             Self::UnsupportedLanguageError(e) => write!(f, "UnsupportedLanguageError: {e}"),
             Self::Error(e) => write!(f, "Error: {e}"),
         }
@@ -82,6 +84,12 @@ impl From<LinderaError> for YomitanError {
 impl<T> From<PoisonError<T>> for YomitanError {
     fn from(e: PoisonError<T>) -> Self {
         Self::MutexPoisonedError(e.to_string())
+    }
+}
+
+impl From<StripPrefixError> for YomitanError {
+    fn from(e: StripPrefixError) -> Self {
+        Self::PathStripPrefixError(e)
     }
 }
 
