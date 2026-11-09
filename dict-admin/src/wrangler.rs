@@ -10,7 +10,7 @@ use serde_json::Value;
 
 #[derive(Clone, Debug)]
 pub struct Wrangler {
-    /// e.g. `npx wrangler`
+    /// e.g. `pnpm exec wrangler`
     pub cmd: Vec<String>,
     /// directory holding wrangler.toml
     pub worker_dir: PathBuf,

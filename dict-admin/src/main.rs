@@ -59,7 +59,7 @@ struct Target {
     local: bool,
 
     /// Command used to run wrangler
-    #[arg(long, global = true, env = "WRANGLER", default_value = "npx wrangler")]
+    #[arg(long, global = true, env = "WRANGLER", default_value = "pnpm exec wrangler")]
     wrangler: String,
 }
 

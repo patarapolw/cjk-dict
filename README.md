@@ -22,12 +22,12 @@ The app tokenizes "~" search queries with `yomitan-parser` (path dependency, wit
 
 ```bash
 cd worker
-npm install
-npx wrangler login
-npx wrangler d1 create cjk-dict        # paste database_id into wrangler.toml
-npx wrangler r2 bucket create cjk-dict
-npm run migrate                        # or: cargo run -p dict-admin -- migrate
-npm run deploy
+pnpm install
+pnpm wrangler login
+pnpm wrangler d1 create cjk-dict        # paste database_id into wrangler.toml
+pnpm wrangler r2 bucket create cjk-dict
+pnpm migrate                           # or: cargo run -p dict-admin -- migrate
+pnpm run deploy
 ```
 
 ## Managing dictionaries
@@ -58,7 +58,7 @@ If an import fails, the dict stays `importing`; run `remove <name>` to clean up.
 
 `remove` deletes in id-range batches (`--batch`). For each shared `term_search` row it first recomputes `def_tags`/`rules`/`tags`/`score` from the remaining dictionaries, or deletes the row if no dictionary references it anymore. It then deletes the media and glossary packs, if any.
 
-Options can also be set by environment: `CJK_DICT_WORKER_DIR`, `CJK_DICT_DATABASE`, `CJK_DICT_BUCKET`, `CJK_DICT_LINDERA_DIR`, `WRANGLER` (default `npx wrangler`). Behind a TLS-intercepting proxy, set `SSL_CERT_FILE`.
+Options can also be set by environment: `CJK_DICT_WORKER_DIR`, `CJK_DICT_DATABASE`, `CJK_DICT_BUCKET`, `CJK_DICT_LINDERA_DIR`, `WRANGLER` (default `pnpm exec wrangler`, run in `--worker-dir`). Behind a TLS-intercepting proxy, set `SSL_CERT_FILE`.
 
 Limits to keep in mind:
 
@@ -88,13 +88,13 @@ Limits to keep in mind:
 // -> { "items": [{ ...term_search, "entries": [{ dict_id, dict_path, term_id, term, reading, glossary, ... }] }], "next": 10 | null }
 ```
 
-Pinyin expansion lives in `worker/src/pinyin.ts`, a port of `yomitan-parser/src/pinyin.rs`. The Rust version normalizes readings at import and the TS version expands queries, so keep them in sync. `npm test` in `worker/` runs the same cases as the Rust tests.
+Pinyin expansion lives in `worker/src/pinyin.ts`, a port of `yomitan-parser/src/pinyin.rs`. The Rust version normalizes readings at import and the TS version expands queries, so keep them in sync. `pnpm test` in `worker/` runs the same cases as the Rust tests.
 
 ## App
 
 ```bash
 cd app
-pnpm install
+ppnpm install
 pnpm start                        # tauri dev (desktop)
 pnpm tauri build                  # release bundle
 pnpm tauri android init && pnpm android   # first time on Android
@@ -110,7 +110,7 @@ Set the Worker URL under **Settings**, or at build time with `VITE_DICT_API_URL`
 ## Local development
 
 ```bash
-cd worker && npm run migrate:local && npx wrangler dev
+cd worker && pnpm migrate:local && pnpm wrangler dev
 # in another shell, from the repo root
 cargo run -p dict-admin -- --local add some.zip
 curl localhost:8787/search -d '{"term":"日本"}'
