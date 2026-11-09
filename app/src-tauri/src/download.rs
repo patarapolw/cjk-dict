@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager};
-use tauri_plugin_http::reqwest;
 use tokio::{fs::remove_file, io::AsyncWriteExt};
 
 use serde::Serialize;
@@ -143,10 +142,10 @@ async fn download_url_local<Callback>(
 where
     Callback: Fn(DownloadProgress),
 {
-    tokio::fs::create_dir_all(out_dir).await?;
-
     let client = reqwest::Client::new();
     let file_pf = out_dir.join(filename);
+    // filename may include subfolders, e.g. dicts/incoming/x.zip
+    tokio::fs::create_dir_all(file_pf.parent().unwrap_or(out_dir)).await?;
     let temp_pf = out_dir.join(format!("{}.dl-tmp", filename));
 
     // Check existing partial download size

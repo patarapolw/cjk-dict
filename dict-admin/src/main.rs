@@ -1,107 +1,59 @@
-//! Admin CLI for the cjk-dict Worker. This is the only way dictionaries are added to or
-//! removed from D1 / R2; the Worker itself is read-only.
+//! Admin CLI for cjk-dict.
+//!
+//! The library is a folder of original Yomitan zips (`<name>.zip`) + `dicts.json`.
+//! `build` indexes them into `search.db` and writes `manifest.json`; `upload` mirrors the
+//! folder to R2 with rclone. The app downloads the zips + search.db and reads definitions
+//! and media straight from the zips. This is the only way dictionaries are added or removed.
 
 mod defaults;
 mod download;
-mod import;
+mod library;
 mod lindera;
-mod remove;
-mod sql;
-mod wrangler;
 
-use std::path::PathBuf;
+use std::{
+    path::{Path, PathBuf},
+    process::Command,
+    time::Instant,
+};
 
 use anyhow::{Context, Result, bail};
-use clap::{Args, Parser, Subcommand};
+use clap::{Parser, Subcommand};
+use yomitan_parser::{
+    parser::YomitanZip,
+    search::{self, DictSource, parse_lang},
+    tokenize::TokenizerMapper,
+};
 
-use crate::wrangler::Wrangler;
+use crate::library::{
+    DictEntry, Library, MANIFEST, Manifest, ManifestDict, SEARCH_DB, check_name, file_info,
+};
 
 #[derive(Parser)]
 #[command(version, about)]
 struct Cli {
-    #[command(flatten)]
-    target: Target,
+    /// Library folder: <name>.zip + dicts.json (+ search.db, manifest.json after `build`)
+    #[arg(
+        long,
+        global = true,
+        env = "CJK_DICT_LIBRARY",
+        default_value = "library"
+    )]
+    library: PathBuf,
 
     #[command(subcommand)]
     cmd: Cmd,
 }
 
-#[derive(Args)]
-struct Target {
-    /// Directory containing wrangler.toml
-    #[arg(
-        long,
-        global = true,
-        env = "CJK_DICT_WORKER_DIR",
-        default_value = "worker"
-    )]
-    worker_dir: PathBuf,
-
-    /// D1 database name (as in wrangler.toml)
-    #[arg(
-        long,
-        global = true,
-        env = "CJK_DICT_DATABASE",
-        default_value = "cjk-dict"
-    )]
-    database: String,
-
-    /// R2 bucket name (as in wrangler.toml)
-    #[arg(
-        long,
-        global = true,
-        env = "CJK_DICT_BUCKET",
-        default_value = "cjk-dict"
-    )]
-    bucket: String,
-
-    /// Use local (wrangler dev) D1/R2 instead of Cloudflare
-    #[arg(long, global = true)]
-    local: bool,
-
-    /// Command used to run wrangler [default: `node <worker-dir>/node_modules/wrangler/bin/wrangler.js`,
-    /// i.e. the workspace's wrangler, run without a shell so it works the same on Windows]
-    #[arg(long, global = true, env = "WRANGLER")]
-    wrangler: Option<String>,
-}
-
-/// Options shared by `add` and `defaults`
-#[derive(Args, Clone)]
-struct ImportArgs {
-    /// Don't upload packs to R2 (they are already there)
-    #[arg(long)]
-    no_upload: bool,
-
-    /// Lindera tokenizer dictionaries (downloaded if missing)
-    #[arg(long, env = "CJK_DICT_LINDERA_DIR", default_value = "tmp/lindera")]
-    lindera_dir: PathBuf,
-
-    /// Where downloaded zips and generated SQL go
-    #[arg(long, default_value = "tmp")]
-    work_dir: PathBuf,
-
-    /// Keep generated SQL files
-    #[arg(long)]
-    keep_sql: bool,
-
-    /// Statements per `wrangler d1 execute --file` call
-    #[arg(long, default_value_t = 50_000)]
-    chunk_size: usize,
-}
-
 #[derive(Subcommand)]
 enum Cmd {
-    /// Apply D1 migrations (worker/migrations)
-    Migrate,
-
-    /// List dictionaries in D1
+    /// List dictionaries in the library
     List,
 
-    /// Add a Yomitan dictionary zip (local path or http(s) URL)
+    /// Add a Yomitan dictionary zip (local path or http(s) URL) to the library
     Add {
         source: String,
 
-        /// Dictionary name/key (default: zip file stem)
+        /// Dictionary name (default: zip file stem); the zip is stored as <name>.zip
         #[arg(long)]
         name: Option<String>,
 
@@ -109,87 +61,73 @@ enum Cmd {
         #[arg(long)]
         lang: Option<String>,
 
-        /// Remove an existing dictionary of the same name first
+        /// Overwrite a dictionary of the same name
         #[arg(long)]
         replace: bool,
-
-        #[command(flatten)]
-        import: ImportArgs,
     },
 
-    /// Import the default dictionaries (latest releases); already imported ones are skipped
+    /// Add the default dictionaries (latest releases); existing ones are skipped
     Defaults {
         /// Only these dictionaries (repeatable); see --list for names
         #[arg(long)]
         only: Vec<String>,
 
-        /// Re-import dictionaries that already exist (e.g. to update to the latest release)
+        /// Re-download dictionaries that already exist (e.g. to update to the latest release)
         #[arg(long)]
         replace: bool,
 
         /// Print the default dictionaries and their download URLs, then exit
         #[arg(long)]
         list: bool,
-
-        #[command(flatten)]
-        import: ImportArgs,
     },
 
-    /// Remove a dictionary from D1 and R2
-    Remove {
-        name: String,
+    /// Remove a dictionary from the library
+    Remove { name: String },
 
-        /// Rows per DELETE batch
-        #[arg(long, default_value_t = 20_000)]
-        batch: i64,
+    /// Build search.db and manifest.json from the library
+    Build {
+        /// Lindera tokenizer dictionaries (downloaded if missing)
+        #[arg(long, env = "CJK_DICT_LINDERA_DIR", default_value = "tmp/lindera")]
+        lindera_dir: PathBuf,
+    },
 
-        /// Delete the R2 packs even if the D1 row is missing
+    /// Mirror the library to R2 with rclone (zips first, then search.db, then manifest.json)
+    Upload {
+        /// rclone destination, e.g. r2:cjk-dict
+        #[arg(long, env = "CJK_DICT_REMOTE")]
+        remote: String,
+
+        /// Show what would be transferred without doing it
         #[arg(long)]
-        force: bool,
+        dry_run: bool,
     },
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    let t = cli.target;
-    let cmd: Vec<String> = match &t.wrangler {
-        Some(c) => c.split_whitespace().map(String::from).collect(),
-        None => {
-            // Run wrangler's JS entry with node directly: on Windows `pnpm`/`npx` are .cmd
-            // shims, which Command can't spawn without going through cmd.exe quoting.
-            let js = t.worker_dir.join("node_modules/wrangler/bin/wrangler.js");
-            if !js.exists() {
-                bail!(
-                    "{} not found: run `pnpm install` at the repo root, or pass --wrangler",
-                    js.display()
-                );
-            }
-            vec![
-                "node".to_string(),
-                std::path::absolute(&js)?.to_string_lossy().into_owned(),
-            ]
-        }
-    };
-    let w = Wrangler {
-        cmd,
-        worker_dir: t.worker_dir,
-        database: t.database,
-        bucket: t.bucket,
-        local: t.local,
-    };
-    if w.cmd.is_empty() {
-        bail!("--wrangler must not be empty");
-    }
+    let lib = Library::new(cli.library)?;
 
     match cli.cmd {
-        Cmd::Migrate => w.migrate()?,
         Cmd::List => {
-            let rows = w.query_rows(
-                "SELECT id, name, title, revision, L1, L2, status, term_count, assets_size, source FROM dict ORDER BY id",
-            )?;
-            for r in rows {
-                println!("{r}");
+            let built = lib.manifest()?;
+            for d in lib.dicts()? {
+                let size = std::fs::metadata(lib.zip_path(&d.name))
+                    .map(|m| format!("{:.1} MB", m.len() as f64 / 1e6))
+                    .unwrap_or_else(|_| "missing!".into());
+                let terms = built
+                    .as_ref()
+                    .and_then(|m| m.dicts.iter().find(|x| x.name == d.name))
+                    .map(|x| format!("{} terms", x.term_count))
+                    .unwrap_or_else(|| "not built".into());
+                println!(
+                    "{}\t{}\t{}\t{}\t{}",
+                    d.name,
+                    d.lang.as_deref().unwrap_or("-"),
+                    size,
+                    terms,
+                    d.source.as_deref().unwrap_or("")
+                );
             }
         }
         Cmd::Add {
@@ -197,21 +135,14 @@ async fn main() -> Result<()> {
             name,
             lang,
             replace,
-            import,
         } => {
-            let lang = match lang {
-                Some(l) => Some(
-                    import::parse_lang(&l).with_context(|| format!("unsupported --lang {l}"))?,
-                ),
-                None => None,
-            };
-            add_source(&w, &source, name, lang, replace, &import).await?;
+            add(&lib, &source, name, lang, replace)?;
+            eprintln!("run `build` (and `upload`) to publish");
         }
         Cmd::Defaults {
             only,
             replace,
             list,
-            import,
         } => {
             let resolved = defaults::resolve(&only)?;
             if list {
@@ -220,34 +151,23 @@ async fn main() -> Result<()> {
                 }
                 return Ok(());
             }
-
-            let existing: std::collections::HashMap<String, String> = w
-                .query_rows("SELECT name, status FROM dict")?
-                .into_iter()
-                .filter_map(|r| {
-                    Some((
-                        r["name"].as_str()?.to_string(),
-                        r["status"].as_str().unwrap_or("").to_string(),
-                    ))
-                })
-                .collect();
-
+            let existing: Vec<String> = lib.dicts()?.into_iter().map(|d| d.name).collect();
             let mut failed = vec![];
             for d in resolved {
-                if let Some(status) = existing.get(d.name) {
-                    if !replace {
-                        eprintln!(
-                            "skip {}: already imported (status {status}); --replace to re-import",
-                            d.name
-                        );
-                        continue;
-                    }
+                if existing.iter().any(|n| n == d.name) && !replace {
+                    eprintln!(
+                        "skip {}: already in the library (--replace to update)",
+                        d.name
+                    );
+                    continue;
                 }
-                eprintln!("== {} ({})", d.name, d.url);
-                let lang = d.lang.and_then(import::parse_lang);
-                if let Err(e) =
-                    add_source(&w, &d.url, Some(d.name.to_string()), lang, replace, &import).await
-                {
+                if let Err(e) = add(
+                    &lib,
+                    &d.url,
+                    Some(d.name.to_string()),
+                    d.lang.map(String::from),
+                    replace,
+                ) {
                     eprintln!("error: {}: {e:#}", d.name);
                     failed.push(d.name);
                 }
@@ -255,82 +175,220 @@ async fn main() -> Result<()> {
             if !failed.is_empty() {
                 bail!("failed: {}", failed.join(", "));
             }
+            eprintln!("run `build` (and `upload`) to publish");
         }
-        Cmd::Remove { name, batch, force } => remove::remove(&w, &name, batch, force)?,
+        Cmd::Remove { name } => {
+            let mut dicts = lib.dicts()?;
+            let before = dicts.len();
+            dicts.retain(|d| d.name != name);
+            if dicts.len() == before {
+                bail!("{name:?} is not in the library");
+            }
+            lib.save_dicts(&dicts)?;
+            let _ = std::fs::remove_file(lib.zip_path(&name));
+            eprintln!("removed {name}; run `build` and `upload` to publish");
+        }
+        Cmd::Build { lindera_dir } => build(&lib, &lindera_dir).await?,
+        Cmd::Upload { remote, dry_run } => upload(&lib, &remote, dry_run)?,
     }
 
     Ok(())
 }
 
-/// Download (if a URL), optionally remove the existing dict, and import.
-async fn add_source(
-    w: &Wrangler,
+/// Copy or download a zip into the library as `<name>.zip` and record it in dicts.json.
+fn add(
+    lib: &Library,
     source: &str,
     name: Option<String>,
-    lang: Option<yomitan_parser::tokenize::Lang>,
+    lang: Option<String>,
     replace: bool,
-    opts: &ImportArgs,
 ) -> Result<()> {
+    if let Some(l) = &lang {
+        parse_lang(l).with_context(|| format!("unsupported language {l}"))?;
+    }
     let is_url = source.starts_with("http://") || source.starts_with("https://");
-
-    let source_label = if is_url {
-        source.to_string()
-    } else {
-        PathBuf::from(source)
-            .file_name()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_else(|| source.to_string())
-    };
-
-    let zip = if is_url {
-        let filename = source
+    let file_name = if is_url {
+        source
             .rsplit('/')
             .next()
             .and_then(|s| s.split('?').next())
-            .filter(|s| !s.is_empty())
-            .unwrap_or("dict.zip");
-        let dir = opts.work_dir.join("downloads");
-        std::fs::create_dir_all(&dir)?;
-        let path = dir.join(filename);
-        if !path.exists() {
-            eprintln!("downloading {source}");
-            download::to_file(source, &path)?;
-        }
-        path
+            .unwrap_or("dict.zip")
+            .to_string()
     } else {
-        PathBuf::from(source)
+        Path::new(source)
+            .file_name()
+            .context("source has no file name")?
+            .to_string_lossy()
+            .into_owned()
     };
-
     let name = match name {
         Some(n) => n,
-        None => zip
+        None => Path::new(&file_name)
             .file_stem()
-            .and_then(|s| s.to_str())
-            .context("cannot derive --name from source")?
-            .to_string(),
+            .context("cannot derive --name")?
+            .to_string_lossy()
+            .into_owned(),
     };
+    check_name(&name)?;
 
-    if replace {
-        match remove::remove(w, &name, 20_000, false) {
-            Ok(()) => {}
-            Err(e) if e.to_string().contains("not found") => {}
-            Err(e) => return Err(e),
-        }
+    let mut dicts = lib.dicts()?;
+    if dicts.iter().any(|d| d.name == name) && !replace {
+        bail!("{name:?} is already in the library (--replace to overwrite)");
     }
 
-    import::add(
-        w,
-        import::AddOpts {
-            zip,
-            source: source_label,
-            name,
-            lang,
-            lindera_dir: opts.lindera_dir.clone(),
-            sql_dir: opts.work_dir.join("sql"),
-            keep_sql: opts.keep_sql,
-            chunk_size: opts.chunk_size,
-            upload: !opts.no_upload,
-        },
-    )
-    .await
+    // fetch to a temp file, validate, then move into place
+    let tmp = lib.dir.join(format!(".{name}.zip.part"));
+    if is_url {
+        eprintln!("downloading {source}");
+        download::to_file(source, &tmp)?;
+    } else {
+        std::fs::copy(source, &tmp).with_context(|| format!("copying {source}"))?;
+    }
+    let index = YomitanZip::open(&tmp)
+        .and_then(|mut z| z.index())
+        .with_context(|| format!("{source} is not a Yomitan dictionary zip"));
+    let index = match index {
+        Ok(i) => i,
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e);
+        }
+    };
+    std::fs::rename(&tmp, lib.zip_path(&name))?;
+
+    let entry = DictEntry {
+        name: name.clone(),
+        lang,
+        source: Some(if is_url {
+            source.to_string()
+        } else {
+            file_name
+        }),
+    };
+    match dicts.iter_mut().find(|d| d.name == name) {
+        Some(d) => *d = entry,
+        None => dicts.push(entry),
+    }
+    lib.save_dicts(&dicts)?;
+    eprintln!("added {name}: {} ({})", index.title, index.revision);
+    Ok(())
+}
+
+async fn build(lib: &Library, lindera_dir: &Path) -> Result<()> {
+    let dicts = lib.dicts()?;
+    if dicts.is_empty() {
+        bail!("the library is empty: `add` or `defaults` first");
+    }
+    let sources = dicts
+        .iter()
+        .map(|d| {
+            let zip = lib.zip_path(&d.name);
+            if !zip.exists() {
+                bail!("{} is missing", zip.display());
+            }
+            Ok(DictSource {
+                name: d.name.clone(),
+                zip,
+                lang: d.lang.as_deref().and_then(parse_lang),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    lindera::ensure(lindera_dir)?;
+    let tok = TokenizerMapper::new(lindera_dir.to_path_buf());
+
+    let t = Instant::now();
+    let db = lib.dir.join(SEARCH_DB);
+    let infos = search::build(&db, &sources, &tok, |name, i, n| {
+        if n > 0 {
+            eprint!("\r{name}: bank {i}/{n}   ");
+        } else {
+            eprintln!("\r{name}...");
+        }
+    })
+    .await?;
+    eprintln!("built {SEARCH_DB} in {:.1}s", t.elapsed().as_secs_f64());
+
+    let mut out = vec![];
+    for info in infos {
+        let file = format!("{}.zip", info.name);
+        out.push(ManifestDict {
+            file: file_info(&lib.zip_path(&info.name), &file)?,
+            name: info.name,
+            title: info.title,
+            revision: info.revision,
+            lang: info.lang,
+            term_count: info.term_count,
+        });
+    }
+    let manifest = Manifest {
+        version: 1,
+        search_db: file_info(&db, SEARCH_DB)?,
+        dicts: out,
+    };
+    let tmp = lib.dir.join(format!("{MANIFEST}.tmp"));
+    std::fs::write(&tmp, serde_json::to_string_pretty(&manifest)? + "\n")?;
+    std::fs::rename(tmp, lib.dir.join(MANIFEST))?;
+
+    for d in &manifest.dicts {
+        eprintln!(
+            "  {}: {} terms, {:.1} MB",
+            d.name,
+            d.term_count,
+            d.file.size as f64 / 1e6
+        );
+    }
+    eprintln!(
+        "  {SEARCH_DB}: {:.1} MB",
+        manifest.search_db.size as f64 / 1e6
+    );
+    Ok(())
+}
+
+/// Mirror the library to R2. Order matters: the app reads manifest.json first, so
+/// everything it points to must already be there; deletions happen last.
+fn upload(lib: &Library, remote: &str, dry_run: bool) -> Result<()> {
+    lib.check_fresh()?;
+    let dir = lib.dir.to_string_lossy().into_owned();
+    let rclone = |args: &[&str]| -> Result<()> {
+        eprintln!("rclone {}", args.join(" "));
+        let mut c = Command::new("rclone");
+        c.args(args).arg("--progress");
+        if dry_run {
+            c.arg("--dry-run");
+        }
+        let st = c
+            .status()
+            .context("failed to run rclone; is it installed and on PATH?")?;
+        if !st.success() {
+            bail!("rclone failed ({st})");
+        }
+        Ok(())
+    };
+    let d = dir.as_str();
+    rclone(&[
+        "copy",
+        d,
+        remote,
+        "--include",
+        "*.zip",
+        "--include",
+        "dicts.json",
+    ])?;
+    rclone(&["copy", d, remote, "--include", SEARCH_DB])?;
+    rclone(&["copy", d, remote, "--include", MANIFEST])?;
+    rclone(&[
+        "sync",
+        d,
+        remote,
+        "--include",
+        "*.zip",
+        "--include",
+        "dicts.json",
+        "--include",
+        SEARCH_DB,
+        "--include",
+        MANIFEST,
+    ])?;
+    Ok(())
 }

@@ -6,7 +6,7 @@ use zip::result::ZipError;
 #[derive(Debug)]
 pub enum AppError {
     TauriError(tauri::Error),
-    TauriReqwestError(tauri_plugin_http::reqwest::Error),
+    ReqwestError(reqwest::Error),
     YomitanError(YomitanError),
     MutexPoisonedError(String),
     IOError(std::io::Error),
@@ -21,7 +21,7 @@ impl fmt::Display for AppError {
         match self {
             Self::TauriError(e) => write!(f, "tauri::Error: {e}"),
             Self::YomitanError(e) => write!(f, "YomitanError: {e}"),
-            Self::TauriReqwestError(e) => write!(f, "TauriReqwest: {e}"),
+            Self::ReqwestError(e) => write!(f, "Reqwest: {e}"),
             Self::MutexPoisonedError(e) => write!(f, "MutexPoisoned: {e}"),
             Self::IOError(e) => write!(f, "IOError: {e}"),
             Self::ZipError(e) => write!(f, "ZipError: {e}"),
@@ -40,9 +40,9 @@ impl From<tauri::Error> for AppError {
     }
 }
 
-impl From<tauri_plugin_http::reqwest::Error> for AppError {
-    fn from(e: tauri_plugin_http::reqwest::Error) -> Self {
-        Self::TauriReqwestError(e)
+impl From<reqwest::Error> for AppError {
+    fn from(e: reqwest::Error) -> Self {
+        Self::ReqwestError(e)
     }
 }
 

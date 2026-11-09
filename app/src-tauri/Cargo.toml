@@ -19,14 +19,18 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 tauri-plugin-clipboard-manager = "2"
-tauri-plugin-http = "2.8"
 tauri-plugin-fs = "2.7"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1.53.1", features = ["io-util"] }
+tokio = { version = "1.53.1", features = ["io-util", "fs", "rt"] }
 zip = "8.6.0"
 # query tokenizer for "~" search (same code dict-admin uses at import)
-yomitan-parser = { path = "../../yomitan-parser" }
+yomitan-parser = { path = "../../yomitan-parser", features = ["search"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "json"] }
+rusty-s3 = "0.8"
+url = "2"
+sha2 = "0.10"
+percent-encoding = "2"
 
 # Standalone workspace: building the root workspace (dict-admin) must not need WebKit/GTK.
 [workspace]

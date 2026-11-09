@@ -112,7 +112,7 @@ import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import { useRoute, useRouter } from "vue-router";
 import Term from "../components/yomitan/Term.vue";
 import { ISearchTerm, ITerm, searchDB } from "../db/search";
-import { toBeLoaded } from "../util/loading";
+import { dictsVersion, toBeLoaded } from "../util/loading";
 import { lang } from "../util/settings";
 
 const q = ref("");
@@ -121,7 +121,7 @@ const items = ref<(ISearchTerm & { entries: ITerm[] })[]>([]);
 const openedItems = ref<number[]>([]);
 
 // "~" needs the lindera tokenizer, which downloads in the background on first launch
-const tokenizerPending = computed(() => toBeLoaded.value.length > 0);
+const tokenizerPending = computed(() => toBeLoaded.value.some((d) => !d.dict));
 const qStateOptions = computed(() => [
   { label: "~", value: "fts", disabled: tokenizerPending.value },
   { label: "=", value: "exact", disabled: false },
@@ -170,7 +170,7 @@ function loadFromRouteQuery() {
   qState.value = String(route.query.qState || "") || null;
 }
 
-watch([q, qState, reading, lang], async () => {
+watch([q, qState, reading, lang, dictsVersion], async () => {
   const id = ++requestId;
   await activeRequest;
   if (id !== requestId) return;

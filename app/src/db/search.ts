@@ -1,31 +1,14 @@
-import { invoke } from "@tauri-apps/api/core";
-import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 
 import { lang as langSetting } from "../util/settings";
 
 /**
- * Dictionary search is served by the cjk-dict worker (Cloudflare D1 + R2).
- * The worker expands pinyin readings. The client only tokenizes "~" (fts) queries locally
- * (lindera), since the tokenizer dictionaries are too large for a worker.
+ * Search runs on the device: `search.db` (downloaded index) is queried by the Rust `search`
+ * command, which reads the entries themselves from the original Yomitan zips. Pinyin
+ * readings are expanded there too. Only "~" (fts) queries are tokenized here first (lindera).
  *
  * @see https://github.com/patarapolw/cjk-dict
  */
-
-/**
- * dev: "/api", proxied by Vite to `wrangler dev` (see vite.config.ts).
- * production: VITE_DICT_API_URL (required at build time).
- */
-const API_BASE = (
-  import.meta.env.DEV ? "/api" : import.meta.env.VITE_DICT_API_URL || ""
-).replace(/\/+$/, "");
-
-/**
- * Same-origin "/api" goes through the webview (and the Vite proxy); an absolute URL goes
- * through Tauri's HTTP plugin, which isn't subject to the webview's CSP/CORS.
- */
-const apiFetch: typeof fetch = API_BASE.startsWith("/")
-  ? (input, init) => window.fetch(input, init)
-  : tauriFetch;
 
 interface SearchOpts {
   term: string;
@@ -56,16 +39,6 @@ export interface ITerm {
   tags: string;
 }
 
-export interface IDict {
-  id: number;
-  name: string;
-  title: string;
-  revision: string | null;
-  L1: string | null;
-  L2: string | null;
-  term_count: number;
-}
-
 type SearchResult = {
   items: (ISearchTerm & { entries: ITerm[] })[];
   next: number | null;
@@ -74,20 +47,6 @@ type SearchResult = {
 const ALL_LANGS = ["ja-JP", "zh-CN", "ko-KR"];
 
 class SearchDatabase {
-  private async request<T>(path: string, init?: RequestInit): Promise<T> {
-    const r = await apiFetch(API_BASE + path, init);
-    if (!r.ok) {
-      throw new Error(
-        `${init?.method || "GET"} ${path}: ${r.status} ${await r.text()}`,
-      );
-    }
-    return r.json();
-  }
-
-  async dicts() {
-    return this.request<IDict[]>("/dicts");
-  }
-
   async search(opts: SearchOpts): Promise<SearchResult> {
     const start = new Date();
     try {
@@ -114,11 +73,7 @@ class SearchDatabase {
         offset: opts.offset,
       };
 
-      return await this.request<SearchResult>("/search", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
+      return await invoke<SearchResult>("search", { req: body });
     } finally {
       const timeTaken = (+new Date() - +start) / 1000;
       if (timeTaken > 0.5) {
@@ -129,12 +84,9 @@ class SearchDatabase {
     }
   }
 
-  /** URL of a media file (structured-content images), for a plain `<img src>`. */
+  /** URL of a media file inside a dictionary zip, for a plain `<img src>` (dict:// protocol). */
   assetSrc(dict: string, path: string): string {
-    return `${API_BASE}/dicts/${encodeURIComponent(dict)}/assets/${path
-      .split("/")
-      .map(encodeURIComponent)
-      .join("/")}`;
+    return convertFileSrc(`${dict}/${path}`, "dict");
   }
 
   private async tokens(term: string, lang: string) {

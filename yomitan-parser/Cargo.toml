@@ -8,12 +8,15 @@ description = "Yomitan dictionary reader, CJK tokenizer and pinyin helpers"
 default = []
 # reading Yomitan dictionary zips (used by dict-admin; not needed by search clients)
 zip = ["dep:zip"]
+# search.db: build it from zips (dict-admin) and query it, reading entries/media from the zips (app)
+search = ["zip", "dep:rusqlite"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread", "sync"] }
 zip = { version = "8.6.0", optional = true }
+rusqlite = { version = "0.37", features = ["bundled"], optional = true }
 lindera = "6.2.0"
 lindera-analysis = "6.2.0"
 unicode-normalization = "0.1"

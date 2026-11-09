@@ -21,9 +21,9 @@
   >
     <header class="downloads-header">
       <span v-if="toBeLoaded.length">
-        Downloading tokenizer ({{ toBeLoaded.length }} left)
+        Downloading ({{ toBeLoaded.length }} left)
       </span>
-      <span v-else>Tokenizer download failed</span>
+      <span v-else>Download failed</span>
       <Button
         :label="downloadsCollapsed ? 'Show' : 'Hide'"
         size="small"
@@ -55,11 +55,18 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref, useTemplateRef, watch } from "vue";
 
+import { invoke } from "@tauri-apps/api/core";
+
 import Button from "primevue/button";
 import Select from "primevue/select";
 
 import Downloading from "./components/Downloading.vue";
-import { loadErrors, toBeLoaded } from "./util/loading.ts";
+import {
+  DownloadingProps,
+  dictsVersion,
+  loadErrors,
+  toBeLoaded,
+} from "./util/loading.ts";
 import { lang } from "./util/settings.ts";
 import { makeLinderaDownloadList } from "./util/tokenize";
 
@@ -101,6 +108,11 @@ async function runQueue() {
         ];
       }
       toBeLoaded.value = toBeLoaded.value.filter((d) => d !== current);
+
+      // last file of a dictionary sync: put everything in place at once
+      if (current.dict && !toBeLoaded.value.some((d) => d.dict)) {
+        await commitDicts();
+      }
     }
   } finally {
     queueRunning = false;
@@ -111,9 +123,43 @@ watch(toBeLoaded, () => {
   if (toBeLoaded.value.length) runQueue();
 });
 
+async function commitDicts() {
+  try {
+    await invoke("dict_commit");
+    dictsVersion.value++;
+  } catch (e) {
+    console.error(e);
+    loadErrors.value = [
+      ...loadErrors.value,
+      { filename: "dictionaries", error: String(e) },
+    ];
+  }
+}
+
 async function loadAll() {
+  // Dictionaries: download what changed in the library (zips + search.db), then commit.
+  try {
+    const plan = await invoke<{ filename: string; url: string }[]>("dict_plan");
+    toBeLoaded.value = [
+      ...toBeLoaded.value,
+      ...plan.map(
+        (f): DownloadingProps => ({
+          filename: f.filename,
+          url: f.url,
+          dict: true,
+        }),
+      ),
+    ];
+    if (!plan.length) dictsVersion.value++;
+  } catch (e) {
+    console.error(e);
+    loadErrors.value = [
+      ...loadErrors.value,
+      { filename: "dictionaries", error: String(e) },
+    ];
+  }
+
   // lindera dictionaries, for tokenizing "~" search queries on the device.
-  // Yomitan dictionaries are served by the cjk-dict worker; nothing to import locally.
   toBeLoaded.value = [
     ...toBeLoaded.value,
     ...(await makeLinderaDownloadList(["unidic", "ko-dic", "cc-cedict"])),

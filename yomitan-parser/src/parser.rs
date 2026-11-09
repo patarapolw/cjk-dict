@@ -357,6 +357,11 @@ impl YomitanZip {
         })
     }
 
+    /// A bank file as raw JSON rows (array of arrays).
+    pub fn read_json_array(&mut self, name: &str) -> Result<Vec<serde_json::Value>, YomitanError> {
+        Ok(serde_json::from_str(&self.read_to_string(name)?)?)
+    }
+
     /// Count entries per bank kind (reads every bank once).
     pub fn count(&mut self) -> Result<HashMap<BankKind, usize>, YomitanError> {
         let mut out = HashMap::new();

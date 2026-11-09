@@ -1,8 +1,6 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  /** cjk-dict worker URL for production builds (dev uses the Vite proxy at /api) */
-  readonly VITE_DICT_API_URL?: string;
   readonly VITE_PRIMEUI_LICENSE_KEY?: string;
 }
 

@@ -49,6 +49,13 @@ impl From<std::io::Error> for YomitanError {
     }
 }
 
+#[cfg(feature = "search")]
+impl From<rusqlite::Error> for YomitanError {
+    fn from(e: rusqlite::Error) -> Self {
+        Self::Error(format!("SQLite: {e}"))
+    }
+}
+
 #[cfg(feature = "zip")]
 impl From<zip::result::ZipError> for YomitanError {
     fn from(e: zip::result::ZipError) -> Self {

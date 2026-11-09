@@ -39,7 +39,7 @@ const isStarted = ref(false);
 const message = ref(
   "Waiting to " +
     (props.url
-      ? `download ${props.filename} from ${props.url}`
+      ? `download ${props.filename.split("/").pop()}`
       : `parse ${props.filename}`),
 );
 const progressMessage = ref("");
@@ -69,7 +69,7 @@ async function start() {
     await listen<DownloadUrlProgress>(
       "download-url-progress",
       ({ payload }) => {
-        message.value = `Downloading ${payload.filepath} from ${payload.url}`;
+        message.value = `Downloading ${payload.filepath.split("/").pop()}`;
         progressMessage.value = `${formatFileSize(payload.downloaded)} / ${formatFileSize(payload.contentLength)}`;
         percentage.value = Math.round(
           (100 * payload.downloaded) / payload.contentLength,

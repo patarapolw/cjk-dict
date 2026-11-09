@@ -8,3 +8,5 @@ lindera/
 .env.*
 dist/
 app/src-tauri/gen/schemas
+# the dictionary library (zips, dicts.json, search.db) lives locally and in R2, not in git
+library/

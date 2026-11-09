@@ -1,7 +1,7 @@
 pnpm-lock.yaml
 target/
 dist/
-.wrangler/
+library/
 tmp/
 app/src-tauri/gen/
 app/src-tauri/icons/
