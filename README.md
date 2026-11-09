@@ -22,35 +22,37 @@ The app tokenizes "~" search queries with `yomitan-parser` (path dependency, wit
 
 ## Setup
 
+All commands in this README run from the repo root and work the same in bash and PowerShell.
+
 ```bash
-pnpm install                            # at the repo root
-cd worker
-pnpm wrangler login
-pnpm wrangler d1 create cjk-dict        # paste database_id into wrangler.toml
-pnpm wrangler r2 bucket create cjk-dict
-pnpm migrate                            # or: cargo run -p dict-admin -- migrate
-pnpm run deploy
+pnpm install
+pnpm worker wrangler login
+pnpm worker wrangler d1 create cjk-dict    # paste database_id into worker/wrangler.toml
+pnpm worker wrangler r2 bucket create cjk-dict
+pnpm admin migrate
+pnpm worker deploy
 ```
 
 ## Managing dictionaries
 
-Run from the repo root (or pass `--worker-dir`). Add `--local` to target `wrangler dev` storage instead of Cloudflare.
+`pnpm admin <command>` builds and runs `dict-admin` (`cargo run --release`) against Cloudflare. `pnpm admin:local <command>` targets `wrangler dev` storage instead. Arguments pass through as-is.
 
 ```bash
-cargo build --release -p dict-admin
-A=target/release/dict-admin
+pnpm admin list
+pnpm admin add path/to/JMdict.zip --lang ja-JP
+pnpm admin add https://github.com/MarvNC/cc-cedict-yomitan/releases/latest/download/CC-CEDICT.zip --lang zh-CN
+pnpm admin add new/JMdict.zip --name JMdict --replace     # update to a new revision
+pnpm admin remove JMdict
 
-$A list
-$A add path/to/JMdict.zip --lang ja-JP
-$A add https://github.com/MarvNC/cc-cedict-yomitan/releases/latest/download/CC-CEDICT.zip --lang zh-CN
-$A add new/JMdict.zip --name JMdict --replace     # update to a new revision
-$A remove JMdict
+pnpm admin defaults --list         # default dictionaries and their latest download URLs
+pnpm admin defaults                # import all that aren't imported yet
+pnpm admin defaults --only CC-CEDICT --only wty-zh-en
+pnpm admin defaults --only CC-CEDICT --replace           # update to the latest release
 
-$A defaults --list                 # default dictionaries and their latest download URLs
-$A defaults                        # import all that aren't imported yet
-$A defaults --only CC-CEDICT --only wty-zh-en
-$A defaults --only CC-CEDICT --replace           # update to the latest release
+pnpm admin --help                  # all options; `pnpm admin add --help` etc. per command
 ```
+
+Windows paths work too, e.g. `pnpm admin add C:\Downloads\JMdict.zip --lang ja-JP`.
 
 The defaults (the list the app used to download itself) are Pixiv, `ja`/`zh`/`ko.Wikipedia` (MarvNC), CC-CEDICT, KO-EN.KRDICT, and `wty-ja-en`/`wty-ko-en`/`wty-zh-en` (Wiktionary). GitHub-hosted ones resolve to the asset of the repo's latest release. Set `GITHUB_TOKEN` if you hit the API's unauthenticated rate limit. The Wikipedia dictionaries are large; mind the D1 size limit below.
 
@@ -67,7 +69,7 @@ If an import fails, the dict stays `importing`; run `remove <name>` to clean up.
 
 `remove` deletes in id-range batches (`--batch`). For each shared `term_search` row it first recomputes `def_tags`/`rules`/`tags`/`score` from the remaining dictionaries, or deletes the row if no dictionary references it anymore. It then deletes the media and glossary packs, if any.
 
-Options can also be set by environment: `CJK_DICT_WORKER_DIR`, `CJK_DICT_DATABASE`, `CJK_DICT_BUCKET`, `CJK_DICT_LINDERA_DIR`, `WRANGLER` (default `pnpm exec wrangler`, run in `--worker-dir`). Behind a TLS-intercepting proxy, set `SSL_CERT_FILE`.
+Options can also be set by environment: `CJK_DICT_WORKER_DIR`, `CJK_DICT_DATABASE`, `CJK_DICT_BUCKET`, `CJK_DICT_LINDERA_DIR`, `WRANGLER` (default: the workspace's wrangler, run as `node worker/node_modules/wrangler/bin/wrangler.js` with no shell, so SQL arguments are passed intact on Windows too). Behind a TLS-intercepting proxy, set `SSL_CERT_FILE`.
 
 Limits to keep in mind:
 
@@ -102,15 +104,15 @@ Pinyin expansion lives in `worker/src/pinyin.ts`, a port of `yomitan-parser/src/
 ## App
 
 ```bash
-cd app                                    # after `pnpm install` at the root
-pnpm start                                # tauri dev (desktop), against `wrangler dev`
-pnpm tauri build                          # release bundle; needs VITE_DICT_API_URL
-pnpm tauri android init && pnpm android   # first time on Android
+pnpm app start                            # tauri dev (desktop), against `wrangler dev`
+pnpm app tauri build                      # release bundle; needs VITE_DICT_API_URL
+pnpm app tauri android init               # first time on Android
+pnpm app android
 ```
 
 Which Worker the app talks to:
 
-- **Development** (`pnpm start`, `pnpm android`): the app calls same-origin `/api/*`, and Vite proxies it to `wrangler dev` on `http://localhost:8787`. Start it with `pnpm worker wrangler dev`. Set `WRANGLER_DEV_URL` to proxy somewhere else, e.g. a deployed worker.
+- **Development** (`pnpm start`, `pnpm android`): the app calls same-origin `/api/*`, and Vite proxies it to `wrangler dev` on `http://localhost:8787`. Start it with `pnpm worker dev`. Set `WRANGLER_DEV_URL` to proxy somewhere else, e.g. a deployed worker.
 - **Production builds**: `VITE_DICT_API_URL`, e.g. in `app/.env.production`. The build fails if it is not set. There is no in-app setting.
 
 PrimeVue shows an "Invalid PrimeUI License" badge unless `VITE_PRIMEUI_LICENSE_KEY` is set too (same as cjk-explainer).
@@ -124,8 +126,11 @@ PrimeVue shows an "Invalid PrimeUI License" badge unless `VITE_PRIMEUI_LICENSE_K
 ## Local development
 
 ```bash
-cd worker && pnpm migrate:local && pnpm wrangler dev
-# in another shell, from the repo root
-cargo run -p dict-admin -- --local add some.zip
-curl localhost:8787/search -d '{"term":"日本"}'
+pnpm worker migrate:local
+pnpm worker dev                     # wrangler dev on http://localhost:8787
+
+# in another terminal
+pnpm admin:local add some.zip
+pnpm admin:local list
+pnpm app start                      # the app, proxied to wrangler dev
 ```

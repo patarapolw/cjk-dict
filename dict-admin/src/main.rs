@@ -59,14 +59,10 @@ struct Target {
     #[arg(long, global = true)]
     local: bool,
 
-    /// Command used to run wrangler
-    #[arg(
-        long,
-        global = true,
-        env = "WRANGLER",
-        default_value = "pnpm exec wrangler"
-    )]
-    wrangler: String,
+    /// Command used to run wrangler [default: `node <worker-dir>/node_modules/wrangler/bin/wrangler.js`,
+    /// i.e. the workspace's wrangler, run without a shell so it works the same on Windows]
+    #[arg(long, global = true, env = "WRANGLER")]
+    wrangler: Option<String>,
 }
 
 /// Options shared by `add` and `defaults`
@@ -157,8 +153,26 @@ enum Cmd {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     let t = cli.target;
+    let cmd: Vec<String> = match &t.wrangler {
+        Some(c) => c.split_whitespace().map(String::from).collect(),
+        None => {
+            // Run wrangler's JS entry with node directly: on Windows `pnpm`/`npx` are .cmd
+            // shims, which Command can't spawn without going through cmd.exe quoting.
+            let js = t.worker_dir.join("node_modules/wrangler/bin/wrangler.js");
+            if !js.exists() {
+                bail!(
+                    "{} not found: run `pnpm install` at the repo root, or pass --wrangler",
+                    js.display()
+                );
+            }
+            vec![
+                "node".to_string(),
+                std::path::absolute(&js)?.to_string_lossy().into_owned(),
+            ]
+        }
+    };
     let w = Wrangler {
-        cmd: t.wrangler.split_whitespace().map(String::from).collect(),
+        cmd,
         worker_dir: t.worker_dir,
         database: t.database,
         bucket: t.bucket,

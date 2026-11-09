@@ -4,6 +4,8 @@
   "scripts": {
     "app": "pnpm --filter cjk-dict-app",
     "worker": "pnpm --filter cjk-dict-worker",
+    "admin": "cargo run --release -q -p dict-admin --",
+    "admin:local": "cargo run --release -q -p dict-admin -- --local",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "format": "prettier --write .",
