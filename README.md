@@ -12,11 +12,7 @@ dict-admin/       Rust CLI: add / remove / list dictionaries (drives `wrangler` 
 worker/           Cloudflare Worker (TypeScript) + D1 migrations
 ```
 
-`yomitan-parser` is also used by the cjk-explainer app (without the `zip` feature) to tokenize "~" search queries on the client:
-
-```toml
-yomitan-parser = { git = "https://github.com/patarapolw/cjk-dict" }
-```
+The cjk-explainer app tokenizes "~" search queries on the client with its own copy of the lindera tokenizer (`src-tauri/src/query_tokenizer.rs`, extracted from `yomitan-parser/src/tokenize.rs`). It does not depend on this crate. If you change the tokenizer here, mirror the change there.
 
 ## Setup
 
