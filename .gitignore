@@ -6,3 +6,5 @@ tmp/
 lindera/
 .env
 .env.*
+dist/
+app/src-tauri/gen/schemas

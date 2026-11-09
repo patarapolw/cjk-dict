@@ -1,3 +1,5 @@
 [workspace]
 members = ["yomitan-parser", "dict-admin"]
+# Tauri app: its own workspace, so building dict-admin does not need WebKit/GTK
+exclude = ["app/src-tauri"]
 resolver = "3"

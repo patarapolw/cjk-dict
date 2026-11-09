@@ -1,6 +1,3 @@
-// The query-side half (TokenizerMapper::tokenize/segment, terms_for_token) is copied into
-// cjk-explainer src-tauri/src/query_tokenizer.rs; keep the two in sync.
-
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,

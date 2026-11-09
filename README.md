@@ -1,20 +1,22 @@
 # cjk-dict
 
-Hosted Yomitan dictionary search for [cjk-explainer](https://github.com/patarapolw/cjk-explainer), on Cloudflare:
+Yomitan dictionary search for Chinese, Japanese and Korean: a Tauri app backed by a dictionary server on Cloudflare.
 
 - **D1** holds the search index (`term_search` + FTS5) and every dictionary entry (`term`, `term_meta`, `kanji`, `kanji_meta`, `tag`).
 - **R2** holds what doesn't fit in D1, as at most two objects per dictionary. Byte ranges are recorded in D1, and the Worker reads each item with a ranged read. Most text dictionaries use no R2 at all, and zips are not stored.
   - `dicts/<name>.assets`: images and other files referenced by structured content, packed uncompressed (ranges in `asset`).
   - `dicts/<name>.glossary`: glossaries too large for a D1 statement (over 100 KB). These rows have `term.glossary` NULL and the range in `glossary_offset`/`glossary_size`. The Worker fills them in, so clients see no difference.
 - The **Worker** is read-only. Dictionaries are only added or removed with the **`dict-admin`** CLI.
+- The **app** (Tauri + Vue, desktop and Android) searches through the Worker. It downloads only the lindera tokenizer dictionaries (~300 MB, in the background on first launch), to tokenize "~" queries on the device.
 
 ```
 yomitan-parser/   Rust crate: Yomitan zip reader (feature "zip"), lindera tokenizer, pinyin helpers
 dict-admin/       Rust CLI: add / remove / list dictionaries (drives `wrangler` for D1 + R2)
 worker/           Cloudflare Worker (TypeScript) + D1 migrations
+app/              Tauri app (Vue 3 + PrimeVue); app/src-tauri is its own Cargo workspace
 ```
 
-The cjk-explainer app tokenizes "~" search queries on the client with its own copy of the lindera tokenizer (`src-tauri/src/query_tokenizer.rs`, extracted from `yomitan-parser/src/tokenize.rs`). It does not depend on this crate. If you change the tokenizer here, mirror the change there.
+The app tokenizes "~" search queries with `yomitan-parser` (path dependency, without the `zip` feature), the same code `dict-admin` uses at import.
 
 ## Setup
 
@@ -87,6 +89,23 @@ Limits to keep in mind:
 ```
 
 Pinyin expansion lives in `worker/src/pinyin.ts`, a port of `yomitan-parser/src/pinyin.rs`. The Rust version normalizes readings at import and the TS version expands queries, so keep them in sync. `npm test` in `worker/` runs the same cases as the Rust tests.
+
+## App
+
+```bash
+cd app
+pnpm install
+pnpm start                        # tauri dev (desktop)
+pnpm tauri build                  # release bundle
+pnpm tauri android init && pnpm android   # first time on Android
+```
+
+Set the Worker URL under **Settings**, or at build time with `VITE_DICT_API_URL` (e.g. in `app/.env`). PrimeVue shows an "Invalid PrimeUI License" badge unless `VITE_PRIMEUI_LICENSE_KEY` is set too (same as cjk-explainer).
+
+- The CSP allows inline styles (`style-src 'unsafe-inline'`), which PrimeVue's runtime theme needs.
+- The HTTP capability (`app/src-tauri/capabilities/default.json`) and the CSP `img-src` (`app/src-tauri/tauri.conf.json`) allow `https://*.workers.dev` and `http://localhost:8787` (`wrangler dev`). For a custom domain, add it to both.
+- Search modes: prefix (default), `=` exact, and `~` token search. `~` needs the tokenizer; until it has downloaded, `~` is disabled and falls back to prefix search.
+- Optional: search by reading (pinyin is expanded to all tones by the Worker), auto-convert romaji to kana, and a clipboard monitor that searches whatever CJK text you copy.
 
 ## Local development
 
