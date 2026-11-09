@@ -18,11 +18,9 @@ All commands below run from the repo root and work the same in bash and PowerShe
 
 ## Security
 
-This repository is public. Nothing private belongs in it.
-
 - The library (`library/`, including `dicts.json`) is gitignored. Your dictionary list and custom zips live only on your machine and in R2.
-- R2 credentials are only read from environment variables. Never commit them; `.env` files are gitignored.
-- The app is built with a **read-only** R2 token compiled in, so anyone who has the built app can extract it and download the bucket. Don't publish such builds (e.g. as GitHub releases). Keep them for your own devices.
+- R2 credentials are only read from environment variables; `.env` files are gitignored.
+- The app is built with a **read-only** R2 token compiled in, so anyone who has the built app can extract it and download the bucket. Keep that in mind before sharing builds.
 
 ## The library
 
