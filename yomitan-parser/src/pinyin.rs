@@ -1,3 +1,5 @@
+// Ported to worker/src/pinyin.ts (query-side expansion); keep the two in sync.
+
 /// tone-marked vowel -> (plain vowel, tone). Expects NFC (precomposed) input.
 fn mark(c: char) -> Option<(char, u8)> {
     Some(match c {

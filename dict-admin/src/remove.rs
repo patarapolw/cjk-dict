@@ -1,27 +1,24 @@
-//! `dict-admin remove`: delete a dictionary's rows from D1 (in batches) and its zip from R2.
+//! `dict-admin remove`: delete a dictionary's rows from D1 (in batches) and its media pack from R2.
 
 use anyhow::{Result, bail};
 
-use crate::{import::r2_key, sql::s, wrangler::Wrangler};
+use crate::{import::assets_key, sql::s, wrangler::Wrangler};
 
 pub fn remove(w: &Wrangler, name: &str, batch: i64, force: bool) -> Result<()> {
     let rows = w.query_rows(&format!(
-        "SELECT id, r2_key FROM dict WHERE name = {}",
+        "SELECT id, assets_key FROM dict WHERE name = {}",
         s(name)
     ))?;
 
     let Some(row) = rows.first() else {
         if force {
-            eprintln!("dict {name:?} not in D1; deleting R2 object only");
-            return w.r2_delete(&r2_key(name));
+            eprintln!("dict {name:?} not in D1; deleting R2 media pack only");
+            return w.r2_delete(&assets_key(name));
         }
-        bail!("dict {name:?} not found (use --force to delete the R2 object anyway)");
+        bail!("dict {name:?} not found (use --force to delete the R2 media pack anyway)");
     };
     let dict_id = row["id"].as_i64().unwrap_or_default();
-    let key = row["r2_key"]
-        .as_str()
-        .map(String::from)
-        .unwrap_or_else(|| r2_key(name));
+    let key = row["assets_key"].as_str().map(String::from);
 
     // hide from search immediately
     w.query(&format!(
@@ -75,9 +72,11 @@ pub fn remove(w: &Wrangler, name: &str, batch: i64, force: bool) -> Result<()> {
 
     w.query(&format!("DELETE FROM dict WHERE id = {dict_id}"))?;
 
-    eprintln!("deleting r2://{}/{key}", w.bucket);
-    if let Err(e) = w.r2_delete(&key) {
-        eprintln!("warning: R2 delete failed (rows already removed): {e:#}");
+    if let Some(key) = key {
+        eprintln!("deleting r2://{}/{key}", w.bucket);
+        if let Err(e) = w.r2_delete(&key) {
+            eprintln!("warning: R2 delete failed (rows already removed): {e:#}");
+        }
     }
 
     eprintln!("removed {name:?}");

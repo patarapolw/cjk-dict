@@ -87,7 +87,7 @@ enum Cmd {
         #[arg(long)]
         replace: bool,
 
-        /// Don't upload the zip to R2 (it is already there)
+        /// Don't upload the media pack to R2 (it is already there)
         #[arg(long)]
         no_upload: bool,
 
@@ -116,7 +116,7 @@ enum Cmd {
         #[arg(long, default_value_t = 20_000)]
         batch: i64,
 
-        /// Delete the R2 object even if the D1 row is missing
+        /// Delete the R2 media pack even if the D1 row is missing
         #[arg(long)]
         force: bool,
     },
@@ -141,7 +141,7 @@ async fn main() -> Result<()> {
         Cmd::Migrate => w.migrate()?,
         Cmd::List => {
             let rows = w.query_rows(
-                "SELECT id, name, title, revision, L1, L2, status, term_count, zip_size FROM dict ORDER BY id",
+                "SELECT id, name, title, revision, L1, L2, status, term_count, assets_size, source FROM dict ORDER BY id",
             )?;
             for r in rows {
                 println!("{r}");
@@ -163,6 +163,15 @@ async fn main() -> Result<()> {
                     import::parse_lang(&l).with_context(|| format!("unsupported --lang {l}"))?,
                 ),
                 None => None,
+            };
+
+            let source_label = if source.starts_with("http://") || source.starts_with("https://") {
+                source.clone()
+            } else {
+                PathBuf::from(&source)
+                    .file_name()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| source.clone())
             };
 
             let zip = if source.starts_with("http://") || source.starts_with("https://") {
@@ -205,6 +214,7 @@ async fn main() -> Result<()> {
                 &w,
                 import::AddOpts {
                     zip,
+                    source: source_label,
                     name,
                     lang,
                     lindera_dir,

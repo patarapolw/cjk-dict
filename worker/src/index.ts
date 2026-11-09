@@ -1,12 +1,13 @@
 /**
- * Read-only dictionary API over D1 (search index + entries) and R2 (original zips).
+ * Read-only dictionary API over D1 (search index + entries) and R2 (media packs).
  * Dictionaries are only added/removed by `dict-admin`.
  *
  * GET  /dicts                         -> IDict[]
  * POST /search                        -> { items: ISearchItem[], next: number | null }
- * GET  /dicts/:name/assets/<path>     -> file from inside the dictionary zip (images ...)
- * GET  /dicts/:name/zip               -> original zip
+ * GET  /dicts/:name/assets/<path>     -> media file (images ...) referenced by structured content
  */
+
+import { expandPinyin } from "./pinyin";
 
 export interface Env {
   DB: D1Database;
@@ -23,8 +24,8 @@ export interface SearchRequest {
   /** e.g. "ja-JP"; empty = all languages */
   lang?: string;
   term?: string;
-  /** reading alternatives (already expanded by the client, e.g. pinyin) */
-  readings?: string[];
+  /** reading; pinyin is expanded to every tone combination when lang is zh-CN or empty */
+  reading?: string;
   /** fts only: client-side tokenized `term`, space-separated, per language */
   tokens?: Partial<Record<ShortLang, string>>;
   limit?: number;
@@ -32,6 +33,8 @@ export interface SearchRequest {
 }
 
 const MAX_LIMIT = 50;
+/** 5^4: up to four toneless syllables are expanded; beyond that, match the raw reading */
+const MAX_READINGS = 625;
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
@@ -75,6 +78,8 @@ function corsHeaders(req: Request, env: Env): Record<string, string> {
   return {
     "Access-Control-Allow-Origin": allow,
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    // structured-content <img> are loaded cross-origin
+    "Cross-Origin-Resource-Policy": "cross-origin",
     "Access-Control-Allow-Headers": "Content-Type",
     "Access-Control-Max-Age": "86400",
   };
@@ -107,9 +112,6 @@ async function route(req: Request, env: Env): Promise<Response> {
 
   if (req.method === "GET" && parts[0] === "dicts" && parts.length >= 3) {
     const name = parts[1];
-    if (parts[2] === "zip" && parts.length === 3) {
-      return await getZip(env, name, req);
-    }
     if (parts[2] === "assets" && parts.length > 3) {
       return await getAsset(env, name, parts.slice(3).join("/"), req);
     }
@@ -126,13 +128,13 @@ export interface IDict {
   L1: string | null;
   L2: string | null;
   term_count: number;
-  zip_size: number | null;
+  source: string | null;
   created_at: number;
 }
 
 async function listDicts(env: Env): Promise<IDict[]> {
   const { results } = await env.DB.prepare(
-    `SELECT id, name, title, revision, L1, L2, term_count, zip_size, created_at
+    `SELECT id, name, title, revision, L1, L2, term_count, source, created_at
      FROM dict WHERE status = 'ready' ORDER BY id`,
   ).all<IDict>();
   return results;
@@ -175,6 +177,16 @@ function readingMatch(readings: string[]) {
   return "reading:" + (readings.length > 1 ? `(${qs})` : qs);
 }
 
+function expandReading(reading: string, lang: ShortLang | ""): string[] {
+  reading = reading.trim();
+  if (!reading) return [];
+  if (!lang || lang === "zh") {
+    const expanded = expandPinyin(reading);
+    if (expanded.length && expanded.length <= MAX_READINGS) return expanded;
+  }
+  return [reading];
+}
+
 function shortLang(lang?: string): ShortLang | "" {
   const l = (lang || "").split("-")[0] as ShortLang;
   return SHORT_LANGS.includes(l) ? l : "";
@@ -183,10 +195,11 @@ function shortLang(lang?: string): ShortLang | "" {
 async function search(env: Env, body: SearchRequest) {
   const limit = Math.min(Math.max(1, Math.floor(body.limit ?? 10)), MAX_LIMIT);
   const offset = Math.max(0, Math.floor(body.offset ?? 0));
-  const readings = (body.readings || [])
-    .filter((r) => typeof r === "string" && r.trim())
-    .slice(0, 200);
   const lang = shortLang(body.lang);
+  const readings = expandReading(
+    typeof body.reading === "string" ? body.reading : "",
+    lang,
+  );
 
   let items: ISearchTerm[];
 
@@ -284,30 +297,35 @@ async function expandItems(env: Env, items: ISearchTerm[]) {
   return items.map((it) => ({ ...it, entries: bySearchId.get(it.id) || [] }));
 }
 
-async function getDict(env: Env, name: string) {
-  const d = await env.DB.prepare(
-    `SELECT id, r2_key FROM dict WHERE name = ?1 AND status = 'ready'`,
+async function getAsset(env: Env, name: string, path: string, req: Request) {
+  const a = await env.DB.prepare(
+    `SELECT d.id AS dict_id, d.assets_key, a."offset", a.size
+     FROM asset a JOIN dict d ON d.id = a.dict_id
+     WHERE d.name = ?1 AND d.status = 'ready' AND a."path" = ?2`,
   )
-    .bind(name)
-    .first<{ id: number; r2_key: string }>();
-  if (!d) throw new HttpError(404, "dictionary not found");
-  return d;
-}
+    .bind(name, path)
+    .first<{ dict_id: number; assets_key: string | null; offset: number; size: number }>();
+  if (!a || !a.assets_key) throw new HttpError(404, "asset not found");
 
-async function getZip(env: Env, name: string, req: Request) {
-  const d = await getDict(env, name);
-  const obj = await env.BUCKET.get(d.r2_key, {
-    range: req.headers,
-    onlyIf: req.headers,
+  const etag = `"${a.dict_id}-${a.offset}-${a.size}"`;
+  if (req.headers.get("If-None-Match") === etag) {
+    return new Response(null, { status: 304, headers: { ETag: etag } });
+  }
+
+  const obj = await env.BUCKET.get(a.assets_key, {
+    range: { offset: a.offset, length: a.size },
   });
-  if (!obj) throw new HttpError(404, "zip not found");
+  if (!obj) throw new HttpError(404, "media pack not found");
 
-  const headers = new Headers();
-  obj.writeHttpMetadata(headers);
-  headers.set("ETag", obj.httpEtag);
-  headers.set("Content-Disposition", `attachment; filename="${encodeURIComponent(name)}.zip"`);
-  if (!("body" in obj)) return new Response(null, { status: 304, headers });
-  return new Response(obj.body, { headers });
+  const ext = path.split(".").pop()?.toLowerCase() || "";
+  return new Response(obj.body, {
+    headers: {
+      "Content-Type": MIME[ext] || "application/octet-stream",
+      "Content-Length": String(a.size),
+      "Cache-Control": "public, max-age=31536000, immutable",
+      ETag: etag,
+    },
+  });
 }
 
 const MIME: Record<string, string> = {
@@ -328,39 +346,3 @@ const MIME: Record<string, string> = {
   wav: "audio/wav",
   opus: "audio/opus",
 };
-
-async function getAsset(env: Env, name: string, path: string, req: Request) {
-  const d = await getDict(env, name);
-  const a = await env.DB.prepare(
-    `SELECT "offset", compressed_size, size, method FROM asset WHERE dict_id = ?1 AND "path" = ?2`,
-  )
-    .bind(d.id, path)
-    .first<{ offset: number; compressed_size: number; size: number; method: number }>();
-  if (!a) throw new HttpError(404, "asset not found");
-
-  const etag = `"${d.id}-${a.offset}-${a.size}"`;
-  if (req.headers.get("If-None-Match") === etag) {
-    return new Response(null, { status: 304, headers: { ETag: etag } });
-  }
-
-  const obj = await env.BUCKET.get(d.r2_key, {
-    range: { offset: a.offset, length: a.compressed_size },
-  });
-  if (!obj) throw new HttpError(404, "zip not found");
-
-  let body: ReadableStream = obj.body;
-  if (a.method === 8) {
-    body = body.pipeThrough(new DecompressionStream("deflate-raw"));
-  } else if (a.method !== 0) {
-    throw new HttpError(415, "unsupported compression");
-  }
-
-  const ext = path.split(".").pop()?.toLowerCase() || "";
-  const headers: Record<string, string> = {
-    "Content-Type": MIME[ext] || "application/octet-stream",
-    "Cache-Control": "public, max-age=31536000, immutable",
-    ETag: etag,
-  };
-  if (a.method === 0) headers["Content-Length"] = String(a.size);
-  return new Response(body, { headers });
-}

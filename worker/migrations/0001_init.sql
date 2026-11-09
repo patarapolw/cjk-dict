@@ -1,4 +1,5 @@
--- One row per imported Yomitan dictionary. The original zip lives in R2 at r2_key.
+-- One row per imported Yomitan dictionary. Zips are not stored: entries live in D1, and
+-- media files (if any) are packed, uncompressed, into a single R2 object at assets_key.
 -- Rows are only written by dict-admin; the Worker only reads `status = 'ready'` dicts.
 CREATE TABLE dict (
   id          INTEGER PRIMARY KEY,
@@ -8,8 +9,9 @@ CREATE TABLE dict (
   L1          TEXT,                   -- source language, e.g. ja-JP (enforced by admin or index.json)
   L2          TEXT,                   -- target language
   index_json  TEXT,                   -- raw index.json
-  r2_key      TEXT NOT NULL,
-  zip_size    INTEGER,
+  "source"    TEXT,                   -- URL or file name the dictionary was imported from
+  assets_key  TEXT,                   -- R2 key of the media pack; NULL if the dict has no media
+  assets_size INTEGER,
   term_count  INTEGER NOT NULL DEFAULT 0,
   status      TEXT NOT NULL DEFAULT 'importing' CHECK (status IN ('importing', 'ready', 'deleting')),
   created_at  INTEGER NOT NULL DEFAULT (unixepoch())
@@ -72,14 +74,13 @@ CREATE TABLE tag (
 );
 CREATE INDEX idx_tag_dict_id_name ON tag (dict_id, "name");
 
--- Non-bank files in the zip (images ...), served by range-reading the R2 zip.
+-- Media files (images ...) referenced by structured content `path`:
+-- byte range inside the dict's R2 media pack.
 CREATE TABLE asset (
-  dict_id         INTEGER NOT NULL,
-  "path"          TEXT NOT NULL,
-  "offset"        INTEGER NOT NULL,   -- start of file data inside the zip
-  compressed_size INTEGER NOT NULL,
-  size            INTEGER NOT NULL,
-  method          INTEGER NOT NULL,   -- 0 stored, 8 deflate
+  dict_id     INTEGER NOT NULL,
+  "path"      TEXT NOT NULL,
+  "offset"    INTEGER NOT NULL,
+  size        INTEGER NOT NULL,
   UNIQUE (dict_id, "path")
 );
 

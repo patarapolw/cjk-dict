@@ -24,6 +24,8 @@ const MAX_STATEMENT_BYTES: usize = 100_000;
 
 pub struct AddOpts {
     pub zip: PathBuf,
+    /// URL or file name, recorded in `dict.source`
+    pub source: String,
     pub name: String,
     pub lang: Option<Lang>,
     pub lindera_dir: PathBuf,
@@ -33,8 +35,38 @@ pub struct AddOpts {
     pub upload: bool,
 }
 
-pub fn r2_key(name: &str) -> String {
-    format!("dicts/{name}.zip")
+/// R2 key of a dictionary's media pack
+pub fn assets_key(name: &str) -> String {
+    format!("dicts/{name}.assets")
+}
+
+pub struct PackedAsset {
+    pub path: String,
+    pub offset: u64,
+    pub size: u64,
+}
+
+/// Concatenate every media file (decompressed) into one file; returns (path, offset, size).
+fn pack_assets(zip: &mut YomitanZip, out_path: &Path) -> Result<Vec<PackedAsset>> {
+    let names = zip.asset_names();
+    let mut out = Vec::with_capacity(names.len());
+    if names.is_empty() {
+        return Ok(out);
+    }
+    let mut f = BufWriter::new(File::create(out_path)?);
+    let mut offset = 0u64;
+    for name in names {
+        let bytes = zip.read_bytes(&name)?;
+        f.write_all(&bytes)?;
+        out.push(PackedAsset {
+            path: name,
+            offset,
+            size: bytes.len() as u64,
+        });
+        offset += bytes.len() as u64;
+    }
+    f.flush()?;
+    Ok(out)
 }
 
 pub fn parse_lang(s: &str) -> Option<Lang> {
@@ -136,7 +168,6 @@ pub async fn add(w: &Wrangler, opts: AddOpts) -> Result<()> {
         YomitanZip::open(&opts.zip).with_context(|| format!("opening {}", opts.zip.display()))?;
     let index_str = zip.index_json_str().context("reading index.json")?;
     let index = zip.index()?;
-    let zip_size = std::fs::metadata(&opts.zip)?.len();
 
     let source_language = opts
         .lang
@@ -163,28 +194,41 @@ pub async fn add(w: &Wrangler, opts: AddOpts) -> Result<()> {
         );
     }
 
-    let key = r2_key(&opts.name);
-    if opts.upload {
-        eprintln!(
-            "uploading {} -> r2://{}/{}",
-            opts.zip.display(),
-            w.bucket,
-            key
-        );
-        w.r2_put(&key, &opts.zip, "application/zip")?;
-    }
+    // media: one uncompressed pack per dict, served by ranged R2 reads. Nothing for text-only dicts.
+    std::fs::create_dir_all(&opts.sql_dir)?;
+    let pack_path = opts
+        .sql_dir
+        .join(format!("{}.assets", sanitize(&opts.name)));
+    let assets = pack_assets(&mut zip, &pack_path)?;
+    let (key, assets_size) = if assets.is_empty() {
+        eprintln!("no media files");
+        (None, None)
+    } else {
+        let key = assets_key(&opts.name);
+        let size = std::fs::metadata(&pack_path)?.len();
+        eprintln!("{} media files, {} bytes", assets.len(), size);
+        if opts.upload {
+            eprintln!("uploading media pack -> r2://{}/{}", w.bucket, key);
+            w.r2_put(&key, &pack_path, "application/octet-stream")?;
+        }
+        if !opts.keep_sql {
+            std::fs::remove_file(&pack_path)?;
+        }
+        (Some(key), Some(size))
+    };
 
     let rows = w.query_rows(&format!(
-        "INSERT INTO dict (name, title, revision, L1, L2, index_json, r2_key, zip_size, status)
-         VALUES ({}, {}, {}, {}, {}, {}, {}, {}, 'importing') RETURNING id",
+        "INSERT INTO dict (name, title, revision, L1, L2, index_json, source, assets_key, assets_size, status)
+         VALUES ({}, {}, {}, {}, {}, {}, {}, {}, {}, 'importing') RETURNING id",
         s(&opts.name),
         s(&index.title),
         s(&index.revision),
         opt_s(source_language.map(|l| l.to_string()).as_deref()),
         opt_s(index.target_language.as_deref()),
         s(&index_str),
-        s(&key),
-        zip_size
+        s(&opts.source),
+        opt_s(key.as_deref()),
+        opt_num(assets_size.map(|n| n as f64))
     ))?;
     let dict_id = rows
         .first()
@@ -192,7 +236,7 @@ pub async fn add(w: &Wrangler, opts: AddOpts) -> Result<()> {
         .context("INSERT dict did not return id")?;
     eprintln!("dict_id = {dict_id}");
 
-    let result = import_entries(w, &mut zip, dict_id, source_language, &opts).await;
+    let result = import_entries(w, &mut zip, dict_id, source_language, &assets, &opts).await;
     let term_count = match result {
         Ok(n) => n,
         Err(e) => {
@@ -216,9 +260,9 @@ async fn import_entries(
     zip: &mut YomitanZip,
     dict_id: i64,
     source_language: Option<Lang>,
+    assets: &[PackedAsset],
     opts: &AddOpts,
 ) -> Result<i64> {
-    std::fs::create_dir_all(&opts.sql_dir)?;
     crate::lindera::ensure(&opts.lindera_dir)?;
     let tok = TokenizerMapper::new(opts.lindera_dir.clone());
 
@@ -230,17 +274,12 @@ async fn import_entries(
         opts.keep_sql,
     );
 
-    // assets: byte ranges inside the R2 zip, served by the worker
-    let assets = zip.assets()?;
-    eprintln!("{} assets", assets.len());
     for a in assets {
         out.push(&format!(
-            "INSERT OR REPLACE INTO asset (dict_id, path, offset, compressed_size, size, method) VALUES ({dict_id}, {}, {}, {}, {}, {})",
+            "INSERT OR REPLACE INTO asset (dict_id, path, offset, size) VALUES ({dict_id}, {}, {}, {})",
             s(&a.path),
             a.offset,
-            a.compressed_size,
             a.size,
-            a.method
         ))?;
     }
 

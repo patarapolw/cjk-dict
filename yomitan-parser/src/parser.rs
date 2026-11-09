@@ -2,13 +2,12 @@
 //!
 //! - [`YomitanZip::index_json_str`] / [`YomitanZip::index`]: `index.json`
 //! - [`YomitanZip::banks`] + [`YomitanZip::read_bank`]: `*_bank_N.json` entries
-//! - [`YomitanZip::assets`]: every other file (images etc.) with the byte range of its
-//!   (possibly deflated) data inside the zip, so a server can serve it with an HTTP range read.
+//! - [`YomitanZip::asset_names`] + [`YomitanZip::read_bytes`]: every other file (images etc.)
 
 use std::{collections::HashMap, fs::File, io::Read, path::Path};
 
 use serde::{Deserialize, Serialize};
-use zip::{CompressionMethod, ZipArchive};
+use zip::ZipArchive;
 
 use crate::error::YomitanError;
 
@@ -226,18 +225,6 @@ pub struct BankFile {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct ZipAsset {
-    /// path inside the zip, as referenced by structured content `path`
-    pub path: String,
-    /// byte offset of the file data (after the local header) inside the zip
-    pub offset: u64,
-    pub compressed_size: u64,
-    pub size: u64,
-    /// 0 = stored, 8 = deflate
-    pub method: u16,
-}
-
-#[derive(Debug, Clone, Serialize)]
 pub struct YomitanImportProgress {
     pub bank: String,
     pub current: u32,
@@ -380,37 +367,23 @@ impl YomitanZip {
         Ok(out)
     }
 
-    /// Every non-directory file that is neither `index.json` nor a bank file.
-    pub fn assets(&mut self) -> Result<Vec<ZipAsset>, YomitanError> {
+    /// Every non-directory file that is neither `index.json` nor a bank file
+    /// (images etc. referenced by structured content `path`).
+    pub fn asset_names(&self) -> Vec<String> {
         let bank_names: std::collections::HashSet<String> =
             self.banks().into_iter().map(|b| b.name).collect();
+        self.archive
+            .file_names()
+            .filter(|n| !n.ends_with('/') && *n != "index.json" && !bank_names.contains(*n))
+            .map(String::from)
+            .collect()
+    }
 
-        let mut out = vec![];
-        for i in 0..self.archive.len() {
-            let f = self.archive.by_index_raw(i)?;
-            let name = f.name().to_string();
-            if f.is_dir() || name == "index.json" || bank_names.contains(&name) {
-                continue;
-            }
-            if f.encrypted() {
-                continue;
-            }
-            let method: u16 = match f.compression() {
-                CompressionMethod::Stored => 0,
-                CompressionMethod::Deflated => 8,
-                _ => continue, // not servable without a custom decoder
-            };
-            let offset = f
-                .data_start()
-                .ok_or_else(|| YomitanError::Error(format!("no data offset for {name}")))?;
-            out.push(ZipAsset {
-                path: name,
-                offset,
-                compressed_size: f.compressed_size(),
-                size: f.size(),
-                method,
-            });
-        }
-        Ok(out)
+    /// Decompressed content of a file in the zip.
+    pub fn read_bytes(&mut self, name: &str) -> Result<Vec<u8>, YomitanError> {
+        let mut f = self.archive.by_name(name)?;
+        let mut buf = Vec::with_capacity(f.size() as usize);
+        f.read_to_end(&mut buf)?;
+        Ok(buf)
     }
 }
