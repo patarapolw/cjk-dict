@@ -10,6 +10,8 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(() => {
   return {
     plugins: [vue()],
+    // VITE_* from the repo-root .env, shared with the Rust build and dict-admin
+    envDir: "..",
 
     // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
     //

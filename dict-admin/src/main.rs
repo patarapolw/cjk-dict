@@ -105,6 +105,9 @@ enum Cmd {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // CJK_DICT_LIBRARY, CJK_DICT_REMOTE, ... from .env (this or a parent folder);
+    // variables already set in the environment win
+    let _ = dotenvy::dotenv();
     let cli = Cli::parse();
     let lib = Library::new(cli.library)?;
 

@@ -14,12 +14,14 @@ dict-admin/       Rust CLI: manage the library, build search.db, upload with rcl
 app/              Tauri app (Vue 3 + PrimeVue); app/src-tauri is its own Cargo workspace
 ```
 
-All commands below run from the repo root and work the same in bash and PowerShell. Run `pnpm install` once first. `pnpm format` runs Prettier, and `pnpm typecheck` checks the app.
+All commands below run from the repo root and work the same in bash and PowerShell. Run `pnpm install` once first.
+
+Settings go in `.env` at the repo root (gitignored); copy `.env.example`. The one file is read by the app's Rust build, by Vite (`VITE_*`) and by `dict-admin`. Variables already set in the environment take precedence. `pnpm format` runs Prettier, and `pnpm typecheck` checks the app.
 
 ## Security
 
 - The library (`library/`, including `dicts.json`) is gitignored. Your dictionary list and custom zips live only on your machine and in R2.
-- R2 credentials are only read from environment variables; `.env` files are gitignored.
+- R2 credentials are only read from `.env` or environment variables; `.env` is gitignored.
 - The app is built with a **read-only** R2 token compiled in, so anyone who has the built app can extract it and download the bucket. Keep that in mind before sharing builds.
 
 ## The library
@@ -72,7 +74,7 @@ pnpm app tauri android init                # first time on Android
 pnpm app android
 ```
 
-Where the app downloads the library from is set by environment variables. They are read when the app is built (compiled in) and can be overridden at runtime:
+Where the app downloads the library from is set in `.env` or by environment variables. They are read when the app is built (compiled in) and can be overridden at runtime:
 
 | Variable                        | Value                                                            |
 | ------------------------------- | ---------------------------------------------------------------- |
