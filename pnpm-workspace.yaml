@@ -1,0 +1,8 @@
+packages:
+  - app
+  - worker
+
+# pnpm skips dependency install scripts unless allowed; wrangler needs these
+onlyBuiltDependencies:
+  - esbuild
+  - workerd

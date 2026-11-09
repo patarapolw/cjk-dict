@@ -16,17 +16,19 @@ worker/           Cloudflare Worker (TypeScript) + D1 migrations
 app/              Tauri app (Vue 3 + PrimeVue); app/src-tauri is its own Cargo workspace
 ```
 
+`app/` and `worker/` form a pnpm workspace: run `pnpm install` once at the repo root (one `pnpm-lock.yaml`). From the root, `pnpm app <script>` and `pnpm worker <script>` run a package's scripts, and `pnpm typecheck` / `pnpm test` run them in both.
+
 The app tokenizes "~" search queries with `yomitan-parser` (path dependency, without the `zip` feature), the same code `dict-admin` uses at import.
 
 ## Setup
 
 ```bash
+pnpm install                            # at the repo root
 cd worker
-pnpm install
 pnpm wrangler login
 pnpm wrangler d1 create cjk-dict        # paste database_id into wrangler.toml
 pnpm wrangler r2 bucket create cjk-dict
-pnpm migrate                           # or: cargo run -p dict-admin -- migrate
+pnpm migrate                            # or: cargo run -p dict-admin -- migrate
 pnpm run deploy
 ```
 
@@ -88,15 +90,14 @@ Limits to keep in mind:
 // -> { "items": [{ ...term_search, "entries": [{ dict_id, dict_path, term_id, term, reading, glossary, ... }] }], "next": 10 | null }
 ```
 
-Pinyin expansion lives in `worker/src/pinyin.ts`, a port of `yomitan-parser/src/pinyin.rs`. The Rust version normalizes readings at import and the TS version expands queries, so keep them in sync. `pnpm test` in `worker/` runs the same cases as the Rust tests.
+Pinyin expansion lives in `worker/src/pinyin.ts`, a port of `yomitan-parser/src/pinyin.rs`. The Rust version normalizes readings at import and the TS version expands queries, so keep them in sync. `pnpm test` runs the same cases as the Rust tests.
 
 ## App
 
 ```bash
-cd app
-ppnpm install
-pnpm start                        # tauri dev (desktop)
-pnpm tauri build                  # release bundle
+cd app                                    # after `pnpm install` at the root
+pnpm start                                # tauri dev (desktop)
+pnpm tauri build                          # release bundle
 pnpm tauri android init && pnpm android   # first time on Android
 ```
 

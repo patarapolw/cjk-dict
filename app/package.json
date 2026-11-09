@@ -8,7 +8,8 @@
     "android": "tauri android run",
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "typecheck": "vue-tsc --noEmit"
   },
   "dependencies": {
     "@primeicons/vue": "^8.0.1",

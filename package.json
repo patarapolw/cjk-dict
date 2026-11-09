@@ -1,0 +1,10 @@
+{
+  "name": "cjk-dict",
+  "private": true,
+  "scripts": {
+    "app": "pnpm --filter cjk-dict-app",
+    "worker": "pnpm --filter cjk-dict-worker",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test"
+  }
+}
