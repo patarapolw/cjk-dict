@@ -278,17 +278,36 @@ async function expandItems(env: Env, items: ISearchTerm[]) {
   const ids = items.map((it) => it.id);
   const { results } = await env.DB.prepare(
     `SELECT t.search_id, t.dict_id, d.name AS dict_path, t.id AS term_id,
-            t.term, t.reading, t.def_tags, t.rules, t.score, t.glossary, t."sequence", t.tags
+            t.term, t.reading, t.def_tags, t.rules, t.score, t.glossary, t."sequence", t.tags,
+            t.glossary_offset, t.glossary_size, d.glossary_key
      FROM term t JOIN dict d ON d.id = t.dict_id
      WHERE t.search_id IN (${ids.map((_, i) => `?${i + 1}`).join(",")})
        AND d.status = 'ready'
      ORDER BY t.dict_id, t.id`,
   )
     .bind(...ids)
-    .all<ITerm & { search_id: number }>();
+    .all<
+      ITerm & {
+        search_id: number;
+        glossary_offset: number | null;
+        glossary_size: number | null;
+        glossary_key: string | null;
+      }
+    >();
+
+  // Glossaries too large for D1 are byte ranges in the dict's R2 glossary pack.
+  await Promise.all(
+    results.map(async (t) => {
+      if (t.glossary !== null || !t.glossary_key || t.glossary_size === null) return;
+      const obj = await env.BUCKET.get(t.glossary_key, {
+        range: { offset: t.glossary_offset ?? 0, length: t.glossary_size },
+      });
+      t.glossary = obj ? await obj.text() : "[]";
+    }),
+  );
 
   const bySearchId = new Map<number, ITerm[]>();
-  for (const { search_id, ...t } of results) {
+  for (const { search_id, glossary_offset, glossary_size, glossary_key, ...t } of results) {
     const arr = bySearchId.get(search_id) || [];
     arr.push(t);
     bySearchId.set(search_id, arr);

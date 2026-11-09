@@ -3,7 +3,9 @@
 Hosted Yomitan dictionary search for [cjk-explainer](https://github.com/patarapolw/cjk-explainer), on Cloudflare:
 
 - **D1** holds the search index (`term_search` + FTS5) and every dictionary entry (`term`, `term_meta`, `kanji`, `kanji_meta`, `tag`).
-- **R2** holds only media. Images and other files referenced by structured content are packed, uncompressed, into one object per dictionary (`dicts/<name>.assets`). Their byte ranges are recorded in D1 (`asset`), and the Worker serves each file with a ranged read. Text-only dictionaries use no R2 at all. Zips are not stored.
+- **R2** holds what doesn't fit in D1, as at most two objects per dictionary. Byte ranges are recorded in D1, and the Worker reads each item with a ranged read. Most text dictionaries use no R2 at all, and zips are not stored.
+  - `dicts/<name>.assets`: images and other files referenced by structured content, packed uncompressed (ranges in `asset`).
+  - `dicts/<name>.glossary`: glossaries too large for a D1 statement (over 100 KB). These rows have `term.glossary` NULL and the range in `glossary_offset`/`glossary_size`. The Worker fills them in, so clients see no difference.
 - The **Worker** is read-only. Dictionaries are only added or removed with the **`dict-admin`** CLI.
 
 ```
@@ -47,17 +49,18 @@ $A remove JMdict
 2. If the dictionary has media, packs it and uploads the pack to `r2://<bucket>/dicts/<name>.assets` (`--no-upload` if it is already there).
 3. Inserts a `dict` row with `status = 'importing'`. The Worker ignores such dicts.
 4. Tokenizes every term with lindera (dictionaries are downloaded to `--lindera-dir` on first use). It then writes SQL in chunks of `--chunk-size` statements and runs each chunk with `wrangler d1 execute --file`.
-5. Marks the dict `ready`.
+5. Writes any glossary too large for D1 to the glossary pack and uploads it.
+6. Marks the dict `ready`.
 
 If an import fails, the dict stays `importing`; run `remove <name>` to clean up.
 
-`remove` deletes in id-range batches (`--batch`). For each shared `term_search` row it first recomputes `def_tags`/`rules`/`tags`/`score` from the remaining dictionaries, or deletes the row if no dictionary references it anymore. It then deletes the media pack, if any.
+`remove` deletes in id-range batches (`--batch`). For each shared `term_search` row it first recomputes `def_tags`/`rules`/`tags`/`score` from the remaining dictionaries, or deletes the row if no dictionary references it anymore. It then deletes the media and glossary packs, if any.
 
 Options can also be set by environment: `CJK_DICT_WORKER_DIR`, `CJK_DICT_DATABASE`, `CJK_DICT_BUCKET`, `CJK_DICT_LINDERA_DIR`, `WRANGLER` (default `npx wrangler`). Behind a TLS-intercepting proxy, set `SSL_CERT_FILE`.
 
 Limits to keep in mind:
 
-- D1 rejects single statements over 100 KB. Entries with a larger glossary are skipped with a warning.
+- D1 rejects single statements over 100 KB. Larger glossaries go to the R2 glossary pack. An entry is skipped with a warning only if it is still too large without its glossary, which would take a term over 100 KB.
 - `wrangler r2 object put` uploads at most ~300 MB. For a bigger media pack, run once with `--keep-sql` and `--no-upload`, then upload `tmp/sql/<name>.assets` with an S3 client (e.g. `rclone`) to `dicts/<name>.assets`.
 - A D1 database holds at most 10 GB.
 

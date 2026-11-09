@@ -116,7 +116,7 @@ enum Cmd {
         #[arg(long, default_value_t = 20_000)]
         batch: i64,
 
-        /// Delete the R2 media pack even if the D1 row is missing
+        /// Delete the R2 packs even if the D1 row is missing
         #[arg(long)]
         force: bool,
     },

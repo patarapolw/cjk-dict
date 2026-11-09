@@ -40,6 +40,55 @@ pub fn assets_key(name: &str) -> String {
     format!("dicts/{name}.assets")
 }
 
+/// R2 key of a dictionary's pack of oversized glossaries
+pub fn glossary_key(name: &str) -> String {
+    format!("dicts/{name}.glossary")
+}
+
+/// Glossaries whose INSERT would exceed D1's statement limit, appended to one file
+/// that is uploaded to R2 as `glossary_key(name)`.
+struct GlossaryPack {
+    path: PathBuf,
+    file: Option<BufWriter<File>>,
+    offset: u64,
+    count: usize,
+}
+
+impl GlossaryPack {
+    fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            file: None,
+            offset: 0,
+            count: 0,
+        }
+    }
+
+    /// returns (offset, size)
+    fn push(&mut self, glossary: &str) -> Result<(u64, u64)> {
+        if self.file.is_none() {
+            self.file = Some(BufWriter::new(File::create(&self.path)?));
+        }
+        let bytes = glossary.as_bytes();
+        self.file.as_mut().unwrap().write_all(bytes)?;
+        let at = (self.offset, bytes.len() as u64);
+        self.offset += bytes.len() as u64;
+        self.count += 1;
+        Ok(at)
+    }
+
+    /// Flush; Some(path) if anything was written.
+    fn finish(&mut self) -> Result<Option<&Path>> {
+        match self.file.take() {
+            Some(mut f) => {
+                f.flush()?;
+                Ok(Some(&self.path))
+            }
+            None => Ok(None),
+        }
+    }
+}
+
 pub struct PackedAsset {
     pub path: String,
     pub offset: u64,
@@ -237,7 +286,7 @@ pub async fn add(w: &Wrangler, opts: AddOpts) -> Result<()> {
     eprintln!("dict_id = {dict_id}");
 
     let result = import_entries(w, &mut zip, dict_id, source_language, &assets, &opts).await;
-    let term_count = match result {
+    let (term_count, gloss_key) = match result {
         Ok(n) => n,
         Err(e) => {
             eprintln!(
@@ -249,7 +298,8 @@ pub async fn add(w: &Wrangler, opts: AddOpts) -> Result<()> {
     };
 
     w.query(&format!(
-        "UPDATE dict SET status = 'ready', term_count = {term_count} WHERE id = {dict_id}"
+        "UPDATE dict SET status = 'ready', term_count = {term_count}, glossary_key = {} WHERE id = {dict_id}",
+        opt_s(gloss_key.as_deref())
     ))?;
     eprintln!("done: {:?} ready with {term_count} terms", opts.name);
     Ok(())
@@ -262,7 +312,7 @@ async fn import_entries(
     source_language: Option<Lang>,
     assets: &[PackedAsset],
     opts: &AddOpts,
-) -> Result<i64> {
+) -> Result<(i64, Option<String>)> {
     crate::lindera::ensure(&opts.lindera_dir)?;
     let tok = TokenizerMapper::new(opts.lindera_dir.clone());
 
@@ -282,6 +332,11 @@ async fn import_entries(
             a.size,
         ))?;
     }
+
+    let mut gloss = GlossaryPack::new(
+        opts.sql_dir
+            .join(format!("{}.glossary", sanitize(&opts.name))),
+    );
 
     let banks = zip.banks();
     let total_banks = banks.len();
@@ -348,16 +403,23 @@ async fn import_entries(
             }
             BankEntries::Term(rs) => {
                 for r in rs {
-                    let (upsert, insert) =
-                        term_statements(dict_id, &r, source_language, &tok).await?;
+                    let (upsert, search_id) = term_statements(&r, source_language, &tok).await?;
+                    let mut insert =
+                        term_insert(dict_id, &search_id, &r, Glossary::Inline(&r.glossary));
                     if insert.len() > MAX_STATEMENT_BYTES {
-                        out.skipped += 1;
-                        eprintln!(
-                            "warning: skipping term {:?}: {} bytes exceeds D1 statement limit",
-                            r.term,
-                            insert.len()
-                        );
-                        continue;
+                        // too big for D1: glossary goes to the R2 pack
+                        let (offset, size) = gloss.push(&r.glossary)?;
+                        insert =
+                            term_insert(dict_id, &search_id, &r, Glossary::Packed(offset, size));
+                        if insert.len() > MAX_STATEMENT_BYTES {
+                            out.skipped += 1;
+                            eprintln!(
+                                "warning: skipping term {:?}: {} bytes even without glossary",
+                                r.term,
+                                insert.len()
+                            );
+                            continue;
+                        }
                     }
                     out.push(&upsert)?;
                     out.push(&insert)?;
@@ -371,12 +433,34 @@ async fn import_entries(
     if out.skipped > 0 {
         eprintln!("warning: {} statements skipped", out.skipped);
     }
-    Ok(term_count)
+
+    // upload before the dict is marked ready, so the worker never sees missing glossaries
+    let count = gloss.count;
+    let key = match gloss.finish()? {
+        None => None,
+        Some(path) => {
+            let key = glossary_key(&opts.name);
+            eprintln!(
+                "{count} oversized glossaries, {} bytes",
+                std::fs::metadata(path)?.len()
+            );
+            if opts.upload {
+                eprintln!("uploading glossary pack -> r2://{}/{}", w.bucket, key);
+                w.r2_put(&key, path, "application/json")?;
+            }
+            if !opts.keep_sql {
+                std::fs::remove_file(path)?;
+            }
+            Some(key)
+        }
+    };
+
+    Ok((term_count, key))
 }
 
 /// Mirrors the old local `YomitanSearch::import`, but with `term_link` folded into `term`.
+/// Returns the term_search upsert and the subquery selecting its id.
 async fn term_statements(
-    dict_id: i64,
     r: &yomitan_parser::parser::TermEntry,
     source_language: Option<Lang>,
     tok: &TokenizerMapper,
@@ -443,19 +527,35 @@ async fn term_statements(
         b(&p4_term_ko),
     );
 
-    let insert = format!(
-        "INSERT INTO term (dict_id, search_id, term, reading, def_tags, rules, score, glossary, sequence, tags) VALUES ({dict_id}, {search_id}, {}, {}, {}, {}, {}, {}, {}, {})",
+    Ok((upsert, search_id))
+}
+
+enum Glossary<'a> {
+    Inline(&'a str),
+    /// (offset, size) in the R2 glossary pack
+    Packed(u64, u64),
+}
+
+fn term_insert(
+    dict_id: i64,
+    search_id: &str,
+    r: &yomitan_parser::parser::TermEntry,
+    glossary: Glossary,
+) -> String {
+    let (glossary, offset, size) = match glossary {
+        Glossary::Inline(g) => (s(g), "NULL".to_string(), "NULL".to_string()),
+        Glossary::Packed(o, n) => ("NULL".to_string(), o.to_string(), n.to_string()),
+    };
+    format!(
+        "INSERT INTO term (dict_id, search_id, term, reading, def_tags, rules, score, glossary, glossary_offset, glossary_size, sequence, tags) VALUES ({dict_id}, {search_id}, {}, {}, {}, {}, {}, {glossary}, {offset}, {size}, {}, {})",
         s(&r.term),
         s(&r.reading),
         opt_s(r.def_tags.as_deref()),
         s(&r.rules),
         num(r.score),
-        s(&r.glossary),
         r.sequence,
         s(&r.tags),
-    );
-
-    Ok((upsert, insert))
+    )
 }
 
 fn sanitize(name: &str) -> String {

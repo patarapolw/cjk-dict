@@ -2,23 +2,35 @@
 
 use anyhow::{Result, bail};
 
-use crate::{import::assets_key, sql::s, wrangler::Wrangler};
+use crate::{
+    import::{assets_key, glossary_key},
+    sql::s,
+    wrangler::Wrangler,
+};
 
 pub fn remove(w: &Wrangler, name: &str, batch: i64, force: bool) -> Result<()> {
     let rows = w.query_rows(&format!(
-        "SELECT id, assets_key FROM dict WHERE name = {}",
+        "SELECT id, assets_key, glossary_key FROM dict WHERE name = {}",
         s(name)
     ))?;
 
     let Some(row) = rows.first() else {
         if force {
-            eprintln!("dict {name:?} not in D1; deleting R2 media pack only");
-            return w.r2_delete(&assets_key(name));
+            eprintln!("dict {name:?} not in D1; deleting R2 packs only");
+            for key in [assets_key(name), glossary_key(name)] {
+                if let Err(e) = w.r2_delete(&key) {
+                    eprintln!("warning: {key}: {e:#}");
+                }
+            }
+            return Ok(());
         }
-        bail!("dict {name:?} not found (use --force to delete the R2 media pack anyway)");
+        bail!("dict {name:?} not found (use --force to delete its R2 packs anyway)");
     };
     let dict_id = row["id"].as_i64().unwrap_or_default();
-    let key = row["assets_key"].as_str().map(String::from);
+    let keys: Vec<String> = ["assets_key", "glossary_key"]
+        .iter()
+        .filter_map(|c| row[*c].as_str().map(String::from))
+        .collect();
 
     // hide from search immediately
     w.query(&format!(
@@ -72,7 +84,7 @@ pub fn remove(w: &Wrangler, name: &str, batch: i64, force: bool) -> Result<()> {
 
     w.query(&format!("DELETE FROM dict WHERE id = {dict_id}"))?;
 
-    if let Some(key) = key {
+    for key in keys {
         eprintln!("deleting r2://{}/{key}", w.bucket);
         if let Err(e) = w.r2_delete(&key) {
             eprintln!("warning: R2 delete failed (rows already removed): {e:#}");
