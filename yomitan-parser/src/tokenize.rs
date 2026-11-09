@@ -231,7 +231,7 @@ impl TokenizerMapper {
             .cloned()
     }
 
-    pub(crate) async fn join_tokens(
+    pub async fn join_tokens(
         &self,
         text: &str,
         for_lang: Lang,
@@ -872,10 +872,7 @@ mod tests {
             m.tokenize(Lang::Ja, "2026-10").await.unwrap(),
             ["2026", "10"]
         );
-        assert_eq!(
-            m.tokenize(Lang::Ja, "２０２６").await.unwrap(),
-            ["2026"]
-        );
+        assert_eq!(m.tokenize(Lang::Ja, "２０２６").await.unwrap(), ["2026"]);
         assert!(m.tokenize(Lang::Ja, "。。").await.unwrap().is_empty());
     }
 

@@ -1,0 +1,3 @@
+[workspace]
+members = ["yomitan-parser", "dict-admin"]
+resolver = "3"

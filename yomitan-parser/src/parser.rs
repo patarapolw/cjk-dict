@@ -1,19 +1,20 @@
-use std::{collections::HashMap, path::PathBuf, time::Duration};
+//! Read a Yomitan dictionary zip in place (no extraction).
+//!
+//! - [`YomitanZip::index_json_str`] / [`YomitanZip::index`]: `index.json`
+//! - [`YomitanZip::banks`] + [`YomitanZip::read_bank`]: `*_bank_N.json` entries
+//! - [`YomitanZip::assets`]: every other file (images etc.) with the byte range of its
+//!   (possibly deflated) data inside the zip, so a server can serve it with an HTTP range read.
 
-use futures::future::join_all;
+use std::{collections::HashMap, fs::File, io::Read, path::Path};
+
 use serde::{Deserialize, Serialize};
-use sqlx::{
-    Pool, Sqlite, SqlitePool,
-    sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous},
-};
-use tokio::fs::{create_dir_all, read_dir, read_to_string, remove_file};
-use zip::ZipArchive;
+use zip::{CompressionMethod, ZipArchive};
 
 use crate::error::YomitanError;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(untagged)]
-enum StringOrNumber {
+pub enum StringOrNumber {
     String(String),
     Number(f64),
 }
@@ -63,7 +64,7 @@ pub struct YomitanIndex {
 /// TODO: @see https://github.com/yomidevs/yomitan/blob/master/ext/data/schemas/dictionary-kanji-bank-v1-schema.json
 /// @see https://github.com/yomidevs/yomitan/blob/master/ext/data/schemas/dictionary-kanji-bank-v3-schema.json
 #[derive(Deserialize)]
-struct KanjiBankV3Entry(
+pub(crate) struct KanjiBankV3Entry(
     String,            // Kanji character
     String, // String of space-separated onyomi readings for the kanji character. An empty string is treated as no readings.
     String, // String of space-separated kunyomi readings for the kanji character. An empty string is treated as no readings.
@@ -74,7 +75,7 @@ struct KanjiBankV3Entry(
 
 /// @see https://github.com/yomidevs/yomitan/blob/master/ext/data/schemas/dictionary-kanji-meta-bank-v3-schema.json
 #[derive(Deserialize)]
-struct KanjiMetaBankEntry(
+pub(crate) struct KanjiMetaBankEntry(
     String,
     String,         // Type of data. \"freq\" corresponds to frequency information.
     StringOrNumber, // Data for the character.
@@ -82,7 +83,7 @@ struct KanjiMetaBankEntry(
 
 /// @see https://github.com/yomidevs/yomitan/blob/master/ext/data/schemas/dictionary-tag-bank-v3-schema.json
 #[derive(Deserialize)]
-struct TagBankEntry(
+pub(crate) struct TagBankEntry(
     String, // tag name
     String, // category for the tag
     f64,    // sorting order for the tag
@@ -93,7 +94,7 @@ struct TagBankEntry(
 /// TODO: @see https://github.com/yomidevs/yomitan/blob/master/ext/data/schemas/dictionary-term-bank-v1-schema.json
 /// @see https://github.com/yomidevs/yomitan/blob/master/ext/data/schemas/dictionary-term-bank-v3-schema.json
 #[derive(Deserialize)]
-struct TermBankV3Entry(
+pub(crate) struct TermBankV3Entry(
     String,                 // The text for the term.
     String, // Reading of the term, or an empty string if the reading is the same as the term.
     Option<String>, // String of space-separated tags for the definition. An empty string is treated as no tags.
@@ -109,7 +110,7 @@ struct TermBankV3Entry(
 
 /// @see https://github.com/yomidevs/yomitan/blob/master/ext/data/schemas/dictionary-term-meta-bank-v3-schema.json
 #[derive(Deserialize)]
-struct TermMetaBankEntry(
+pub(crate) struct TermMetaBankEntry(
     String, // The text for the term.
     String, // Type of data. \"freq\" corresponds to frequency information; \"pitch\" corresponds to pitch information. \"ipa\" corresponds to IPA transcription.
     serde_json::Value, // Data for the term. One of:
@@ -118,6 +119,124 @@ struct TermMetaBankEntry(
             // - "ipa" => { reading: string, transcriptions: { ipa: string, tag?: string[] }[]}
 );
 
+#[derive(Debug, Clone)]
+pub struct TermEntry {
+    pub term: String,
+    pub reading: String,
+    pub def_tags: Option<String>,
+    pub rules: String,
+    pub score: f64,
+    /// JSON array of definitions
+    pub glossary: String,
+    pub sequence: i64,
+    pub tags: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct TermMetaEntry {
+    pub term: String,
+    pub r#type: String,
+    /// JSON
+    pub data: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct KanjiEntry {
+    pub kanji: String,
+    pub onyomi: String,
+    pub kunyomi: String,
+    pub tags: String,
+    /// JSON array of strings
+    pub meanings: String,
+    /// JSON object
+    pub stats: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct KanjiMetaEntry {
+    pub kanji: String,
+    pub r#type: String,
+    pub data: StringOrNumber,
+}
+
+#[derive(Debug, Clone)]
+pub struct TagEntry {
+    pub name: String,
+    pub category: String,
+    pub sort_order: f64,
+    pub notes: String,
+    pub score: f64,
+}
+
+#[derive(Debug, Clone)]
+pub enum BankEntries {
+    Term(Vec<TermEntry>),
+    TermMeta(Vec<TermMetaEntry>),
+    Kanji(Vec<KanjiEntry>),
+    KanjiMeta(Vec<KanjiMetaEntry>),
+    Tag(Vec<TagEntry>),
+}
+
+impl BankEntries {
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Term(v) => v.len(),
+            Self::TermMeta(v) => v.len(),
+            Self::Kanji(v) => v.len(),
+            Self::KanjiMeta(v) => v.len(),
+            Self::Tag(v) => v.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BankKind {
+    // order matters: tags first, terms last-ish
+    Tag,
+    Kanji,
+    KanjiMeta,
+    Term,
+    TermMeta,
+}
+
+impl BankKind {
+    pub fn from_name(bank_name: &str) -> Option<Self> {
+        match bank_name {
+            "tag_bank" => Some(Self::Tag),
+            "kanji_bank" => Some(Self::Kanji),
+            "kanji_meta_bank" => Some(Self::KanjiMeta),
+            "term_bank" => Some(Self::Term),
+            "term_meta_bank" => Some(Self::TermMeta),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct BankFile {
+    pub kind: BankKind,
+    pub index: u32,
+    /// file name inside the zip
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ZipAsset {
+    /// path inside the zip, as referenced by structured content `path`
+    pub path: String,
+    /// byte offset of the file data (after the local header) inside the zip
+    pub offset: u64,
+    pub compressed_size: u64,
+    pub size: u64,
+    /// 0 = stored, 8 = deflate
+    pub method: u16,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct YomitanImportProgress {
     pub bank: String,
@@ -125,274 +244,173 @@ pub struct YomitanImportProgress {
     pub total: usize,
 }
 
-pub struct YomitanParser {
-    root_dir: PathBuf,
+pub struct YomitanZip {
+    archive: ZipArchive<File>,
 }
 
-impl YomitanParser {
-    pub async fn from_zip(zip_file: PathBuf, out_dir: PathBuf) -> Result<Self, YomitanError> {
-        let root_dir = out_dir.clone();
-        create_dir_all(root_dir.clone()).await?;
-
-        tokio::task::spawn_blocking(move || unzip(zip_file, out_dir)).await??;
-
-        Ok(Self { root_dir })
+impl YomitanZip {
+    pub fn open(path: impl AsRef<Path>) -> Result<Self, YomitanError> {
+        let file = File::open(path)?;
+        Ok(Self {
+            archive: ZipArchive::new(file)?,
+        })
     }
 
-    pub fn from_dir(root_dir: PathBuf) -> Self {
-        Self { root_dir }
+    fn read_to_string(&mut self, name: &str) -> Result<String, YomitanError> {
+        let mut f = self.archive.by_name(name)?;
+        let mut s = String::new();
+        f.read_to_string(&mut s)?;
+        Ok(s)
     }
 
-    pub async fn create_db(
-        self,
-        progress_callback: impl Fn(YomitanImportProgress),
-    ) -> Result<(), YomitanError> {
-        let db_pathbuf = self.root_dir.join("content.db");
-        let db_path = db_pathbuf.as_path();
-        if db_path.exists() {
-            remove_file(&db_path).await?;
-        }
+    pub fn index_json_str(&mut self) -> Result<String, YomitanError> {
+        self.read_to_string("index.json")
+    }
 
-        let options = SqliteConnectOptions::new()
-            .filename(db_path)
-            .create_if_missing(true)
-            .journal_mode(SqliteJournalMode::Wal)
-            .synchronous(SqliteSynchronous::Normal)
-            .busy_timeout(Duration::from_secs(5))
-            .foreign_keys(false)
-            .pragma("cache_size", "-64000") // approximately 64 MiB
-            .pragma("temp_store", "MEMORY")
-            .pragma("mmap_size", "268435456") // 256 MiB
-            .optimize_on_close(true, None);
+    pub fn index(&mut self) -> Result<YomitanIndex, YomitanError> {
+        Ok(serde_json::from_str(&self.index_json_str()?)?)
+    }
 
-        let db = SqlitePool::connect_with(options).await?;
-
-        sqlx::migrate!("migrations/parser").run(&db).await?;
-
-        let mut json_files: HashMap<String, Vec<(u32, PathBuf)>> = HashMap::new();
-
-        let mut entries = read_dir(self.root_dir).await?;
-        while let Some(entry) = entries.next_entry().await? {
-            if !entry.file_type().await?.is_file() {
-                continue;
-            }
-
-            let path = entry.path();
-
-            if !path
-                .extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("json"))
-            {
-                continue;
-            }
-
-            if let Some(filestem) = path.file_stem().and_then(|s| s.to_str()) {
-                if let Some((bank_name, id_str)) = filestem.rsplit_once("_")
-                    && let Ok(idx) = id_str.parse::<u32>()
-                {
-                    match json_files.get_mut(bank_name) {
-                        Some(rs) => {
-                            rs.push((idx, path));
-                        }
-                        _ => {
-                            json_files.insert(bank_name.to_string(), vec![(idx, path)]);
-                        }
-                    };
+    /// `*_bank_N.json` files, sorted by kind then N
+    pub fn banks(&self) -> Vec<BankFile> {
+        let mut out: Vec<BankFile> = self
+            .archive
+            .file_names()
+            .filter_map(|name| {
+                let stem = name.strip_suffix(".json")?;
+                if stem.contains('/') {
+                    return None;
                 }
+                let (bank_name, idx) = stem.rsplit_once('_')?;
+                Some(BankFile {
+                    kind: BankKind::from_name(bank_name)?,
+                    index: idx.parse().ok()?,
+                    name: name.to_string(),
+                })
+            })
+            .collect();
+        out.sort_by_key(|b| (b.kind, b.index));
+        out
+    }
+
+    pub fn read_bank(&mut self, bank: &BankFile) -> Result<BankEntries, YomitanError> {
+        let json_str = self.read_to_string(&bank.name)?;
+
+        Ok(match bank.kind {
+            BankKind::Term => {
+                let rs: Vec<TermBankV3Entry> = serde_json::from_str(&json_str)?;
+                let mut out = Vec::with_capacity(rs.len());
+                for r in rs {
+                    out.push(TermEntry {
+                        glossary: serde_json::to_string(&r.5)?,
+                        term: r.0,
+                        reading: r.1,
+                        def_tags: r.2,
+                        rules: r.3,
+                        score: r.4,
+                        sequence: r.6,
+                        tags: r.7,
+                    });
+                }
+                BankEntries::Term(out)
             }
-        }
-
-        let mut parsed_files: Vec<&PathBuf> = vec![];
-
-        for (bank_name, rs) in json_files.iter_mut() {
-            rs.sort_by_key(|r| r.0);
-
-            let total = rs.len();
-            let mut current = 0;
-
-            for (_, path) in rs {
-                progress_callback(YomitanImportProgress {
-                    bank: bank_name.to_string(),
-                    current,
-                    total,
-                });
-                current += 1;
-
-                let json_str = tokio::fs::read_to_string(&path).await?;
-
-                match bank_name.as_str() {
-                    "kanji_bank" => {
-                        parsed_files.push(path);
-                        let rs: Vec<KanjiBankV3Entry> = serde_json::from_str(&json_str)?;
-
-                        let mut tx = db.begin().await?;
-                        for r in rs {
-                            let r4s = serde_json::to_string(&r.4)?;
-                            let r5s = serde_json::to_string(&r.5)?;
-
-                            sqlx::query("
-                                    INSERT INTO kanji (kanji, onyomi, kunyomi, tags, meanings, stats)
-                                    VALUES (?, ?, ?, ?, ?, ?)
-                                ")
-                                    .bind(r.0)
-                                    .bind(r.1)
-                                    .bind(r.2)
-                                    .bind(r.3)
-                                    .bind(r4s)
-                                    .bind(r5s)
-                                    .execute(&mut *tx)
-                                    .await?;
-                        }
-                        tx.commit().await?;
-                    }
-                    "kanji_meta_bank" => {
-                        parsed_files.push(path);
-                        let rs: Vec<KanjiMetaBankEntry> = serde_json::from_str(&json_str)?;
-
-                        let mut tx = db.begin().await?;
-                        for r in rs {
-                            let mut q = sqlx::query(
-                                "
-                                    INSERT INTO kanji_meta (kanji, `type`, `data`)
-                                    VALUES (?, ?, ?)
-                                ",
-                            )
-                            .bind(r.0)
-                            .bind(r.1);
-
-                            match r.2 {
-                                StringOrNumber::Number(i) => q = q.bind(i),
-                                StringOrNumber::String(s) => q = q.bind(s),
-                            }
-
-                            q.execute(&mut *tx).await?;
-                        }
-                        tx.commit().await?;
-                    }
-                    "tag_bank" => {
-                        parsed_files.push(path);
-                        let rs: Vec<TagBankEntry> = serde_json::from_str(&json_str)?;
-
-                        let mut tx = db.begin().await?;
-                        for r in rs {
-                            sqlx::query(
-                                "
-                                    INSERT INTO tag (name, category, sort_order, notes, score)
-                                    VALUES (?, ?, ?, ?, ?)
-                                ",
-                            )
-                            .bind(r.0)
-                            .bind(r.1)
-                            .bind(r.2)
-                            .bind(r.3)
-                            .bind(r.4)
-                            .execute(&mut *tx)
-                            .await?;
-                        }
-                        tx.commit().await?;
-                    }
-                    "term_bank" => {
-                        parsed_files.push(path);
-                        let rs: Vec<TermBankV3Entry> = serde_json::from_str(&json_str)?;
-
-                        let mut tx = db.begin().await?;
-                        for r in rs {
-                            let r5s = serde_json::to_string(&r.5)?;
-
-                            sqlx::query(
-                                    "
-                                    INSERT INTO term (term, reading, def_tags, rules, score, glossary, sequence, tags)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                                ",
-                                )
-                                .bind(r.0)
-                                .bind(r.1)
-                                .bind(r.2)
-                                .bind(r.3)
-                                .bind(r.4)
-                                .bind(r5s)
-                                .bind(r.6)
-                                .bind(r.7)
-                                .execute(&mut *tx)
-                                .await?;
-                        }
-                        tx.commit().await?;
-                    }
-                    "term_meta_bank" => {
-                        parsed_files.push(path);
-                        let rs: Vec<TermMetaBankEntry> = serde_json::from_str(&json_str)?;
-
-                        let mut tx = db.begin().await?;
-                        for r in rs {
-                            let r2s = serde_json::to_string(&r.2)?;
-
-                            sqlx::query(
-                                "
-                                    INSERT INTO term_meta (term, type, `data`)
-                                    VALUES (?, ?, ?)
-                                ",
-                            )
-                            .bind(r.0)
-                            .bind(r.1)
-                            .bind(r2s)
-                            .execute(&mut *tx)
-                            .await?;
-                        }
-                        tx.commit().await?;
-                    }
-                    _ => (),
-                };
+            BankKind::TermMeta => {
+                let rs: Vec<TermMetaBankEntry> = serde_json::from_str(&json_str)?;
+                let mut out = Vec::with_capacity(rs.len());
+                for r in rs {
+                    out.push(TermMetaEntry {
+                        data: serde_json::to_string(&r.2)?,
+                        term: r.0,
+                        r#type: r.1,
+                    });
+                }
+                BankEntries::TermMeta(out)
             }
+            BankKind::Kanji => {
+                let rs: Vec<KanjiBankV3Entry> = serde_json::from_str(&json_str)?;
+                let mut out = Vec::with_capacity(rs.len());
+                for r in rs {
+                    out.push(KanjiEntry {
+                        meanings: serde_json::to_string(&r.4)?,
+                        stats: serde_json::to_string(&r.5)?,
+                        kanji: r.0,
+                        onyomi: r.1,
+                        kunyomi: r.2,
+                        tags: r.3,
+                    });
+                }
+                BankEntries::Kanji(out)
+            }
+            BankKind::KanjiMeta => {
+                let rs: Vec<KanjiMetaBankEntry> = serde_json::from_str(&json_str)?;
+                BankEntries::KanjiMeta(
+                    rs.into_iter()
+                        .map(|r| KanjiMetaEntry {
+                            kanji: r.0,
+                            r#type: r.1,
+                            data: r.2,
+                        })
+                        .collect(),
+                )
+            }
+            BankKind::Tag => {
+                let rs: Vec<TagBankEntry> = serde_json::from_str(&json_str)?;
+                BankEntries::Tag(
+                    rs.into_iter()
+                        .map(|r| TagEntry {
+                            name: r.0,
+                            category: r.1,
+                            sort_order: r.2,
+                            notes: r.3,
+                            score: r.4,
+                        })
+                        .collect(),
+                )
+            }
+        })
+    }
+
+    /// Count entries per bank kind (reads every bank once).
+    pub fn count(&mut self) -> Result<HashMap<BankKind, usize>, YomitanError> {
+        let mut out = HashMap::new();
+        for b in self.banks() {
+            let n = self.read_bank(&b)?.len();
+            *out.entry(b.kind).or_insert(0) += n;
         }
+        Ok(out)
+    }
 
-        let rows = sqlx::query("PRAGMA foreign_key_check")
-            .fetch_all(&db)
-            .await?;
-        if rows.is_empty() {
-            db.close().await;
-            join_all(parsed_files.iter().map(|f| remove_file(f))).await;
+    /// Every non-directory file that is neither `index.json` nor a bank file.
+    pub fn assets(&mut self) -> Result<Vec<ZipAsset>, YomitanError> {
+        let bank_names: std::collections::HashSet<String> =
+            self.banks().into_iter().map(|b| b.name).collect();
 
-            Ok(())
-        } else {
-            let e = format!("import left {} FK violations", rows.len());
-            db.close().await;
-
-            Err(YomitanError::Error(e))
+        let mut out = vec![];
+        for i in 0..self.archive.len() {
+            let f = self.archive.by_index_raw(i)?;
+            let name = f.name().to_string();
+            if f.is_dir() || name == "index.json" || bank_names.contains(&name) {
+                continue;
+            }
+            if f.encrypted() {
+                continue;
+            }
+            let method: u16 = match f.compression() {
+                CompressionMethod::Stored => 0,
+                CompressionMethod::Deflated => 8,
+                _ => continue, // not servable without a custom decoder
+            };
+            let offset = f
+                .data_start()
+                .ok_or_else(|| YomitanError::Error(format!("no data offset for {name}")))?;
+            out.push(ZipAsset {
+                path: name,
+                offset,
+                compressed_size: f.compressed_size(),
+                size: f.size(),
+                method,
+            });
         }
-    }
-}
-
-fn unzip(path: PathBuf, out_dir: PathBuf) -> zip::result::ZipResult<()> {
-    let file = std::fs::File::open(path)?;
-    let mut archive = ZipArchive::new(file)?;
-    archive.extract(out_dir)?;
-    Ok(())
-}
-
-#[derive(Clone)]
-pub struct YomitanReader {
-    pub root_dir: PathBuf,
-    pub db: Pool<Sqlite>,
-}
-
-impl YomitanReader {
-    pub fn open(root_dir: PathBuf) -> Self {
-        let options = SqliteConnectOptions::new()
-            .filename(root_dir.join("content.db"))
-            .foreign_keys(true);
-
-        // connect with lazy doesn't need to await,
-        // but it's prob a large db file taking load time, anyway.
-        let db = SqlitePool::connect_lazy_with(options);
-
-        Self { root_dir, db }
-    }
-
-    pub async fn get_index_json_str(self) -> Result<String, YomitanError> {
-        Ok(read_to_string(self.root_dir.join("index.json")).await?)
-    }
-
-    pub async fn get_index_json(self) -> Result<YomitanIndex, YomitanError> {
-        Ok(serde_json::from_str(&self.get_index_json_str().await?)?)
+        Ok(out)
     }
 }

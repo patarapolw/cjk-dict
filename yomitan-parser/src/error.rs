@@ -1,15 +1,14 @@
 use std::{error::Error, fmt, path::StripPrefixError, sync::PoisonError};
 
 use lindera::error::LinderaError;
-use sqlx::migrate::MigrateError;
+#[cfg(feature = "zip")]
 use zip::result::ZipError;
 
 #[derive(Debug)]
 pub enum YomitanError {
-    SqlxError(sqlx::Error),
-    SqlxMigrateError(MigrateError),
     TokioJoinError(tokio::task::JoinError),
     IOError(std::io::Error),
+    #[cfg(feature = "zip")]
     ZipError(ZipError),
     JSONError(serde_json::Error),
     LinderaError(LinderaError),
@@ -22,10 +21,9 @@ pub enum YomitanError {
 impl fmt::Display for YomitanError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::SqlxError(e) => write!(f, "sqlx::Error: {e}"),
-            Self::SqlxMigrateError(e) => write!(f, "sqlx::migrate::MigrateError: {e}"),
             Self::TokioJoinError(e) => write!(f, "tokio::task::JoinError: {e}"),
             Self::IOError(e) => write!(f, "std::io::Error: {e}"),
+            #[cfg(feature = "zip")]
             Self::ZipError(e) => write!(f, "ZipError: {e}"),
             Self::JSONError(e) => write!(f, "serde_json::Error: {e}"),
             Self::LinderaError(e) => write!(f, "LinderaError: {e}"),
@@ -39,18 +37,6 @@ impl fmt::Display for YomitanError {
 
 impl Error for YomitanError {}
 
-impl From<sqlx::Error> for YomitanError {
-    fn from(e: sqlx::Error) -> Self {
-        Self::SqlxError(e)
-    }
-}
-
-impl From<MigrateError> for YomitanError {
-    fn from(e: MigrateError) -> Self {
-        Self::SqlxMigrateError(e)
-    }
-}
-
 impl From<tokio::task::JoinError> for YomitanError {
     fn from(e: tokio::task::JoinError) -> Self {
         Self::TokioJoinError(e)
@@ -63,6 +49,7 @@ impl From<std::io::Error> for YomitanError {
     }
 }
 
+#[cfg(feature = "zip")]
 impl From<zip::result::ZipError> for YomitanError {
     fn from(e: zip::result::ZipError) -> Self {
         Self::ZipError(e)

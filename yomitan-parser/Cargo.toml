@@ -1,16 +1,19 @@
 [package]
 name = "yomitan-parser"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
+description = "Yomitan dictionary reader, CJK tokenizer and pinyin helpers"
+
+[features]
+default = []
+# reading Yomitan dictionary zips (used by dict-admin; not needed by search clients)
+zip = ["dep:zip"]
 
 [dependencies]
-futures = "0.3.34"
-itertools = "0.15.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sqlx = { version = "0.8.6", features = ["sqlite", "runtime-tokio"] }
 tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
-zip = "8.6.0"
+zip = { version = "8.6.0", optional = true }
 lindera = "6.2.0"
 lindera-analysis = "6.2.0"
 unicode-normalization = "0.1"

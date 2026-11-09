@@ -37,3 +37,20 @@ impl OptionNonEmpty for Option<String> {
         self.filter(|s| !s.is_empty())
     }
 }
+
+use std::borrow::Cow;
+
+use unicode_normalization::{IsNormalized, UnicodeNormalization, is_nfkc_quick};
+
+fn nfkc(text: &str) -> Cow<'_, str> {
+    if is_nfkc_quick(text.chars()) == IsNormalized::Yes {
+        Cow::Borrowed(text)
+    } else {
+        Cow::Owned(text.nfkc().collect())
+    }
+}
+
+/// NFKC + uppercase; the canonical form stored in `term_search.term` / `reading`.
+pub fn normalize_text(text: &str) -> String {
+    nfkc(text).to_uppercase()
+}
