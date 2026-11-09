@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
-import { fetch } from "@tauri-apps/plugin-http";
+import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 
-import { settingsState } from "../util/settings";
+import { lang as langSetting } from "../util/settings";
 
 /**
  * Dictionary search is served by the cjk-dict worker (Cloudflare D1 + R2).
@@ -10,6 +10,22 @@ import { settingsState } from "../util/settings";
  *
  * @see https://github.com/patarapolw/cjk-dict
  */
+
+/**
+ * dev: "/api", proxied by Vite to `wrangler dev` (see vite.config.ts).
+ * production: VITE_DICT_API_URL (required at build time).
+ */
+const API_BASE = (
+  import.meta.env.DEV ? "/api" : import.meta.env.VITE_DICT_API_URL || ""
+).replace(/\/+$/, "");
+
+/**
+ * Same-origin "/api" goes through the webview (and the Vite proxy); an absolute URL goes
+ * through Tauri's HTTP plugin, which isn't subject to the webview's CSP/CORS.
+ */
+const apiFetch: typeof fetch = API_BASE.startsWith("/")
+  ? (input, init) => window.fetch(input, init)
+  : tauriFetch;
 
 interface SearchOpts {
   term: string;
@@ -58,18 +74,8 @@ type SearchResult = {
 const ALL_LANGS = ["ja-JP", "zh-CN", "ko-KR"];
 
 class SearchDatabase {
-  get baseURL() {
-    const url = settingsState.computed.dictApiURL.value;
-    if (!url) {
-      throw new Error(
-        "Dictionary server URL is not set (Settings → Dictionary)",
-      );
-    }
-    return url.replace(/\/+$/, "");
-  }
-
   private async request<T>(path: string, init?: RequestInit): Promise<T> {
-    const r = await fetch(this.baseURL + path, init);
+    const r = await apiFetch(API_BASE + path, init);
     if (!r.ok) {
       throw new Error(
         `${init?.method || "GET"} ${path}: ${r.status} ${await r.text()}`,
@@ -85,7 +91,7 @@ class SearchDatabase {
   async search(opts: SearchOpts): Promise<SearchResult> {
     const start = new Date();
     try {
-      const lang = settingsState.computed.lang.value;
+      const lang = langSetting.value;
 
       let type = opts.type;
       let tokens: Record<string, string> | undefined;
@@ -125,7 +131,7 @@ class SearchDatabase {
 
   /** URL of a media file (structured-content images), for a plain `<img src>`. */
   assetSrc(dict: string, path: string): string {
-    return `${this.baseURL}/dicts/${encodeURIComponent(dict)}/assets/${path
+    return `${API_BASE}/dicts/${encodeURIComponent(dict)}/assets/${path
       .split("/")
       .map(encodeURIComponent)
       .join("/")}`;

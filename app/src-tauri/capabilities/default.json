@@ -9,10 +9,7 @@
     "clipboard-manager:allow-read-text",
     {
       "identifier": "http:default",
-      "allow": [
-        { "url": "https://*.workers.dev/*" },
-        { "url": "http://localhost:8787/*" }
-      ]
+      "allow": [{ "url": "https://*.workers.dev/*" }]
     },
     "fs:default"
   ]

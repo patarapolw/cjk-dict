@@ -1,36 +1,14 @@
 <template>
   <div class="layout">
     <header class="header">
-      <RouterLink to="/dictionary" custom v-slot="{ isActive, navigate }">
-        <Button
-          :severity="isActive ? undefined : 'secondary'"
-          text
-          size="small"
-          aria-label="Dictionary"
-          @click="navigate"
-        >
-          <SearchIcon />
-        </Button>
-      </RouterLink>
-      <span class="header-title">{{ $route.name }}</span>
+      <span class="header-title">CJK Dictionary</span>
       <Select
-        v-model="settingsState.state.lang"
+        v-model="lang"
         :options="langSelectOptions"
         option-label="label"
         option-value="value"
         size="small"
       />
-      <RouterLink to="/settings" custom v-slot="{ isActive, navigate }">
-        <Button
-          :severity="isActive ? undefined : 'secondary'"
-          text
-          size="small"
-          aria-label="Settings"
-          @click="navigate"
-        >
-          <CogIcon />
-        </Button>
-      </RouterLink>
     </header>
     <RouterView />
   </div>
@@ -80,12 +58,9 @@ import { nextTick, onMounted, ref, useTemplateRef, watch } from "vue";
 import Button from "primevue/button";
 import Select from "primevue/select";
 
-import CogIcon from "@primeicons/vue/cog";
-import SearchIcon from "@primeicons/vue/search";
-
 import Downloading from "./components/Downloading.vue";
 import { loadErrors, toBeLoaded } from "./util/loading.ts";
-import { settingsState } from "./util/settings.ts";
+import { lang } from "./util/settings.ts";
 import { makeLinderaDownloadList } from "./util/tokenize";
 
 // array of refs, or undefined

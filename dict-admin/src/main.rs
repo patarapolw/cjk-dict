@@ -1,6 +1,7 @@
 //! Admin CLI for the cjk-dict Worker. This is the only way dictionaries are added to or
 //! removed from D1 / R2; the Worker itself is read-only.
 
+mod defaults;
 mod download;
 mod import;
 mod lindera;
@@ -68,6 +69,30 @@ struct Target {
     wrangler: String,
 }
 
+/// Options shared by `add` and `defaults`
+#[derive(Args, Clone)]
+struct ImportArgs {
+    /// Don't upload packs to R2 (they are already there)
+    #[arg(long)]
+    no_upload: bool,
+
+    /// Lindera tokenizer dictionaries (downloaded if missing)
+    #[arg(long, env = "CJK_DICT_LINDERA_DIR", default_value = "tmp/lindera")]
+    lindera_dir: PathBuf,
+
+    /// Where downloaded zips and generated SQL go
+    #[arg(long, default_value = "tmp")]
+    work_dir: PathBuf,
+
+    /// Keep generated SQL files
+    #[arg(long)]
+    keep_sql: bool,
+
+    /// Statements per `wrangler d1 execute --file` call
+    #[arg(long, default_value_t = 50_000)]
+    chunk_size: usize,
+}
+
 #[derive(Subcommand)]
 enum Cmd {
     /// Apply D1 migrations (worker/migrations)
@@ -92,25 +117,26 @@ enum Cmd {
         #[arg(long)]
         replace: bool,
 
-        /// Don't upload the media pack to R2 (it is already there)
+        #[command(flatten)]
+        import: ImportArgs,
+    },
+
+    /// Import the default dictionaries (latest releases); already imported ones are skipped
+    Defaults {
+        /// Only these dictionaries (repeatable); see --list for names
         #[arg(long)]
-        no_upload: bool,
+        only: Vec<String>,
 
-        /// Lindera tokenizer dictionaries (downloaded if missing)
-        #[arg(long, env = "CJK_DICT_LINDERA_DIR", default_value = "tmp/lindera")]
-        lindera_dir: PathBuf,
-
-        /// Where downloaded zips and generated SQL go
-        #[arg(long, default_value = "tmp")]
-        work_dir: PathBuf,
-
-        /// Keep generated SQL files
+        /// Re-import dictionaries that already exist (e.g. to update to the latest release)
         #[arg(long)]
-        keep_sql: bool,
+        replace: bool,
 
-        /// Statements per `wrangler d1 execute --file` call
-        #[arg(long, default_value_t = 50_000)]
-        chunk_size: usize,
+        /// Print the default dictionaries and their download URLs, then exit
+        #[arg(long)]
+        list: bool,
+
+        #[command(flatten)]
+        import: ImportArgs,
     },
 
     /// Remove a dictionary from D1 and R2
@@ -157,11 +183,7 @@ async fn main() -> Result<()> {
             name,
             lang,
             replace,
-            no_upload,
-            lindera_dir,
-            work_dir,
-            keep_sql,
-            chunk_size,
+            import,
         } => {
             let lang = match lang {
                 Some(l) => Some(
@@ -169,70 +191,132 @@ async fn main() -> Result<()> {
                 ),
                 None => None,
             };
-
-            let source_label = if source.starts_with("http://") || source.starts_with("https://") {
-                source.clone()
-            } else {
-                PathBuf::from(&source)
-                    .file_name()
-                    .map(|s| s.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| source.clone())
-            };
-
-            let zip = if source.starts_with("http://") || source.starts_with("https://") {
-                let filename = source
-                    .rsplit('/')
-                    .next()
-                    .and_then(|s| s.split('?').next())
-                    .filter(|s| !s.is_empty())
-                    .unwrap_or("dict.zip");
-                let dir = work_dir.join("downloads");
-                std::fs::create_dir_all(&dir)?;
-                let path = dir.join(filename);
-                if !path.exists() {
-                    eprintln!("downloading {source}");
-                    download::to_file(&source, &path)?;
+            add_source(&w, &source, name, lang, replace, &import).await?;
+        }
+        Cmd::Defaults {
+            only,
+            replace,
+            list,
+            import,
+        } => {
+            let resolved = defaults::resolve(&only)?;
+            if list {
+                for d in &resolved {
+                    println!("{}\t{}\t{}", d.name, d.lang.unwrap_or("-"), d.url);
                 }
-                path
-            } else {
-                PathBuf::from(&source)
-            };
-
-            let name = match name {
-                Some(n) => n,
-                None => zip
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .context("cannot derive --name from source")?
-                    .to_string(),
-            };
-
-            if replace {
-                match remove::remove(&w, &name, 20_000, false) {
-                    Ok(()) => {}
-                    Err(e) if e.to_string().contains("not found") => {}
-                    Err(e) => return Err(e),
-                }
+                return Ok(());
             }
 
-            import::add(
-                &w,
-                import::AddOpts {
-                    zip,
-                    source: source_label,
-                    name,
-                    lang,
-                    lindera_dir,
-                    sql_dir: work_dir.join("sql"),
-                    keep_sql,
-                    chunk_size,
-                    upload: !no_upload,
-                },
-            )
-            .await?;
+            let existing: std::collections::HashMap<String, String> = w
+                .query_rows("SELECT name, status FROM dict")?
+                .into_iter()
+                .filter_map(|r| {
+                    Some((
+                        r["name"].as_str()?.to_string(),
+                        r["status"].as_str().unwrap_or("").to_string(),
+                    ))
+                })
+                .collect();
+
+            let mut failed = vec![];
+            for d in resolved {
+                if let Some(status) = existing.get(d.name) {
+                    if !replace {
+                        eprintln!(
+                            "skip {}: already imported (status {status}); --replace to re-import",
+                            d.name
+                        );
+                        continue;
+                    }
+                }
+                eprintln!("== {} ({})", d.name, d.url);
+                let lang = d.lang.and_then(import::parse_lang);
+                if let Err(e) =
+                    add_source(&w, &d.url, Some(d.name.to_string()), lang, replace, &import).await
+                {
+                    eprintln!("error: {}: {e:#}", d.name);
+                    failed.push(d.name);
+                }
+            }
+            if !failed.is_empty() {
+                bail!("failed: {}", failed.join(", "));
+            }
         }
         Cmd::Remove { name, batch, force } => remove::remove(&w, &name, batch, force)?,
     }
 
     Ok(())
+}
+
+/// Download (if a URL), optionally remove the existing dict, and import.
+async fn add_source(
+    w: &Wrangler,
+    source: &str,
+    name: Option<String>,
+    lang: Option<yomitan_parser::tokenize::Lang>,
+    replace: bool,
+    opts: &ImportArgs,
+) -> Result<()> {
+    let is_url = source.starts_with("http://") || source.starts_with("https://");
+
+    let source_label = if is_url {
+        source.to_string()
+    } else {
+        PathBuf::from(source)
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| source.to_string())
+    };
+
+    let zip = if is_url {
+        let filename = source
+            .rsplit('/')
+            .next()
+            .and_then(|s| s.split('?').next())
+            .filter(|s| !s.is_empty())
+            .unwrap_or("dict.zip");
+        let dir = opts.work_dir.join("downloads");
+        std::fs::create_dir_all(&dir)?;
+        let path = dir.join(filename);
+        if !path.exists() {
+            eprintln!("downloading {source}");
+            download::to_file(source, &path)?;
+        }
+        path
+    } else {
+        PathBuf::from(source)
+    };
+
+    let name = match name {
+        Some(n) => n,
+        None => zip
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .context("cannot derive --name from source")?
+            .to_string(),
+    };
+
+    if replace {
+        match remove::remove(w, &name, 20_000, false) {
+            Ok(()) => {}
+            Err(e) if e.to_string().contains("not found") => {}
+            Err(e) => return Err(e),
+        }
+    }
+
+    import::add(
+        w,
+        import::AddOpts {
+            zip,
+            source: source_label,
+            name,
+            lang,
+            lindera_dir: opts.lindera_dir.clone(),
+            sql_dir: opts.work_dir.join("sql"),
+            keep_sql: opts.keep_sql,
+            chunk_size: opts.chunk_size,
+            upload: !opts.no_upload,
+        },
+    )
+    .await
 }

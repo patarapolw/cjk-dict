@@ -43,12 +43,12 @@
         fluid
       />
       <nav>
-        <label v-if="settingsState.computed.lang.value !== 'ko-KR'">
+        <label v-if="lang !== 'ko-KR'">
           <input type="checkbox" name="reading" v-model="searchReading" />
           <span>Search reading</span>
         </label>
 
-        <label v-if="['', 'ja-JP'].includes(settingsState.computed.lang.value)">
+        <label v-if="['', 'ja-JP'].includes(lang)">
           <input type="checkbox" name="autokana" v-model="autoKana" />
           <span>Auto-convert to Kana</span>
         </label>
@@ -113,7 +113,7 @@ import { useRoute, useRouter } from "vue-router";
 import Term from "../components/yomitan/Term.vue";
 import { ISearchTerm, ITerm, searchDB } from "../db/search";
 import { toBeLoaded } from "../util/loading";
-import { settingsState } from "../util/settings";
+import { lang } from "../util/settings";
 
 const q = ref("");
 const reading = ref("");
@@ -129,7 +129,7 @@ const qStateOptions = computed(() => [
 const qState = ref<string | null>(null);
 
 const searchReading = ref(false);
-const autoKana = ref(settingsState.computed.lang.value === "ja-JP");
+const autoKana = ref(lang.value === "ja-JP");
 
 const loading = ref(false);
 const nextOffset = ref<number | null>(0);
@@ -170,7 +170,7 @@ function loadFromRouteQuery() {
   qState.value = String(route.query.qState || "") || null;
 }
 
-watch([q, qState, reading, settingsState.computed.lang], async () => {
+watch([q, qState, reading, lang], async () => {
   const id = ++requestId;
   await activeRequest;
   if (id !== requestId) return;
@@ -179,8 +179,8 @@ watch([q, qState, reading, settingsState.computed.lang], async () => {
   loadMore(true);
 });
 
-watch(settingsState.computed.lang, (lang) => {
-  if (lang === "ko-KR") {
+watch(lang, (value) => {
+  if (value === "ko-KR") {
     reading.value = "";
     searchReading.value = false;
   }
@@ -195,10 +195,7 @@ async function onTermInput({ target }: InputEvent) {
   isWanakanaFinished = false;
   try {
     await nextTick();
-    if (
-      autoKana.value &&
-      ["", "ja-JP"].includes(settingsState.computed.lang.value)
-    ) {
+    if (autoKana.value && ["", "ja-JP"].includes(lang.value)) {
       const conv = (s: string) =>
         toKana(s, { useObsoleteKana: true, IMEMode: true });
 

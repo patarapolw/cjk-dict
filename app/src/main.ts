@@ -8,9 +8,6 @@ import Aura from "@primeuix/themes/aura";
 
 import App from "./App.vue";
 import { router } from "./router.ts";
-import { settingsState } from "./util/settings.ts";
-
-settingsState.load();
 
 createApp(App)
   .use(PrimeVue, {

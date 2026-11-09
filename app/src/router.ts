@@ -7,11 +7,6 @@ const routes = [
     component: () => import("./views/DictionaryView.vue"),
     name: "Dictionary",
   },
-  {
-    path: "/settings",
-    component: () => import("./views/SettingsView.vue"),
-    name: "Settings",
-  },
 ];
 
 export const router = createRouter({

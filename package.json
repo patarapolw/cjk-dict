@@ -5,6 +5,11 @@
     "app": "pnpm --filter cjk-dict-app",
     "worker": "pnpm --filter cjk-dict-worker",
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm -r test"
+    "test": "pnpm -r test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "prettier": "3.6.2"
   }
 }

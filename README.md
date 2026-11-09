@@ -16,7 +16,7 @@ worker/           Cloudflare Worker (TypeScript) + D1 migrations
 app/              Tauri app (Vue 3 + PrimeVue); app/src-tauri is its own Cargo workspace
 ```
 
-`app/` and `worker/` form a pnpm workspace: run `pnpm install` once at the repo root (one `pnpm-lock.yaml`). From the root, `pnpm app <script>` and `pnpm worker <script>` run a package's scripts, and `pnpm typecheck` / `pnpm test` run them in both.
+`app/` and `worker/` form a pnpm workspace: run `pnpm install` once at the repo root (one `pnpm-lock.yaml`). From the root, `pnpm app <script>` and `pnpm worker <script>` run a package's scripts, and `pnpm typecheck` / `pnpm test` run them in both. `pnpm format` runs Prettier (a root devDependency, also used by VS Code's format on save).
 
 The app tokenizes "~" search queries with `yomitan-parser` (path dependency, without the `zip` feature), the same code `dict-admin` uses at import.
 
@@ -45,7 +45,14 @@ $A add path/to/JMdict.zip --lang ja-JP
 $A add https://github.com/MarvNC/cc-cedict-yomitan/releases/latest/download/CC-CEDICT.zip --lang zh-CN
 $A add new/JMdict.zip --name JMdict --replace     # update to a new revision
 $A remove JMdict
+
+$A defaults --list                 # default dictionaries and their latest download URLs
+$A defaults                        # import all that aren't imported yet
+$A defaults --only CC-CEDICT --only wty-zh-en
+$A defaults --only CC-CEDICT --replace           # update to the latest release
 ```
+
+The defaults (the list the app used to download itself) are Pixiv, `ja`/`zh`/`ko.Wikipedia` (MarvNC), CC-CEDICT, KO-EN.KRDICT, and `wty-ja-en`/`wty-ko-en`/`wty-zh-en` (Wiktionary). GitHub-hosted ones resolve to the asset of the repo's latest release. Set `GITHUB_TOKEN` if you hit the API's unauthenticated rate limit. The Wikipedia dictionaries are large; mind the D1 size limit below.
 
 `add`:
 
@@ -70,22 +77,22 @@ Limits to keep in mind:
 
 ## API
 
-| Method | Path | |
-| --- | --- | --- |
-| `GET` | `/dicts` | ready dictionaries |
-| `POST` | `/search` | see below |
-| `GET` | `/dicts/:name/assets/<path>` | a media file; usable directly as `<img src>` |
+| Method | Path                         |                                              |
+| ------ | ---------------------------- | -------------------------------------------- |
+| `GET`  | `/dicts`                     | ready dictionaries                           |
+| `POST` | `/search`                    | see below                                    |
+| `GET`  | `/dicts/:name/assets/<path>` | a media file; usable directly as `<img src>` |
 
 ```jsonc
 // POST /search
 {
-  "type": null,          // null: prefix search on term | "exact" | "fts" (token search)
-  "lang": "ja-JP",       // optional; restricts to terms tokenizable in that language
-  "term": "日本",        // prefix / exact modes
+  "type": null, // null: prefix search on term | "exact" | "fts" (token search)
+  "lang": "ja-JP", // optional; restricts to terms tokenizable in that language
+  "term": "日本", // prefix / exact modes
   "tokens": { "ja": "日本" }, // fts mode: client-side tokenized term per language
-  "reading": "pinyin",   // optional; with lang zh-CN or empty, pinyin is expanded to every tone combination
-  "limit": 10,           // max 50
-  "offset": 0
+  "reading": "pinyin", // optional; with lang zh-CN or empty, pinyin is expanded to every tone combination
+  "limit": 10, // max 50
+  "offset": 0,
 }
 // -> { "items": [{ ...term_search, "entries": [{ dict_id, dict_path, term_id, term, reading, glossary, ... }] }], "next": 10 | null }
 ```
@@ -96,16 +103,22 @@ Pinyin expansion lives in `worker/src/pinyin.ts`, a port of `yomitan-parser/src/
 
 ```bash
 cd app                                    # after `pnpm install` at the root
-pnpm start                                # tauri dev (desktop)
-pnpm tauri build                          # release bundle
+pnpm start                                # tauri dev (desktop), against `wrangler dev`
+pnpm tauri build                          # release bundle; needs VITE_DICT_API_URL
 pnpm tauri android init && pnpm android   # first time on Android
 ```
 
-Set the Worker URL under **Settings**, or at build time with `VITE_DICT_API_URL` (e.g. in `app/.env`). PrimeVue shows an "Invalid PrimeUI License" badge unless `VITE_PRIMEUI_LICENSE_KEY` is set too (same as cjk-explainer).
+Which Worker the app talks to:
+
+- **Development** (`pnpm start`, `pnpm android`): the app calls same-origin `/api/*`, and Vite proxies it to `wrangler dev` on `http://localhost:8787`. Start it with `pnpm worker wrangler dev`. Set `WRANGLER_DEV_URL` to proxy somewhere else, e.g. a deployed worker.
+- **Production builds**: `VITE_DICT_API_URL`, e.g. in `app/.env.production`. The build fails if it is not set. There is no in-app setting.
+
+PrimeVue shows an "Invalid PrimeUI License" badge unless `VITE_PRIMEUI_LICENSE_KEY` is set too (same as cjk-explainer).
 
 - The CSP allows inline styles (`style-src 'unsafe-inline'`), which PrimeVue's runtime theme needs.
-- The HTTP capability (`app/src-tauri/capabilities/default.json`) and the CSP `img-src` (`app/src-tauri/tauri.conf.json`) allow `https://*.workers.dev` and `http://localhost:8787` (`wrangler dev`). For a custom domain, add it to both.
+- The HTTP capability (`app/src-tauri/capabilities/default.json`) and the CSP `img-src` (`app/src-tauri/tauri.conf.json`) allow `https://*.workers.dev`. For a custom domain, add it to both. Development needs neither, since it is same-origin through the proxy.
 - Search modes: prefix (default), `=` exact, and `~` token search. `~` needs the tokenizer; until it has downloaded, `~` is disabled and falls back to prefix search.
+- The search language (header) is the only setting; it is remembered per device.
 - Optional: search by reading (pinyin is expanded to all tones by the Worker), auto-convert romaji to kana, and a clipboard monitor that searches whatever CJK text you copy.
 
 ## Local development
