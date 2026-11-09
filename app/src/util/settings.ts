@@ -37,7 +37,10 @@ class SettingsState {
 
   load() {
     try {
-      Object.assign(this.state, JSON.parse(localStorage.getItem(this.LSKEY) || "{}"));
+      Object.assign(
+        this.state,
+        JSON.parse(localStorage.getItem(this.LSKEY) || "{}"),
+      );
     } catch (e) {
       console.error(e);
     }

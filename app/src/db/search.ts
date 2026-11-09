@@ -61,7 +61,9 @@ class SearchDatabase {
   get baseURL() {
     const url = settingsState.computed.dictApiURL.value;
     if (!url) {
-      throw new Error("Dictionary server URL is not set (Settings → Dictionary)");
+      throw new Error(
+        "Dictionary server URL is not set (Settings → Dictionary)",
+      );
     }
     return url.replace(/\/+$/, "");
   }
@@ -69,7 +71,9 @@ class SearchDatabase {
   private async request<T>(path: string, init?: RequestInit): Promise<T> {
     const r = await fetch(this.baseURL + path, init);
     if (!r.ok) {
-      throw new Error(`${init?.method || "GET"} ${path}: ${r.status} ${await r.text()}`);
+      throw new Error(
+        `${init?.method || "GET"} ${path}: ${r.status} ${await r.text()}`,
+      );
     }
     return r.json();
   }

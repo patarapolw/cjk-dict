@@ -6,6 +6,7 @@
 
 type Letter = [string, number]; // [plain letter, tone 0..4 (0 = unmarked)]
 
+// prettier-ignore
 const MARKS: Record<string, Letter> = {
   ā: ["a", 1], á: ["a", 2], ǎ: ["a", 3], à: ["a", 4],
   ē: ["e", 1], é: ["e", 2], ě: ["e", 3], è: ["e", 4],
@@ -16,10 +17,12 @@ const MARKS: Record<string, Letter> = {
   ɡ: ["g", 0], // single-story g, used in some pinyin text
 };
 
+// prettier-ignore
 const INITIALS = [
   "zh", "ch", "sh", "b", "p", "m", "f", "d", "t", "n", "l", "g", "k", "h", "j", "q", "x", "r",
   "z", "c", "s", "y", "w", "",
 ];
+// prettier-ignore
 const FINALS = new Set([
   "a", "o", "e", "i", "u", "ü", "ai", "ei", "ui", "ao", "ou", "iu", "ie", "üe", "ue", "er", "an",
   "en", "in", "un", "ün", "ang", "eng", "ing", "ong", "ia", "iao", "ian", "iang", "iong", "ua",
@@ -49,12 +52,19 @@ function markedTone(syl: Letter[]): number | undefined {
 }
 
 function render(syl: Letter[], explicit?: number) {
-  const letters = syl.map(([c]) => c).join("").replace(/ü/g, "v");
+  const letters = syl
+    .map(([c]) => c)
+    .join("")
+    .replace(/ü/g, "v");
   return `${letters}${explicit ?? markedTone(syl) ?? 5}`;
 }
 
 function parsePinyin(input: string): [Letter[], number | undefined][] | null {
-  const lower = input.normalize("NFC").toLowerCase().replace(/u:/g, "ü").replace(/v/g, "ü");
+  const lower = input
+    .normalize("NFC")
+    .toLowerCase()
+    .replace(/u:/g, "ü")
+    .replace(/v/g, "ü");
   // a digit always ends a syllable: "pin1yin1" -> "pin1 yin1 "
   const spaced = lower.replace(/[0-9]/g, "$& ");
 
@@ -99,8 +109,8 @@ export function expandPinyin(input: string): string[] {
   let expanded = [""];
   for (const [syl, explicit] of syllables) {
     const tone = explicit ?? markedTone(syl);
-    const alternatives = (tone !== undefined ? [tone] : [1, 2, 3, 4, 5]).map((t) =>
-      render(syl, t),
+    const alternatives = (tone !== undefined ? [tone] : [1, 2, 3, 4, 5]).map(
+      (t) => render(syl, t),
     );
     expanded = expanded.flatMap((prefix) =>
       alternatives.map((alt) => (prefix ? `${prefix} ${alt}` : alt)),

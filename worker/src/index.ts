@@ -85,7 +85,11 @@ function corsHeaders(req: Request, env: Env): Record<string, string> {
   };
 }
 
-function json(data: unknown, status = 200, headers: Record<string, string> = {}) {
+function json(
+  data: unknown,
+  status = 200,
+  headers: Record<string, string> = {},
+) {
   return new Response(JSON.stringify(data), {
     status,
     headers: { "Content-Type": "application/json; charset=utf-8", ...headers },
@@ -298,7 +302,8 @@ async function expandItems(env: Env, items: ISearchTerm[]) {
   // Glossaries too large for D1 are byte ranges in the dict's R2 glossary pack.
   await Promise.all(
     results.map(async (t) => {
-      if (t.glossary !== null || !t.glossary_key || t.glossary_size === null) return;
+      if (t.glossary !== null || !t.glossary_key || t.glossary_size === null)
+        return;
       const obj = await env.BUCKET.get(t.glossary_key, {
         range: { offset: t.glossary_offset ?? 0, length: t.glossary_size },
       });
@@ -307,7 +312,13 @@ async function expandItems(env: Env, items: ISearchTerm[]) {
   );
 
   const bySearchId = new Map<number, ITerm[]>();
-  for (const { search_id, glossary_offset, glossary_size, glossary_key, ...t } of results) {
+  for (const {
+    search_id,
+    glossary_offset,
+    glossary_size,
+    glossary_key,
+    ...t
+  } of results) {
     const arr = bySearchId.get(search_id) || [];
     arr.push(t);
     bySearchId.set(search_id, arr);
@@ -323,7 +334,12 @@ async function getAsset(env: Env, name: string, path: string, req: Request) {
      WHERE d.name = ?1 AND d.status = 'ready' AND a."path" = ?2`,
   )
     .bind(name, path)
-    .first<{ dict_id: number; assets_key: string | null; offset: number; size: number }>();
+    .first<{
+      dict_id: number;
+      assets_key: string | null;
+      offset: number;
+      size: number;
+    }>();
   if (!a || !a.assets_key) throw new HttpError(404, "asset not found");
 
   const etag = `"${a.dict_id}-${a.offset}-${a.size}"`;
