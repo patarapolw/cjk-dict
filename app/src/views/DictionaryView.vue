@@ -53,11 +53,11 @@
           <span>Auto-convert to Kana</span>
         </label>
 
-        <label @click.prevent="toggleClipboardMonitor()">
+        <label>
           <input
             type="checkbox"
             name="clipboard"
-            :checked="clipboardInterval !== 0"
+            v-model="clipboardMonitor"
           />
           <span>Clipboard monitor</span>
         </label>
@@ -324,6 +324,15 @@ async function onAnchorClicked(href: string) {
 
   await setRouteQuery();
 }
+
+// A checkbox click must not be preventDefault()ed: the browser then reverts the
+// box after Vue has already re-rendered it, so it never shows as toggled.
+const clipboardMonitor = computed({
+  get: () => clipboardInterval.value !== 0,
+  set: (on) => {
+    if (on !== (clipboardInterval.value !== 0)) toggleClipboardMonitor();
+  },
+});
 
 function toggleClipboardMonitor() {
   if (clipboardInterval.value) {
