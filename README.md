@@ -16,7 +16,7 @@ app/              Tauri app (Vue 3 + PrimeVue); app/src-tauri is its own Cargo w
 
 All commands below run from the repo root and work the same in bash and PowerShell. Run `pnpm install` once first.
 
-Settings go in `.env` at the repo root (gitignored); copy `.env.example`. The one file is read by the app's Rust build, by Vite (`VITE_*`) and by `dict-admin`. Variables already set in the environment take precedence. `pnpm format` runs Prettier, and `pnpm typecheck` checks the app.
+Local development needs no settings: `pnpm serve` serves `library/` over HTTP with rclone, `pnpm dev` runs the app against it, and `dict-admin` defaults to `library/` and `tmp/lindera`. Production settings (R2 keys, the rclone upload destination, the PrimeUI license) go in `.env` at the repo root (gitignored); copy `.env.example`. The one file is read by the app's Rust build, by Vite (`VITE_*`) and by `dict-admin`. Variables already set in the environment take precedence. `pnpm format` runs Prettier, and `pnpm typecheck` checks the app.
 
 ## Security
 
@@ -68,7 +68,9 @@ pnpm admin upload --remote r2:cjk-dict     # rclone; or set CJK_DICT_REMOTE
 ## App
 
 ```bash
-pnpm app start                             # tauri dev (desktop)
+pnpm serve                                 # terminal 1: local library on 127.0.0.1:8080 (Ctrl+C to stop)
+pnpm dev                                   # terminal 2: tauri dev against it, no .env needed
+pnpm app start                             # tauri dev (desktop) against R2, from .env
 pnpm app tauri build                       # release bundle
 pnpm app tauri android init                # first time on Android
 pnpm app android
@@ -85,12 +87,7 @@ Where the app downloads the library from is set in `.env` or by environment vari
 | `CJK_DICT_R2_PREFIX`            | optional folder inside the bucket                                |
 | `CJK_DICT_BASE_URL`             | instead of R2: a plain HTTP base URL, e.g. for local development |
 
-The app signs its R2 requests itself, with presigned URLs. For development without R2, serve the local library:
-
-```bash
-rclone serve http library --addr 127.0.0.1:8080
-# then run the app with CJK_DICT_BASE_URL=http://127.0.0.1:8080
-```
+The app signs its R2 requests itself, with presigned URLs. For development without R2, `pnpm serve` runs `rclone serve http library --addr 127.0.0.1:8080`, and `pnpm dev` runs the app with `CJK_DICT_BASE_URL=http://127.0.0.1:8080`. They run in separate terminals, so the server keeps running across app restarts until you stop it. The inline variable overrides `.env`, and works on Windows because `.npmrc` turns on pnpm's `shell-emulator`. Run `pnpm admin build` first so the library has a `manifest.json`.
 
 On start, the app compares the remote `manifest.json` with its own copy and downloads only changed files, in the background and resumably. They go to a staging folder and replace the old files only when all of them have arrived and their checksums match. Until then, the app keeps searching the previous version.
 
