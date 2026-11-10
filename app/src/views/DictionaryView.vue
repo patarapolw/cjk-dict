@@ -57,7 +57,7 @@
           <input
             type="checkbox"
             name="clipboard"
-            :model-value="clipboardInterval !== 0"
+            :checked="clipboardInterval !== 0"
           />
           <span>Clipboard monitor</span>
         </label>
@@ -174,7 +174,7 @@ function loadFromRouteQuery() {
 const SEARCH_DEBOUNCE_MS = 200;
 let searchTimer: ReturnType<typeof setTimeout> | undefined;
 
-watch([q, qState, reading, lang, dictsVersion], () => {
+watch([q, qState, reading, searchReading, lang, dictsVersion], () => {
   // bump now, so an in-flight search for the old query discards its results
   const id = ++requestId;
   clearTimeout(searchTimer);
@@ -242,7 +242,14 @@ async function loadMore(isNew?: boolean) {
   let term = q.value.trimStart();
   const termReading = searchReading.value ? reading.value.trim() : "";
 
-  if (!(term.trimEnd() || termReading)) return;
+  if (!(term.trimEnd() || termReading)) {
+    // empty query: don't leave the previous query's results up
+    if (isNew) {
+      items.value = [];
+      nextOffset.value = null;
+    }
+    return;
+  }
 
   loading.value = true;
 
@@ -324,7 +331,12 @@ function toggleClipboardMonitor() {
     clipboardInterval.value = 0;
   } else {
     clipboardInterval.value = setInterval(async () => {
-      const newText = (await readText()).trim();
+      let newText: string;
+      try {
+        newText = (await readText()).trim();
+      } catch {
+        return; // clipboard is empty or holds something other than text
+      }
       if (
         !/[\p{sc=Han}\p{scx=Hiragana}\p{scx=Katakana}\p{sc=Hangul}]/u.test(
           newText.slice(0, 10),
