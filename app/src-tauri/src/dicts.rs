@@ -13,6 +13,7 @@ use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
+use tauri_plugin_http::reqwest;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};

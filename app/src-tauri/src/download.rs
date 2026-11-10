@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager};
+use tauri_plugin_http::reqwest;
 use tokio::{fs::remove_file, io::AsyncWriteExt};
 
 use serde::Serialize;

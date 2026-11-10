@@ -1,4 +1,5 @@
 use std::{error::Error, fmt, sync::PoisonError};
+use tauri_plugin_http::reqwest;
 
 use yomitan_parser::error::YomitanError;
 use zip::result::ZipError;
