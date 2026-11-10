@@ -280,6 +280,10 @@ async function loadMore(isNew?: boolean) {
         ...openedItems.value,
         ...result.items.map((r) => r.id),
       ];
+    } catch (e) {
+      // e.g. "no dictionaries downloaded yet" on first launch. Never reject: a rejected
+      // activeRequest would make every later search bail out at `await activeRequest`.
+      console.error(e);
     } finally {
       loading.value = false;
     }
