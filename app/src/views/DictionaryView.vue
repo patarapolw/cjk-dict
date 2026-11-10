@@ -53,11 +53,11 @@
           <span>Auto-convert to Kana</span>
         </label>
 
-        <label @click.prevent="toggleClipboardMonitor()">
+        <label>
           <input
             type="checkbox"
             name="clipboard"
-            :checked="clipboardInterval !== 0"
+            v-model="clipboardMonitor"
           />
           <span>Clipboard monitor</span>
         </label>
@@ -97,6 +97,7 @@ import InputGroupAddon from "primevue/inputgroupaddon";
 import InputText from "primevue/inputtext";
 import SelectButton from "primevue/selectbutton";
 
+import { invoke } from "@tauri-apps/api/core";
 import {
   computed,
   nextTick,
@@ -108,7 +109,6 @@ import {
 } from "vue";
 import { toKana } from "wanakana";
 
-import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import { useRoute, useRouter } from "vue-router";
 import Term from "../components/yomitan/Term.vue";
 import { ISearchTerm, ITerm, searchDB } from "../db/search";
@@ -325,6 +325,15 @@ async function onAnchorClicked(href: string) {
   await setRouteQuery();
 }
 
+// A checkbox click must not be preventDefault()ed: the browser then reverts the
+// box after Vue has already re-rendered it, so it never shows as toggled.
+const clipboardMonitor = computed({
+  get: () => clipboardInterval.value !== 0,
+  set: (on) => {
+    if (on !== (clipboardInterval.value !== 0)) toggleClipboardMonitor();
+  },
+});
+
 function toggleClipboardMonitor() {
   if (clipboardInterval.value) {
     clearInterval(clipboardInterval.value);
@@ -333,10 +342,13 @@ function toggleClipboardMonitor() {
     clipboardInterval.value = setInterval(async () => {
       let newText: string;
       try {
-        newText = (await readText()).trim();
+        // also converts HTML clips to text (on Android, the clipboard plugin rejects them)
+        newText =
+          (await invoke<string | null>("read_clipboard_text"))?.trim() ?? "";
       } catch {
-        return; // clipboard is empty or holds something other than text
+        return;
       }
+      if (!newText) return; // clipboard is empty or holds something other than text
       if (
         !/[\p{sc=Han}\p{scx=Hiragana}\p{scx=Katakana}\p{sc=Hangul}]/u.test(
           newText.slice(0, 10),
