@@ -140,6 +140,30 @@ impl DictState {
         s
     }
 
+    /// Drop the open database and wait for in-flight searches to let go of it:
+    /// Windows can't replace search.db or a zip while it's open.
+    fn close(&self) -> Result<(), AppError> {
+        let Some(mut db) = self.db.lock()?.take() else {
+            return Ok(());
+        };
+        for _ in 0..250 {
+            match Arc::try_unwrap(db) {
+                Ok(db) => {
+                    drop(db);
+                    return Ok(());
+                }
+                Err(shared) => {
+                    db = shared;
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+            }
+        }
+        *self.db.lock()? = Some(db);
+        Err(AppError::Error(
+            "dictionaries are still in use, try again later".into(),
+        ))
+    }
+
     fn reopen(&self) -> Result<(), AppError> {
         let mut slot = self.db.lock()?;
         *slot = None;
@@ -160,6 +184,26 @@ impl DictState {
     fn local_manifest(&self) -> Option<Manifest> {
         let s = std::fs::read_to_string(self.dir.join(MANIFEST)).ok()?;
         serde_json::from_str(&s).ok()
+    }
+
+    /// file -> sha256, for files in place that the committed manifest vouches for
+    fn committed(&self) -> HashMap<String, String> {
+        self.local_manifest()
+            .map(|m| {
+                m.files()
+                    .filter(|f| self.dir.join(&f.file).exists())
+                    .map(|f| (f.file.clone(), f.sha256.clone()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+}
+
+/// Whether `path` holds exactly `f`. Sizes are compared first, so most mismatches are cheap.
+fn has_file(path: &Path, f: &FileInfo) -> Result<bool, AppError> {
+    match std::fs::metadata(path) {
+        Ok(m) if m.is_file() && m.len() == f.size => Ok(sha256_file(path)? == f.sha256),
+        _ => Ok(false),
     }
 }
 
@@ -188,7 +232,7 @@ pub struct PlannedFile {
 /// Fetch the remote manifest and list the files that need downloading.
 /// Empty = up to date. Remembers the manifest until `dict_commit`.
 #[tauri::command]
-pub async fn dict_plan(state: State<'_, DictState>) -> Result<Vec<PlannedFile>, AppError> {
+pub async fn dict_plan(app: AppHandle) -> Result<Vec<PlannedFile>, AppError> {
     let remote = Remote::from_env()?;
     let res = reqwest::get(remote.url(MANIFEST)).await?;
     if !res.status().is_success() {
@@ -200,34 +244,53 @@ pub async fn dict_plan(state: State<'_, DictState>) -> Result<Vec<PlannedFile>, 
     let text = res.text().await?;
     let remote_manifest: Manifest = serde_json::from_str(&text)?;
 
-    let local: HashMap<String, String> = state
-        .local_manifest()
-        .map(|m| {
-            m.files()
-                .map(|f| (f.file.clone(), f.sha256.clone()))
-                .collect()
-        })
-        .unwrap_or_default();
+    // hashing files and committing is blocking work
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<DictState>();
+        let committed = state.committed();
+        let incoming = state.dir.join(INCOMING);
+        std::fs::create_dir_all(&incoming)?;
 
-    let mut out = vec![];
-    for f in remote_manifest.files() {
-        let up_to_date = local.get(&f.file) == Some(&f.sha256) && state.dir.join(&f.file).exists();
-        if !up_to_date {
+        let mut out = vec![];
+        for f in remote_manifest.files() {
+            if committed.get(&f.file) == Some(&f.sha256) {
+                continue;
+            }
+            // Downloaded by an earlier run that was closed before the rest finished (or
+            // whose commit failed): nothing is committed until every file is there.
+            let new = incoming.join(&f.file);
+            if new.exists() {
+                if has_file(&new, f)? {
+                    continue;
+                }
+                let _ = std::fs::remove_file(&new);
+            }
+            // moved into place by a commit that failed partway, before the manifest
+            if has_file(&state.dir.join(&f.file), f)? {
+                continue;
+            }
             out.push(PlannedFile {
                 filename: format!("dicts/{INCOMING}/{}", f.file),
                 url: remote.url(&f.file),
                 size: f.size,
             });
         }
-    }
 
-    std::fs::create_dir_all(state.dir.join(INCOMING))?;
-    std::fs::write(state.dir.join(PENDING), text)?;
-    // nothing to download, but dicts may have been removed: commit right away
-    if out.is_empty() {
-        commit(&state)?;
-    }
-    Ok(out)
+        let unchanged =
+            std::fs::read_to_string(state.dir.join(MANIFEST)).ok() == Some(text.clone());
+        if unchanged && out.is_empty() {
+            let _ = std::fs::remove_file(state.dir.join(PENDING));
+            return Ok(out);
+        }
+        std::fs::write(state.dir.join(PENDING), &text)?;
+        // nothing to download, but dicts may have been removed: commit right away
+        if out.is_empty() {
+            commit(&state)?;
+        }
+        Ok(out)
+    })
+    .await
+    .map_err(|e| AppError::Error(e.to_string()))?
 }
 
 /// Verify downloaded files, move them into place, drop removed dictionaries, reopen.
@@ -249,6 +312,7 @@ fn commit(state: &DictState) -> Result<(), AppError> {
     };
     let m: Manifest = serde_json::from_str(&text)?;
     let incoming = state.dir.join(INCOMING);
+    let committed = state.committed();
 
     // everything must be present and intact before anything is replaced
     for f in m.files() {
@@ -256,6 +320,10 @@ fn commit(state: &DictState) -> Result<(), AppError> {
         let path = if new.exists() {
             new
         } else {
+            // in place and already verified by an earlier commit
+            if committed.get(&f.file) == Some(&f.sha256) {
+                continue;
+            }
             state.dir.join(&f.file)
         };
         if !path.exists() {
@@ -271,7 +339,7 @@ fn commit(state: &DictState) -> Result<(), AppError> {
     }
 
     // close search.db and the zips before replacing them
-    *state.db.lock()? = None;
+    state.close()?;
     for f in m.files() {
         let new = incoming.join(&f.file);
         if new.exists() {
