@@ -42,7 +42,7 @@
       <Downloading
         v-for="d in toBeLoaded"
         :key="d.filename"
-        ref="loading"
+        :ref="(el) => setLoader(d.filename, el)"
         v-bind="d"
       />
       <p v-for="e in loadErrors" :key="e.filename" class="downloads-error">
@@ -53,7 +53,13 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, onMounted, ref, useTemplateRef, watch } from "vue";
+import {
+  type ComponentPublicInstance,
+  nextTick,
+  onMounted,
+  ref,
+  watch,
+} from "vue";
 
 import { invoke } from "@tauri-apps/api/core";
 
@@ -70,8 +76,16 @@ import {
 import { lang } from "./util/settings.ts";
 import { makeLinderaDownloadList } from "./util/tokenize";
 
-// array of refs, or undefined
-const elLoading = useTemplateRef("loading");
+// Download components by filename. Not a `ref` in `v-for`: that array's order
+// isn't guaranteed to match `toBeLoaded`, so [0] could be another file's component.
+const loaders = new Map<string, InstanceType<typeof Downloading>>();
+function setLoader(
+  filename: string,
+  el: Element | ComponentPublicInstance | null,
+) {
+  if (el) loaders.set(filename, el as InstanceType<typeof Downloading>);
+  else loaders.delete(filename);
+}
 
 const downloadsCollapsed = ref(false);
 
@@ -96,7 +110,7 @@ async function runQueue() {
     while (toBeLoaded.value.length) {
       await nextTick();
       const current = toBeLoaded.value[0];
-      const loader = elLoading.value?.[0];
+      const loader = loaders.get(current.filename);
       try {
         if (!loader) throw new Error("download component not mounted");
         await loader.start();
