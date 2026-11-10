@@ -97,6 +97,7 @@ import InputGroupAddon from "primevue/inputgroupaddon";
 import InputText from "primevue/inputtext";
 import SelectButton from "primevue/selectbutton";
 
+import { invoke } from "@tauri-apps/api/core";
 import {
   computed,
   nextTick,
@@ -108,7 +109,6 @@ import {
 } from "vue";
 import { toKana } from "wanakana";
 
-import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import { useRoute, useRouter } from "vue-router";
 import Term from "../components/yomitan/Term.vue";
 import { ISearchTerm, ITerm, searchDB } from "../db/search";
@@ -333,10 +333,13 @@ function toggleClipboardMonitor() {
     clipboardInterval.value = setInterval(async () => {
       let newText: string;
       try {
-        newText = (await readText()).trim();
+        // also converts HTML clips to text (on Android, the clipboard plugin rejects them)
+        newText =
+          (await invoke<string | null>("read_clipboard_text"))?.trim() ?? "";
       } catch {
-        return; // clipboard is empty or holds something other than text
+        return;
       }
+      if (!newText) return; // clipboard is empty or holds something other than text
       if (
         !/[\p{sc=Han}\p{scx=Hiragana}\p{scx=Katakana}\p{sc=Hangul}]/u.test(
           newText.slice(0, 10),

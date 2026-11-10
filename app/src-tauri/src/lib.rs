@@ -1,6 +1,7 @@
 use tauri::Manager;
 use yomitan_parser::tokenize::TokenizerMapper;
 
+mod clipboard;
 mod dicts;
 mod download;
 mod error;
@@ -33,6 +34,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            clipboard::read_clipboard_text,
             download::download_url,
             download::unzip,
             download::download_and_unzip,

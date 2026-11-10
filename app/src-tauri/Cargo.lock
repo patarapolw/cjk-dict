@@ -586,6 +586,7 @@ name = "cjk-dict-app"
 version = "0.1.0"
 dependencies = [
  "dotenvy",
+ "jni",
  "percent-encoding",
  "rusty-s3",
  "serde",
