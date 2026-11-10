@@ -24,7 +24,7 @@ tauri-plugin-fs = "2.7"
 tauri-plugin-http = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1.53.1", features = ["io-util", "fs", "rt"] }
+tokio = { version = "1.53.1", features = ["io-util", "fs", "rt", "sync"] }
 zip = "8.6.0"
 # query tokenizer for "~" search (same code dict-admin uses at import)
 yomitan-parser = { path = "../../yomitan-parser", features = ["search"] }
@@ -32,6 +32,10 @@ rusty-s3 = "0.8"
 url = "2"
 sha2 = "0.10"
 percent-encoding = "2"
+
+# read HTML clips on Android, which tauri-plugin-clipboard-manager rejects (see src/clipboard.rs)
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
 
 # Standalone workspace: building the root workspace (dict-admin) must not need WebKit/GTK.
 [workspace]
