@@ -170,13 +170,21 @@ function loadFromRouteQuery() {
   qState.value = String(route.query.qState || "") || null;
 }
 
-watch([q, qState, reading, lang, dictsVersion], async () => {
-  const id = ++requestId;
-  await activeRequest;
-  if (id !== requestId) return;
+/** wait for typing to pause; also merges auto-kana's romaji -> kana double update */
+const SEARCH_DEBOUNCE_MS = 200;
+let searchTimer: ReturnType<typeof setTimeout> | undefined;
 
-  nextOffset.value = 0;
-  loadMore(true);
+watch([q, qState, reading, lang, dictsVersion], () => {
+  // bump now, so an in-flight search for the old query discards its results
+  const id = ++requestId;
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(async () => {
+    await activeRequest;
+    if (id !== requestId) return;
+
+    nextOffset.value = 0;
+    loadMore(true);
+  }, SEARCH_DEBOUNCE_MS);
 });
 
 watch(lang, (value) => {
@@ -259,6 +267,7 @@ async function loadMore(isNew?: boolean) {
         offset,
         type,
       });
+      if (id !== requestId) return; // the query changed meanwhile
 
       items.value = isNew ? result.items : [...oldItems, ...result.items];
       nextOffset.value = result.next;
@@ -339,6 +348,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  clearTimeout(searchTimer);
   if (clipboardInterval.value) {
     clearInterval(clipboardInterval.value);
     clipboardInterval.value = 0;

@@ -15,7 +15,7 @@ use std::{
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params, params_from_iter};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, value::RawValue};
 
 use crate::{
     error::YomitanError,
@@ -300,10 +300,14 @@ pub struct SearchResult {
 const MAX_LIMIT: u32 = 50;
 /// 5^4: up to four toneless syllables are expanded; beyond that, match the raw reading
 const MAX_READINGS: usize = 625;
-/// parsed term banks kept in memory
-const BANK_CACHE: usize = 8;
+/// Term banks kept in memory, by JSON size. A bank is 3-30 MB of JSON; a search's entries
+/// are spread over several banks of several dicts, so a few searches touch dozens.
+const BANK_CACHE_BYTES: usize = 192 << 20;
 
 type BankKey = (i64, i64);
+/// A term bank split into rows, each still raw JSON: splitting is far cheaper than parsing
+/// the whole bank into `Value`s, and a search only needs a handful of rows from it.
+type Bank = Arc<Vec<Box<RawValue>>>;
 
 pub struct SearchDb {
     conn: Mutex<Connection>,
@@ -311,7 +315,8 @@ pub struct SearchDb {
     /// dict_id -> name
     names: HashMap<i64, String>,
     zips: Mutex<HashMap<String, YomitanZip>>,
-    banks: Mutex<VecDeque<(BankKey, Arc<Vec<Value>>)>>,
+    /// most recently used first; (key, rows, JSON bytes)
+    banks: Mutex<VecDeque<(BankKey, Bank, usize)>>,
 }
 
 fn fts_phrase(s: &str) -> String {
@@ -514,6 +519,13 @@ impl SearchDb {
             let Some(row) = rows.get(idx as usize) else {
                 continue;
             };
+            let row: Vec<Value> = match serde_json::from_str(row.get()) {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("{name} term_bank_{bank}[{idx}]: {e}");
+                    continue;
+                }
+            };
             let s = |i: usize| row.get(i).and_then(Value::as_str).unwrap_or("").to_string();
             let entry = TermEntryOut {
                 dict_id,
@@ -554,23 +566,35 @@ impl SearchDb {
         f(zips.get_mut(name).unwrap())
     }
 
-    fn bank(&self, dict_id: i64, name: &str, bank: i64) -> Result<Arc<Vec<Value>>, YomitanError> {
+    fn bank(&self, dict_id: i64, name: &str, bank: i64) -> Result<Bank, YomitanError> {
         let key = (dict_id, bank);
         {
             let mut cache = self.banks.lock()?;
-            if let Some(pos) = cache.iter().position(|(k, _)| *k == key) {
+            if let Some(pos) = cache.iter().position(|(k, ..)| *k == key) {
                 let hit = cache.remove(pos).unwrap();
                 let rows = hit.1.clone();
                 cache.push_front(hit);
                 return Ok(rows);
             }
         }
-        let rows = Arc::new(self.with_zip(name, |z| {
-            z.read_json_array(&format!("term_bank_{bank}.json"))
-        })?);
+        let text = self.with_zip(name, |z| z.read_to_string(&format!("term_bank_{bank}.json")))?;
+        let size = text.len();
+        let rows: Bank = Arc::new(serde_json::from_str(&text)?);
+        drop(text);
+
         let mut cache = self.banks.lock()?;
-        cache.push_front((key, rows.clone()));
-        cache.truncate(BANK_CACHE);
+        cache.push_front((key, rows.clone(), size));
+        let mut total = 0;
+        // always keep the newest, even if it alone is over budget
+        let keep = cache
+            .iter()
+            .take_while(|(.., s)| {
+                total += s;
+                total <= BANK_CACHE_BYTES
+            })
+            .count()
+            .max(1);
+        cache.truncate(keep);
         Ok(rows)
     }
 

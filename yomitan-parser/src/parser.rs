@@ -243,7 +243,7 @@ impl YomitanZip {
         })
     }
 
-    fn read_to_string(&mut self, name: &str) -> Result<String, YomitanError> {
+    pub fn read_to_string(&mut self, name: &str) -> Result<String, YomitanError> {
         let mut f = self.archive.by_name(name)?;
         let mut s = String::new();
         f.read_to_string(&mut s)?;
