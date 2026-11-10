@@ -392,3 +392,80 @@ impl YomitanZip {
         Ok(buf)
     }
 }
+
+/// Term banks are cut to about this much JSON by [`rebank`].
+pub const TERM_BANK_BYTES: usize = 256 << 10;
+
+/// Rewrite `src` into `dst` with its term banks re-split into `term_bank_N.json` files of
+/// about `max_bytes` each. Deflate has no random access, so reading one entry inflates its
+/// whole bank; published dictionaries often use 3-30 MB banks.
+///
+/// Rows keep their order and their exact JSON; every other file is copied as is (still
+/// compressed). The output is deterministic, so rebuilding does not change its checksum.
+///
+/// Returns `false`, writing nothing, when the term banks are already small on average.
+pub fn rebank(src: &Path, dst: &Path, max_bytes: usize) -> Result<bool, YomitanError> {
+    use std::io::Write;
+    use zip::{CompressionMethod, DateTime, ZipWriter, write::SimpleFileOptions};
+
+    let mut z = YomitanZip::open(src)?;
+    let terms: Vec<BankFile> = z
+        .banks()
+        .into_iter()
+        .filter(|b| b.kind == BankKind::Term)
+        .collect();
+    if terms.is_empty() {
+        return Ok(false);
+    }
+    let mut total = 0u64;
+    for b in &terms {
+        total += z.archive.by_name(&b.name)?.size();
+    }
+    if total / terms.len() as u64 <= max_bytes as u64 {
+        return Ok(false);
+    }
+
+    let mut w = ZipWriter::new(std::io::BufWriter::new(File::create(dst)?));
+    for i in 0..z.archive.len() {
+        let f = z.archive.by_index_raw(i)?;
+        if terms.iter().any(|b| b.name == f.name()) {
+            continue;
+        }
+        w.raw_copy_file(f)?;
+    }
+
+    let opts = SimpleFileOptions::default()
+        .compression_method(CompressionMethod::Deflated)
+        .last_modified_time(DateTime::DEFAULT);
+    let mut n = 0;
+    let mut chunk: Vec<u8> = Vec::with_capacity(max_bytes + 1024);
+    let mut flush = |w: &mut ZipWriter<_>, chunk: &mut Vec<u8>| -> Result<(), YomitanError> {
+        if chunk.is_empty() {
+            return Ok(());
+        }
+        n += 1;
+        w.start_file(format!("term_bank_{n}.json"), opts)?;
+        w.write_all(b"[")?;
+        w.write_all(chunk)?;
+        w.write_all(b"]")?;
+        chunk.clear();
+        Ok(())
+    };
+    for b in &terms {
+        let text = z.read_to_string(&b.name)?;
+        let rows: Vec<&serde_json::value::RawValue> = serde_json::from_str(&text)?;
+        for row in rows {
+            let row = row.get().as_bytes();
+            if !chunk.is_empty() && chunk.len() + 1 + row.len() > max_bytes {
+                flush(&mut w, &mut chunk)?;
+            }
+            if !chunk.is_empty() {
+                chunk.push(b',');
+            }
+            chunk.extend_from_slice(row);
+        }
+    }
+    flush(&mut w, &mut chunk)?;
+    w.finish()?.flush()?;
+    Ok(true)
+}

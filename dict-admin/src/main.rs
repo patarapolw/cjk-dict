@@ -1,6 +1,7 @@
 //! Admin CLI for cjk-dict.
 //!
-//! The library is a folder of original Yomitan zips (`<name>.zip`) + `dicts.json`.
+//! The library is a folder of Yomitan zips (`<name>.zip`) + `dicts.json`. Zips are stored
+//! with their term banks re-split into small ones (see `parser::rebank`); otherwise as published.
 //! `build` indexes them into `search.db` and writes `manifest.json`; `upload` mirrors the
 //! folder to R2 with rclone. The app downloads the zips + search.db and reads definitions
 //! and media straight from the zips. This is the only way dictionaries are added or removed.
@@ -19,7 +20,7 @@ use std::{
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use yomitan_parser::{
-    parser::YomitanZip,
+    parser::{self, YomitanZip},
     search::{self, DictSource, parse_lang},
     tokenize::TokenizerMapper,
 };
@@ -257,6 +258,10 @@ fn add(
             return Err(e);
         }
     };
+    if let Err(e) = rebank(&tmp, &name) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
     std::fs::rename(&tmp, lib.zip_path(&name))?;
 
     let entry = DictEntry {
@@ -275,6 +280,31 @@ fn add(
     lib.save_dicts(&dicts)?;
     eprintln!("added {name}: {} ({})", index.title, index.revision);
     Ok(())
+}
+
+/// Re-split the zip's term banks into small ones (in place), so the app inflates little to
+/// read an entry. No-op when they already are small.
+fn rebank(zip: &Path, name: &str) -> Result<()> {
+    let tmp = zip.with_extension("zip.rebank");
+    let t = Instant::now();
+    let done = parser::rebank(zip, &tmp, parser::TERM_BANK_BYTES)
+        .with_context(|| format!("rebanking {name}"));
+    match done {
+        Ok(true) => {
+            std::fs::rename(&tmp, zip)?;
+            eprintln!(
+                "{name}: split term banks into {} KB ones ({:.1}s)",
+                parser::TERM_BANK_BYTES >> 10,
+                t.elapsed().as_secs_f64()
+            );
+            Ok(())
+        }
+        Ok(false) => Ok(()),
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            Err(e)
+        }
+    }
 }
 
 async fn build(lib: &Library, lindera_dir: &Path) -> Result<()> {
@@ -296,6 +326,11 @@ async fn build(lib: &Library, lindera_dir: &Path) -> Result<()> {
             })
         })
         .collect::<Result<Vec<_>>>()?;
+
+    // zips added before `add` rebanked them
+    for s in &sources {
+        rebank(&s.zip, &s.name)?;
+    }
 
     lindera::ensure(lindera_dir)?;
     let tok = TokenizerMapper::new(lindera_dir.to_path_buf());

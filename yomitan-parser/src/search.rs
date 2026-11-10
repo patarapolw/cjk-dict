@@ -2,7 +2,7 @@
 //!
 //! It holds only what search needs (normalized terms, tokens, readings, tags, scores, and
 //! where each entry is: dict + `term_bank_N.json` + array index). Definitions and media
-//! stay in the original zips, which are read on demand.
+//! stay in the zips, which are read on demand.
 //!
 //! - [`build`] (dict-admin): zips -> `search.db`
 //! - [`SearchDb`] (app): query `search.db`, then read entries / media from the zips
@@ -300,9 +300,9 @@ pub struct SearchResult {
 const MAX_LIMIT: u32 = 50;
 /// 5^4: up to four toneless syllables are expanded; beyond that, match the raw reading
 const MAX_READINGS: usize = 625;
-/// Term banks kept in memory, by JSON size. A bank is 3-30 MB of JSON; a search's entries
-/// are spread over several banks of several dicts, so a few searches touch dozens.
-const BANK_CACHE_BYTES: usize = 192 << 20;
+/// Term banks kept in memory, by JSON size. dict-admin cuts banks to ~256 KB
+/// ([`crate::parser::rebank`]), but zips from before that have 3-30 MB banks.
+const BANK_CACHE_BYTES: usize = 64 << 20;
 
 type BankKey = (i64, i64);
 /// A term bank split into rows, each still raw JSON: splitting is far cheaper than parsing

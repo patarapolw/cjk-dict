@@ -4,7 +4,7 @@ import { lang as langSetting } from "../util/settings";
 
 /**
  * Search runs on the device: `search.db` (downloaded index) is queried by the Rust `search`
- * command, which reads the entries themselves from the original Yomitan zips. Pinyin
+ * command, which reads the entries themselves from the Yomitan zips. Pinyin
  * readings are expanded there too. Only "~" (fts) queries are tokenized here first (lindera).
  *
  * @see https://github.com/patarapolw/cjk-dict

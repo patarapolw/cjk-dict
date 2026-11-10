@@ -2,7 +2,7 @@
 
 Yomitan dictionary search for Chinese, Japanese and Korean: a Tauri app (desktop and Android) that searches a dictionary library kept in a private Cloudflare R2 bucket.
 
-- The **library** is a folder of original Yomitan dictionary zips, plus `search.db`, a small SQLite index built from them. `dict-admin` manages it, and `rclone` mirrors it to R2.
+- The **library** is a folder of Yomitan dictionary zips (term banks re-split into ~256 KB files so the app can read single entries quickly), plus `search.db`, a small SQLite index built from them. `dict-admin` manages it, and `rclone` mirrors it to R2.
 - The **app** downloads the library, or only what changed, and searches on the device:
   - It queries `search.db` for matches.
   - It reads definitions and images straight from the zips, so nothing is indexed on the device.
@@ -28,7 +28,7 @@ Settings go in `.env` at the repo root (gitignored); copy `.env.example`. The on
 
 ```
 library/
-  <name>.zip      original Yomitan zips (default + custom dictionaries)
+  <name>.zip      Yomitan zips, rebanked (default + custom dictionaries)
   dicts.json      [{ name, lang?, source? }]: build order and language overrides
   search.db       written by `build`: terms, tokens, readings, tags, and where each entry is in its zip
   manifest.json   written by `build`: file sizes and sha256; the app compares these to download only what changed
