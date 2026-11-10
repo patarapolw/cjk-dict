@@ -149,7 +149,7 @@ where
     let temp_pf = out_dir.join(format!("{}.dl-tmp", filename));
 
     // Check existing partial download size
-    let existing_size = tokio::fs::metadata(&temp_pf)
+    let mut existing_size = tokio::fs::metadata(&temp_pf)
         .await
         .map(|m| m.len())
         .unwrap_or(0);
@@ -161,6 +161,30 @@ where
     }
 
     let mut response = request.send().await?;
+
+    // 416: nothing left after `existing_size`. Either the partial file is already complete
+    // (closed between the last chunk and the rename), or it's longer than the file now is.
+    if existing_size > 0 && response.status() == reqwest::StatusCode::RANGE_NOT_SATISFIABLE {
+        let total = response
+            .headers()
+            .get(reqwest::header::CONTENT_RANGE)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("bytes */"))
+            .and_then(|n| n.parse::<u64>().ok());
+        if total == Some(existing_size) {
+            tokio::fs::rename(&temp_pf, &file_pf).await?;
+            println!(
+                "File downloaded {} MB to {:?}",
+                existing_size >> 20,
+                &file_pf
+            );
+            return Ok(true);
+        }
+        // unknown or different size: start over
+        remove_file(&temp_pf).await?;
+        existing_size = 0;
+        response = client.get(url).send().await?;
+    }
     let status = response.status();
     if !status.is_success() {
         return Err(AppError::Error(format!("GET {url}: {status}")));
