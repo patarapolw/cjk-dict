@@ -702,9 +702,7 @@ impl SearchDb {
                 return Ok(rows);
             }
         }
-        let text = self.with_zip(name, |z| {
-            z.read_to_string(&format!("term_bank_{bank}.json"))
-        })?;
+        let text = self.with_zip(name, |z| z.read_to_string(&format!("term_bank_{bank}.json")))?;
         let size = text.len();
         let rows: Bank = Arc::new(serde_json::from_str(&text)?);
         drop(text);
