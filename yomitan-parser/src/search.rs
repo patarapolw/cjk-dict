@@ -71,6 +71,23 @@ CREATE VIRTUAL TABLE term_search_fts USING fts5 (
 );
 "#;
 
+const FTS_TRIGGERS: &str = r#"
+CREATE TRIGGER IF NOT EXISTS term_search_ai AFTER INSERT ON term_search BEGIN
+  INSERT INTO term_search_fts (rowid, term_ja, term_zh, term_ko, reading, def_tags, rules, tags)
+  VALUES (new.id, new.term_ja, new.term_zh, new.term_ko, new.reading, new.def_tags, new.rules, new.tags);
+END;
+CREATE TRIGGER IF NOT EXISTS term_search_ad AFTER DELETE ON term_search BEGIN
+  INSERT INTO term_search_fts (term_search_fts, rowid, term_ja, term_zh, term_ko, reading, def_tags, rules, tags)
+  VALUES ('delete', old.id, old.term_ja, old.term_zh, old.term_ko, old.reading, old.def_tags, old.rules, old.tags);
+END;
+CREATE TRIGGER IF NOT EXISTS term_search_au AFTER UPDATE ON term_search BEGIN
+  INSERT INTO term_search_fts (term_search_fts, rowid, term_ja, term_zh, term_ko, reading, def_tags, rules, tags)
+  VALUES ('delete', old.id, old.term_ja, old.term_zh, old.term_ko, old.reading, old.def_tags, old.rules, old.tags);
+  INSERT INTO term_search_fts (rowid, term_ja, term_zh, term_ko, reading, def_tags, rules, tags)
+  VALUES (new.id, new.term_ja, new.term_zh, new.term_ko, new.reading, new.def_tags, new.rules, new.tags);
+END;
+"#;
+
 /// A dictionary to index.
 pub struct DictSource {
     pub name: String,
@@ -104,13 +121,59 @@ pub async fn build(
     tok: &TokenizerMapper,
     progress: impl Fn(&str, usize, usize),
 ) -> Result<Vec<DictInfo>, YomitanError> {
+    build_inner(out, dicts, &[], tok, progress, false).await
+}
+
+/// Update only the supplied dictionaries, first removing their old entries and any other
+/// dictionaries no longer present in the library.
+pub async fn build_incremental(
+    out: &Path,
+    dicts: &[DictSource],
+    remove: &[String],
+    tok: &TokenizerMapper,
+    progress: impl Fn(&str, usize, usize),
+) -> Result<Vec<DictInfo>, YomitanError> {
+    build_inner(out, dicts, remove, tok, progress, true).await
+}
+
+async fn build_inner(
+    out: &Path,
+    dicts: &[DictSource],
+    remove: &[String],
+    tok: &TokenizerMapper,
+    progress: impl Fn(&str, usize, usize),
+    incremental: bool,
+) -> Result<Vec<DictInfo>, YomitanError> {
     let tmp = out.with_extension("db.tmp");
     let _ = std::fs::remove_file(&tmp);
+    let has_existing = incremental && out.is_file();
+    if has_existing {
+        std::fs::copy(out, &tmp)?;
+    }
     let mut conn = Connection::open(&tmp)?;
     conn.execute_batch(
         "PRAGMA journal_mode = OFF; PRAGMA synchronous = OFF; PRAGMA temp_store = MEMORY; PRAGMA cache_size = -262144;",
     )?;
-    conn.execute_batch(SCHEMA)?;
+    if !has_existing {
+        conn.execute_batch(SCHEMA)?;
+    }
+    conn.execute_batch(FTS_TRIGGERS)?;
+
+    if has_existing {
+        let tx = conn.transaction()?;
+        for name in remove {
+            tx.execute(
+                "DELETE FROM term_link WHERE dict_id IN (SELECT id FROM dict WHERE name = ?1)",
+                [name],
+            )?;
+            tx.execute("DELETE FROM dict WHERE name = ?1", [name])?;
+        }
+        tx.execute(
+            "DELETE FROM term_search WHERE id NOT IN (SELECT DISTINCT search_id FROM term_link)",
+            [],
+        )?;
+        tx.commit()?;
+    }
 
     let mut infos = vec![];
     for d in dicts {
@@ -227,16 +290,78 @@ pub async fn build(
         });
     }
 
-    progress("full-text index", 0, 0);
-    conn.execute_batch(
-        "INSERT INTO term_search_fts (term_search_fts) VALUES ('rebuild');
-         INSERT INTO term_search_fts (term_search_fts) VALUES ('optimize');
-         ANALYZE;",
-    )?;
-    conn.execute_batch("VACUUM;")?;
+    if !has_existing {
+        progress("full-text index", 0, 0);
+        conn.execute_batch(
+            "INSERT INTO term_search_fts (term_search_fts) VALUES ('rebuild');
+             INSERT INTO term_search_fts (term_search_fts) VALUES ('optimize');
+             ANALYZE;",
+        )?;
+        conn.execute_batch("VACUUM;")?;
+    }
     drop(conn);
     std::fs::rename(&tmp, out)?;
     Ok(infos)
+}
+
+#[cfg(test)]
+mod incremental_tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[tokio::test]
+    async fn incremental_build_removes_deleted_dictionaries() {
+        let id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir =
+            std::env::temp_dir().join(format!("cjk-dict-incremental-{}-{id}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("search.db");
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute_batch(SCHEMA).unwrap();
+            conn.execute_batch(FTS_TRIGGERS).unwrap();
+            conn.execute(
+                "INSERT INTO dict (name, title) VALUES ('removed', 'Removed')",
+                [],
+            )
+            .unwrap();
+            let search_id = conn
+                .query_row(
+                    "INSERT INTO term_search (term, term_ja) VALUES ('TEST', 'test') RETURNING id",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap();
+            conn.execute(
+                "INSERT INTO term_link (search_id, dict_id, bank, idx) VALUES (?1, 1, 1, 0)",
+                [search_id],
+            )
+            .unwrap();
+        }
+
+        let tok = TokenizerMapper::new(dir.clone());
+        build_incremental(&db_path, &[], &["removed".to_string()], &tok, |_, _, _| {})
+            .await
+            .unwrap();
+
+        let conn = Connection::open(&db_path).unwrap();
+        let dict_count = conn
+            .query_row("SELECT count(*) FROM dict", [], |row| row.get::<_, i64>(0))
+            .unwrap();
+        let term_count = conn
+            .query_row(
+                "SELECT count(*) FROM term_search_fts WHERE term_search_fts MATCH 'test'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap();
+        assert_eq!(dict_count, 0);
+        assert_eq!(term_count, 0);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -577,7 +702,9 @@ impl SearchDb {
                 return Ok(rows);
             }
         }
-        let text = self.with_zip(name, |z| z.read_to_string(&format!("term_bank_{bank}.json")))?;
+        let text = self.with_zip(name, |z| {
+            z.read_to_string(&format!("term_bank_{bank}.json"))
+        })?;
         let size = text.len();
         let rows: Bank = Arc::new(serde_json::from_str(&text)?);
         drop(text);

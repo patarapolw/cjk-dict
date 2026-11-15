@@ -92,6 +92,13 @@ enum Cmd {
         lindera_dir: PathBuf,
     },
 
+    /// Rebuild search.db and manifest.json from scratch
+    Rebuild {
+        /// Lindera tokenizer dictionaries (downloaded if missing)
+        #[arg(long, env = "CJK_DICT_LINDERA_DIR", default_value = "tmp/lindera")]
+        lindera_dir: PathBuf,
+    },
+
     /// Mirror the library to R2 with rclone (zips first, then search.db, then manifest.json)
     Upload {
         /// rclone destination, e.g. r2:cjk-dict
@@ -192,7 +199,8 @@ async fn main() -> Result<()> {
             let _ = std::fs::remove_file(lib.zip_path(&name));
             eprintln!("removed {name}; run `build` and `upload` to publish");
         }
-        Cmd::Build { lindera_dir } => build(&lib, &lindera_dir).await?,
+        Cmd::Build { lindera_dir } => build(&lib, &lindera_dir, false).await?,
+        Cmd::Rebuild { lindera_dir } => build(&lib, &lindera_dir, true).await?,
         Cmd::Upload { remote, dry_run } => upload(&lib, &remote, dry_run)?,
     }
 
@@ -307,56 +315,144 @@ fn rebank(zip: &Path, name: &str) -> Result<()> {
     }
 }
 
-async fn build(lib: &Library, lindera_dir: &Path) -> Result<()> {
+async fn build(lib: &Library, lindera_dir: &Path, rebuild: bool) -> Result<()> {
     let dicts = lib.dicts()?;
-    if dicts.is_empty() {
-        bail!("the library is empty: `add` or `defaults` first");
+    let db = lib.dir.join(SEARCH_DB);
+    let previous = if !rebuild && db.is_file() {
+        lib.manifest()?
+    } else {
+        None
+    };
+    let rebuild_from_scratch = rebuild || previous.is_none();
+    let mut sources = vec![];
+    let mut changed_sources = vec![];
+    let mut zip_infos = std::collections::HashMap::new();
+    let mut changed_names = vec![];
+    for d in &dicts {
+        let zip = lib.zip_path(&d.name);
+        if !zip.exists() {
+            bail!("{} is missing", zip.display());
+        }
+        let file = file_info(&zip, &format!("{}.zip", d.name))?;
+        let old = previous
+            .as_ref()
+            .and_then(|m| m.dicts.iter().find(|x| x.name == d.name));
+        let requested_lang = d
+            .lang
+            .as_deref()
+            .and_then(parse_lang)
+            .map(|lang| lang.to_string());
+        let lang_changed = requested_lang
+            .as_ref()
+            .is_some_and(|lang| old.and_then(|x| x.lang.as_deref()) != Some(lang.as_str()));
+        let changed = rebuild_from_scratch
+            || old.is_none_or(|x| x.file.size != file.size || x.file.sha256 != file.sha256)
+            || lang_changed;
+        let source = DictSource {
+            name: d.name.clone(),
+            zip,
+            lang: d.lang.as_deref().and_then(parse_lang),
+        };
+        if changed {
+            changed_names.push(d.name.clone());
+            changed_sources.push(DictSource {
+                name: source.name.clone(),
+                zip: source.zip.clone(),
+                lang: source.lang,
+            });
+        }
+        sources.push(source);
+        zip_infos.insert(d.name.clone(), file);
     }
-    let sources = dicts
-        .iter()
-        .map(|d| {
-            let zip = lib.zip_path(&d.name);
-            if !zip.exists() {
-                bail!("{} is missing", zip.display());
-            }
-            Ok(DictSource {
-                name: d.name.clone(),
-                zip,
-                lang: d.lang.as_deref().and_then(parse_lang),
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
 
     // zips added before `add` rebanked them
-    for s in &sources {
+    for s in &changed_sources {
         rebank(&s.zip, &s.name)?;
+        zip_infos.insert(
+            s.name.clone(),
+            file_info(&s.zip, &format!("{}.zip", s.name))?,
+        );
     }
 
-    lindera::ensure(lindera_dir)?;
+    if !changed_sources.is_empty() {
+        lindera::ensure(lindera_dir)?;
+    }
     let tok = TokenizerMapper::new(lindera_dir.to_path_buf());
 
     let t = Instant::now();
-    let db = lib.dir.join(SEARCH_DB);
-    let infos = search::build(&db, &sources, &tok, |name, i, n| {
-        if n > 0 {
-            eprint!("\r{name}: bank {i}/{n}   ");
+    let removed_names = previous
+        .as_ref()
+        .map(|m| {
+            m.dicts
+                .iter()
+                .filter(|old| !dicts.iter().any(|d| d.name == old.name))
+                .map(|old| old.name.clone())
+                .chain(changed_names.iter().cloned())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let infos = if rebuild_from_scratch {
+        search::build(&db, &sources, &tok, |name, i, n| {
+            if n > 0 {
+                eprint!("\r{name}: bank {i}/{n}   ");
+            } else {
+                eprintln!("\r{name}...");
+            }
+        })
+        .await?
+    } else {
+        search::build_incremental(&db, &changed_sources, &removed_names, &tok, |name, i, n| {
+            if n > 0 {
+                eprint!("\r{name}: bank {i}/{n}   ");
+            } else {
+                eprintln!("\r{name}...");
+            }
+        })
+        .await?
+    };
+    eprintln!(
+        "{} {SEARCH_DB} in {:.1}s",
+        if rebuild_from_scratch {
+            "rebuilt"
         } else {
-            eprintln!("\r{name}...");
-        }
-    })
-    .await?;
-    eprintln!("built {SEARCH_DB} in {:.1}s", t.elapsed().as_secs_f64());
+            "updated"
+        },
+        t.elapsed().as_secs_f64()
+    );
 
+    let indexed: std::collections::HashMap<_, _> = infos
+        .into_iter()
+        .map(|info| (info.name.clone(), info))
+        .collect();
     let mut out = vec![];
-    for info in infos {
-        let file = format!("{}.zip", info.name);
+    for d in &dicts {
+        let file = zip_infos.remove(&d.name).expect("zip info was collected");
+        let info = indexed.get(&d.name);
+        let old = previous
+            .as_ref()
+            .and_then(|m| m.dicts.iter().find(|x| x.name == d.name));
+        let (title, revision, lang, term_count) = match (info, old) {
+            (Some(info), _) => (
+                info.title.clone(),
+                info.revision.clone(),
+                info.lang.clone(),
+                info.term_count,
+            ),
+            (None, Some(old)) => (
+                old.title.clone(),
+                old.revision.clone(),
+                old.lang.clone(),
+                old.term_count,
+            ),
+            (None, None) => bail!("missing build information for {}", d.name),
+        };
         out.push(ManifestDict {
-            file: file_info(&lib.zip_path(&info.name), &file)?,
-            name: info.name,
-            title: info.title,
-            revision: info.revision,
-            lang: info.lang,
-            term_count: info.term_count,
+            name: d.name.clone(),
+            title,
+            revision,
+            lang,
+            term_count,
+            file,
         });
     }
     let manifest = Manifest {
