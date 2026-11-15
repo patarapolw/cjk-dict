@@ -12,6 +12,7 @@ mod library;
 mod lindera;
 
 use std::{
+    collections::BTreeMap,
     path::{Path, PathBuf},
     process::Command,
     time::Instant,
@@ -26,7 +27,8 @@ use yomitan_parser::{
 };
 
 use crate::library::{
-    DictEntry, Library, MANIFEST, Manifest, ManifestDict, SEARCH_DB, check_name, file_info,
+    DICTS_JSON, DictEntry, Library, MANIFEST, Manifest, ManifestDict, SEARCH_DB, check_name,
+    file_info,
 };
 
 #[derive(Parser)]
@@ -49,6 +51,13 @@ struct Cli {
 enum Cmd {
     /// List dictionaries in the library
     List,
+
+    /// Show the R2 mirror size, grouped by dictionary language
+    Size {
+        /// Only show dictionary zips for this language (e.g. ja-JP)
+        #[arg(long)]
+        lang: Option<String>,
+    },
 
     /// Add a Yomitan dictionary zip (local path or http(s) URL) to the library
     Add {
@@ -141,6 +150,7 @@ async fn main() -> Result<()> {
                 );
             }
         }
+        Cmd::Size { lang } => size(&lib, lang.as_deref())?,
         Cmd::Add {
             source,
             name,
@@ -525,4 +535,119 @@ fn upload(lib: &Library, remote: &str, dry_run: bool) -> Result<()> {
         MANIFEST,
     ])?;
     Ok(())
+}
+
+fn size(lib: &Library, lang: Option<&str>) -> Result<()> {
+    let manifest = lib.check_fresh()?;
+    let lang_filter = lang
+        .map(|lang| {
+            parse_lang(lang)
+                .map(|lang| lang.to_string())
+                .with_context(|| format!("unsupported language {lang}"))
+        })
+        .transpose()?;
+    let zip_sizes = zip_size_by_lang(&manifest.dicts, lang_filter.as_deref());
+
+    println!("Language\tDictionaries\tZIP size");
+    for (lang, (count, bytes)) in &zip_sizes {
+        println!("{lang}\t{count}\t{:.1} MB", *bytes as f64 / 1e6);
+    }
+    let zip_total: u64 = zip_sizes.values().map(|(_, size)| size).sum();
+    let dict_count: usize = zip_sizes.values().map(|(count, _)| count).sum();
+    println!("ZIP total\t{dict_count}\t{:.1} MB", zip_total as f64 / 1e6);
+
+    if lang_filter.is_some() {
+        println!("(ZIP total is filtered; shared files and upload remain whole-library.)");
+    } else {
+        let dicts_path = lib.dir.join(DICTS_JSON);
+        let dicts_size = match std::fs::metadata(dicts_path) {
+            Ok(metadata) => metadata.len(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
+            Err(error) => return Err(error.into()),
+        };
+        let shared_files = [
+            (SEARCH_DB, std::fs::metadata(lib.dir.join(SEARCH_DB))?.len()),
+            (DICTS_JSON, dicts_size),
+            (MANIFEST, std::fs::metadata(lib.dir.join(MANIFEST))?.len()),
+        ];
+        let shared_total: u64 = shared_files.iter().map(|(_, size)| size).sum();
+        for (file, bytes) in shared_files {
+            println!("{file}\t\t{:.1} MB", bytes as f64 / 1e6);
+        }
+        println!(
+            "R2 mirror total\t\t{:.1} MB",
+            (zip_total + shared_total) as f64 / 1e6
+        );
+    }
+    Ok(())
+}
+
+fn zip_size_by_lang(
+    dicts: &[ManifestDict],
+    lang_filter: Option<&str>,
+) -> BTreeMap<String, (usize, u64)> {
+    let mut sizes = BTreeMap::new();
+    for dict in dicts {
+        let lang = dict
+            .lang
+            .as_deref()
+            .map(|lang| {
+                parse_lang(lang)
+                    .map(|lang| lang.to_string())
+                    .unwrap_or_else(|| lang.to_string())
+            })
+            .unwrap_or_else(|| "unknown".to_string());
+        if lang_filter.is_some_and(|filter| filter != lang) {
+            continue;
+        }
+        let (count, size) = sizes.entry(lang).or_insert((0, 0));
+        *count += 1;
+        *size += dict.file.size;
+    }
+    sizes
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::library::FileInfo;
+
+    fn dict(name: &str, lang: Option<&str>, size: u64) -> ManifestDict {
+        ManifestDict {
+            name: name.into(),
+            title: name.into(),
+            revision: "1".into(),
+            lang: lang.map(String::from),
+            term_count: 0,
+            file: FileInfo {
+                file: format!("{name}.zip"),
+                size,
+                sha256: String::new(),
+            },
+        }
+    }
+
+    #[test]
+    fn zip_sizes_are_grouped_and_filterable_by_language() {
+        let dicts = [
+            dict("ja-one", Some("ja"), 10),
+            dict("ja-two", Some("ja-JP"), 20),
+            dict("zh", Some("zh-CN"), 30),
+            dict("unknown", None, 40),
+        ];
+
+        assert_eq!(
+            zip_size_by_lang(&dicts, None),
+            BTreeMap::from([
+                ("ja-JP".into(), (2, 30)),
+                ("unknown".into(), (1, 40)),
+                ("zh-CN".into(), (1, 30)),
+            ])
+        );
+        assert_eq!(
+            zip_size_by_lang(&dicts, Some("ja-JP")),
+            BTreeMap::from([("ja-JP".into(), (2, 30))])
+        );
+        assert!(zip_size_by_lang(&dicts, Some("ko-KR")).is_empty());
+    }
 }
