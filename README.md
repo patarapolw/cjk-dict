@@ -16,7 +16,7 @@ app/              Tauri app (Vue 3 + PrimeVue); app/src-tauri is its own Cargo w
 
 All commands below run from the repo root and work the same in bash and PowerShell. Run `pnpm install` once first.
 
-Local development needs no settings: `pnpm serve` serves `library/` over HTTP with rclone, `pnpm dev` runs the app against it, and `dict-admin` defaults to `library/` and `tmp/lindera`. Production settings (R2 keys, the rclone upload destination, the PrimeUI license) go in `.env` at the repo root (gitignored); copy `.env.example`. The one file is read by the app's Rust build, by Vite (`VITE_*`) and by `dict-admin`. Variables already set in the environment take precedence. `pnpm format` runs Prettier, and `pnpm typecheck` checks the app.
+Local development needs no settings: `pnpm serve` serves `library/` over HTTP with rclone, `pnpm dev` runs the app against it, and `dict-admin` defaults to `library/` and `tmp/lindera`. Production settings (R2 keys and the rclone upload destination) go in `.env` at the repo root (gitignored); copy `.env.example`. The one file is read by the app's Rust build, by Vite (`VITE_*`) and by `dict-admin`. Variables already set in the environment take precedence. `pnpm format` runs Prettier, and `pnpm typecheck` checks the app.
 
 ## Security
 
@@ -101,4 +101,4 @@ On start, the app compares the remote `manifest.json` with its own copy and down
 - The search language (header) is the only setting; it is remembered per device.
 - Optional: search by reading (pinyin is expanded to all tones), auto-convert romaji to kana, and a clipboard monitor that searches whatever CJK text you copy.
 - Images in definitions are served from the zips through a `dict://` protocol.
-- PrimeVue shows an "Invalid PrimeUI License" badge unless `VITE_PRIMEUI_LICENSE_KEY` is set. The CSP allows inline styles (`style-src 'unsafe-inline'`), which PrimeVue's runtime theme needs.
+- The CSP allows inline styles (`style-src 'unsafe-inline'`), which PrimeVue's runtime theme needs.

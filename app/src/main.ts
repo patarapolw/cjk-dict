@@ -14,7 +14,6 @@ createApp(App)
     theme: {
       preset: Aura,
     },
-    license: import.meta.env.VITE_PRIMEUI_LICENSE_KEY,
   })
   .directive("tooltip", Tooltip)
   .use(router)
