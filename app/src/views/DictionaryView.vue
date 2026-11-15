@@ -1,8 +1,9 @@
 <template>
   <main class="container">
     <header>
-      <InputGroup>
-        <InputText
+      <div class="search-group">
+        <input
+          class="search-input"
           inputmode="search"
           name="term"
           v-model="q"
@@ -12,25 +13,33 @@
           autocomplete="off"
           spellcheck="false"
           @input="onTermInput"
-          fluid
         />
-        <InputGroupAddon>
-          <SelectButton
-            v-model="qState"
-            :options="qStateOptions"
-            option-label="label"
-            option-value="value"
-            option-disabled="disabled"
-            v-tooltip.bottom="
+        <div class="search-modes" role="group" aria-label="Search mode">
+          <button
+            type="button"
+            :aria-pressed="qState === 'fts'"
+            :disabled="tokenizerPending"
+            :title="
               tokenizerPending
                 ? '~ (token search) is available once the tokenizer download finishes'
                 : undefined
             "
-          />
-        </InputGroupAddon>
-      </InputGroup>
-      <InputText
+            @click="toggleQueryState('fts')"
+          >
+            ~
+          </button>
+          <button
+            type="button"
+            :aria-pressed="qState === 'exact'"
+            @click="toggleQueryState('exact')"
+          >
+            =
+          </button>
+        </div>
+      </div>
+      <input
         v-if="searchReading"
+        class="search-input"
         inputmode="search"
         name="reading"
         v-model="reading"
@@ -40,7 +49,6 @@
         autocomplete="off"
         spellcheck="false"
         @input="onTermInput"
-        fluid
       />
       <nav>
         <label v-if="lang !== 'ko-KR'">
@@ -54,49 +62,40 @@
         </label>
 
         <label>
-          <input
-            type="checkbox"
-            name="clipboard"
-            v-model="clipboardMonitor"
-          />
+          <input type="checkbox" name="clipboard" v-model="clipboardMonitor" />
           <span>Clipboard monitor</span>
         </label>
       </nav>
     </header>
     <div class="scroller" ref="scroller" @scroll.passive="onScroll">
-      <Accordion multiple v-model:value="openedItems">
-        <AccordionPanel v-for="it in items" :key="it.id" :value="it.id">
-          <AccordionHeader>
-            <span v-if="!openedItems.includes(it.id)">
-              {{ it.entries[0]?.term || it.term }}
-            </span>
-          </AccordionHeader>
-          <AccordionContent>
-            <Term
-              v-for="(ent, j) in it.entries"
-              :key="j"
-              :row="ent"
-              :dictionary="ent.dict_path"
-              :get-asset-src="getAssetSrc"
-              @anchor-clicked="onAnchorClicked"
-            />
-          </AccordionContent>
-        </AccordionPanel>
-      </Accordion>
+      <section v-for="it in items" :key="it.id" class="accordion-item">
+        <button
+          type="button"
+          class="accordion-header"
+          :aria-expanded="openedItems.includes(it.id)"
+          :aria-label="it.entries[0]?.term || it.term"
+          @click="toggleItem(it.id)"
+        >
+          <span v-if="!openedItems.includes(it.id)">
+            {{ it.entries[0]?.term || it.term }}
+          </span>
+        </button>
+        <div v-if="openedItems.includes(it.id)" class="accordion-content">
+          <Term
+            v-for="(ent, j) in it.entries"
+            :key="j"
+            :row="ent"
+            :dictionary="ent.dict_path"
+            :get-asset-src="getAssetSrc"
+            @anchor-clicked="onAnchorClicked"
+          />
+        </div>
+      </section>
     </div>
   </main>
 </template>
 
 <script setup lang="ts">
-import Accordion from "primevue/accordion";
-import AccordionContent from "primevue/accordioncontent";
-import AccordionHeader from "primevue/accordionheader";
-import AccordionPanel from "primevue/accordionpanel";
-import InputGroup from "primevue/inputgroup";
-import InputGroupAddon from "primevue/inputgroupaddon";
-import InputText from "primevue/inputtext";
-import SelectButton from "primevue/selectbutton";
-
 import { invoke } from "@tauri-apps/api/core";
 import {
   computed,
@@ -122,11 +121,17 @@ const openedItems = ref<number[]>([]);
 
 // "~" needs the lindera tokenizer, which downloads in the background on first launch
 const tokenizerPending = computed(() => toBeLoaded.value.some((d) => !d.dict));
-const qStateOptions = computed(() => [
-  { label: "~", value: "fts", disabled: tokenizerPending.value },
-  { label: "=", value: "exact", disabled: false },
-]);
 const qState = ref<string | null>(null);
+
+function toggleQueryState(value: string) {
+  qState.value = qState.value === value ? null : value;
+}
+
+function toggleItem(id: number) {
+  openedItems.value = openedItems.value.includes(id)
+    ? openedItems.value.filter((itemId) => itemId !== id)
+    : [...openedItems.value, id];
+}
 
 const searchReading = ref(false);
 const autoKana = ref(lang.value === "ja-JP");
@@ -393,6 +398,60 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-rows: auto 1fr;
 
+  .search-group {
+    display: flex;
+    width: 100%;
+  }
+
+  .search-input {
+    box-sizing: border-box;
+    min-width: 0;
+    width: 100%;
+    padding: 0.5rem;
+    border: 1px solid var(--app-input-border);
+    background: var(--app-surface);
+    color: var(--app-text);
+    border-radius: 0.25rem;
+    font: inherit;
+  }
+
+  .search-group .search-input {
+    border-radius: 0.25rem 0 0 0.25rem;
+  }
+
+  .search-modes {
+    display: flex;
+  }
+
+  .search-modes button {
+    min-width: 2.5rem;
+    border: 1px solid var(--app-input-border);
+    border-left: 0;
+    background: var(--app-control-background);
+    color: var(--app-text);
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .search-modes button:last-child {
+    border-radius: 0 0.25rem 0.25rem 0;
+  }
+
+  .search-modes button[aria-pressed="true"] {
+    background: var(--app-selected-background);
+  }
+
+  .search-modes button:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
+
+  input:focus-visible,
+  button:focus-visible {
+    outline: 2px solid var(--app-focus);
+    outline-offset: 2px;
+  }
+
   nav * + * {
     margin-inline-start: 0.5em;
   }
@@ -404,6 +463,38 @@ onBeforeUnmount(() => {
 
 .scroller {
   overflow: auto;
+}
+
+.accordion-item {
+  border-bottom: 1px solid var(--app-border);
+}
+
+.accordion-header {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 2.5rem;
+  padding: 0.5rem;
+  border: 0;
+  background: var(--app-surface);
+  color: var(--app-text);
+  text-align: start;
+  font: inherit;
+  cursor: pointer;
+}
+
+.accordion-header::before {
+  content: "›";
+  margin-inline-end: 0.5rem;
+  transition: transform 150ms ease;
+}
+
+.accordion-header[aria-expanded="true"]::before {
+  transform: rotate(90deg);
+}
+
+.accordion-content {
+  padding: 0.5rem;
 }
 
 .row {

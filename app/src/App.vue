@@ -2,13 +2,15 @@
   <div class="layout">
     <header class="header">
       <span class="header-title">CJK Dictionary</span>
-      <Select
-        v-model="lang"
-        :options="langSelectOptions"
-        option-label="label"
-        option-value="value"
-        size="small"
-      />
+      <select v-model="lang" aria-label="Search language">
+        <option
+          v-for="option in langSelectOptions"
+          :key="option.value"
+          :value="option.value"
+        >
+          {{ option.label }}
+        </option>
+      </select>
     </header>
     <RouterView />
   </div>
@@ -24,19 +26,21 @@
         Downloading ({{ toBeLoaded.length }} left)
       </span>
       <span v-else>Download failed</span>
-      <Button
-        :label="downloadsCollapsed ? 'Show' : 'Hide'"
-        size="small"
-        text
+      <button
+        type="button"
+        class="text-button"
         @click="downloadsCollapsed = !downloadsCollapsed"
-      />
-      <Button
+      >
+        {{ downloadsCollapsed ? "Show" : "Hide" }}
+      </button>
+      <button
         v-if="!toBeLoaded.length"
-        label="Dismiss"
-        size="small"
-        text
+        type="button"
+        class="text-button"
         @click="loadErrors = []"
-      />
+      >
+        Dismiss
+      </button>
     </header>
     <div v-show="!downloadsCollapsed" class="downloads-body">
       <Downloading
@@ -62,9 +66,6 @@ import {
 } from "vue";
 
 import { invoke } from "@tauri-apps/api/core";
-
-import Button from "primevue/button";
-import Select from "primevue/select";
 
 import Downloading from "./components/Downloading.vue";
 import {
@@ -202,6 +203,24 @@ async function loadAll() {
   flex-grow: 1;
 }
 
+.header select {
+  font: inherit;
+  padding: 0.25rem 0.5rem;
+}
+
+.text-button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+}
+
+.text-button:hover {
+  text-decoration: underline;
+}
+
 .downloads {
   position: fixed;
   right: 1rem;
@@ -211,10 +230,10 @@ async function loadAll() {
   max-height: 40vh;
   overflow: auto;
   padding: 0.5rem 0.75rem;
-  border: 1px solid var(--p-content-border-color, #ccc);
+  border: 1px solid var(--app-border);
   border-radius: 0.5rem;
-  background: var(--p-content-background, #fff);
-  color: var(--p-text-color, inherit);
+  background: var(--app-surface);
+  color: var(--app-text);
   box-shadow: 0 4px 16px rgb(0 0 0 / 0.15);
   font-size: 0.875rem;
 }
@@ -234,6 +253,6 @@ async function loadAll() {
 }
 
 .downloads-error {
-  color: var(--p-red-500, #c00);
+  color: var(--app-error);
 }
 </style>

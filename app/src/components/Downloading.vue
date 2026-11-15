@@ -6,19 +6,26 @@
         ({{ progressMessage }})
       </span>
     </p>
-    <ProgressBar
+    <div
       v-if="isStarted"
-      :mode="progressMessage ? 'determinate' : 'indeterminate'"
-      :value="percentage"
-      :show-value="false"
-    />
+      class="progress"
+      :class="{ indeterminate: !progressMessage }"
+      role="progressbar"
+      :aria-label="message"
+      aria-valuemin="0"
+      aria-valuemax="100"
+      :aria-valuenow="progressMessage ? percentage : undefined"
+    >
+      <div
+        class="progress-value"
+        :style="{ width: progressMessage ? `${percentage}%` : undefined }"
+      />
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { onBeforeUnmount, ref } from "vue";
-
-import ProgressBar from "primevue/progressbar";
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
@@ -105,4 +112,31 @@ onBeforeUnmount(() => {
 });
 </script>
 
-<style scoped></style>
+<style scoped>
+.progress {
+  height: 0.5rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--app-progress-track);
+}
+
+.progress-value {
+  height: 100%;
+  background: var(--app-focus);
+  transition: width 150ms ease;
+}
+
+.progress.indeterminate .progress-value {
+  width: 40%;
+  animation: progress 1.2s ease-in-out infinite alternate;
+}
+
+@keyframes progress {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+</style>
