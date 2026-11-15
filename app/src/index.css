@@ -8,10 +8,44 @@ body {
 
 :root {
   font-family: sans-serif;
+  color-scheme: light;
+
+  --app-background: #fff;
+  --app-surface: #fff;
+  --app-text: #1f2937;
+  --app-border: #d1d5db;
+  --app-input-border: #9ca3af;
+  --app-control-background: #f3f4f6;
+  --app-selected-background: #dbeafe;
+  --app-focus: #2563eb;
+  --app-progress-track: #e5e7eb;
+  --app-error: #b91c1c;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   -webkit-text-size-adjust: 100%;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+
+    --app-background: #111827;
+    --app-surface: #1f2937;
+    --app-text: #f9fafb;
+    --app-border: #4b5563;
+    --app-input-border: #6b7280;
+    --app-control-background: #374151;
+    --app-selected-background: #1e3a5f;
+    --app-focus: #60a5fa;
+    --app-progress-track: #374151;
+    --app-error: #f87171;
+  }
+}
+
+body {
+  background: var(--app-background);
+  color: var(--app-text);
 }

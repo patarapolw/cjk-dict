@@ -408,7 +408,9 @@ onBeforeUnmount(() => {
     min-width: 0;
     width: 100%;
     padding: 0.5rem;
-    border: 1px solid #9ca3af;
+    border: 1px solid var(--app-input-border);
+    background: var(--app-surface);
+    color: var(--app-text);
     border-radius: 0.25rem;
     font: inherit;
   }
@@ -423,9 +425,10 @@ onBeforeUnmount(() => {
 
   .search-modes button {
     min-width: 2.5rem;
-    border: 1px solid #9ca3af;
+    border: 1px solid var(--app-input-border);
     border-left: 0;
-    background: #f3f4f6;
+    background: var(--app-control-background);
+    color: var(--app-text);
     font: inherit;
     cursor: pointer;
   }
@@ -435,7 +438,7 @@ onBeforeUnmount(() => {
   }
 
   .search-modes button[aria-pressed="true"] {
-    background: #dbeafe;
+    background: var(--app-selected-background);
   }
 
   .search-modes button:disabled {
@@ -445,7 +448,7 @@ onBeforeUnmount(() => {
 
   input:focus-visible,
   button:focus-visible {
-    outline: 2px solid #2563eb;
+    outline: 2px solid var(--app-focus);
     outline-offset: 2px;
   }
 
@@ -463,7 +466,7 @@ onBeforeUnmount(() => {
 }
 
 .accordion-item {
-  border-bottom: 1px solid #d1d5db;
+  border-bottom: 1px solid var(--app-border);
 }
 
 .accordion-header {
@@ -473,8 +476,8 @@ onBeforeUnmount(() => {
   min-height: 2.5rem;
   padding: 0.5rem;
   border: 0;
-  background: transparent;
-  color: inherit;
+  background: var(--app-surface);
+  color: var(--app-text);
   text-align: start;
   font: inherit;
   cursor: pointer;

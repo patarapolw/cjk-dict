@@ -230,10 +230,10 @@ async function loadAll() {
   max-height: 40vh;
   overflow: auto;
   padding: 0.5rem 0.75rem;
-  border: 1px solid var(--p-content-border-color, #ccc);
+  border: 1px solid var(--app-border);
   border-radius: 0.5rem;
-  background: var(--p-content-background, #fff);
-  color: var(--p-text-color, inherit);
+  background: var(--app-surface);
+  color: var(--app-text);
   box-shadow: 0 4px 16px rgb(0 0 0 / 0.15);
   font-size: 0.875rem;
 }
@@ -253,6 +253,6 @@ async function loadAll() {
 }
 
 .downloads-error {
-  color: var(--p-red-500, #c00);
+  color: var(--app-error);
 }
 </style>

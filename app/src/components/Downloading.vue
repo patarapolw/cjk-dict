@@ -117,12 +117,12 @@ onBeforeUnmount(() => {
   height: 0.5rem;
   overflow: hidden;
   border-radius: 999px;
-  background: #e5e7eb;
+  background: var(--app-progress-track);
 }
 
 .progress-value {
   height: 100%;
-  background: #2563eb;
+  background: var(--app-focus);
   transition: width 150ms ease;
 }
 
