@@ -76,8 +76,8 @@ pnpm serve                                 # terminal 1: local library on 127.0.
 pnpm dev                                   # terminal 2: tauri dev against it, no .env needed
 pnpm app start                             # tauri dev (desktop) against R2, from .env
 pnpm app tauri build                       # release bundle
-pnpm app tauri android init                # first time on Android
-pnpm app android
+pnpm app android                           # tauri dev (Android) without Vite dev server setup. Stays intact when detached.
+pnpm app tauri android dev                 # tauri dev (Android) with Vite dev server. May require OS firewall setup.
 ```
 
 Where the app downloads the library from is set in `.env` or by environment variables. They are read when the app is built (compiled in) and can be overridden at runtime:
