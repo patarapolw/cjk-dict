@@ -2,5 +2,7 @@ packages:
   - app
 
 # pnpm skips dependency install scripts unless allowed
-onlyBuiltDependencies:
-  - esbuild
+allowBuilds:
+  esbuild: true
+
+shellEmulator: true
