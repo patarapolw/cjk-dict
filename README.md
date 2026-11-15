@@ -49,12 +49,13 @@ pnpm admin remove MyDict
 pnpm admin list
 
 pnpm admin build                           # search.db + manifest.json
+pnpm admin rebuild                        # discard and rebuild the complete search index
 pnpm admin upload --remote r2:cjk-dict     # rclone; or set CJK_DICT_REMOTE
 ```
 
 - **`add`** copies or downloads the zip into the library as `<name>.zip`, after checking that it is a Yomitan dictionary. `--lang` overrides the zip's `sourceLanguage`.
 - **Default dictionaries** (the list the app used to download itself): Pixiv, `ja`/`zh`/`ko.Wikipedia` (MarvNC), CC-CEDICT, KO-EN.KRDICT, and `wty-ja-en`/`wty-ko-en`/`wty-zh-en` (Wiktionary). GitHub-hosted ones resolve to the asset of the repo's latest release. Set `GITHUB_TOKEN` if you hit the API's unauthenticated rate limit.
-- **`build`** rebuilds `search.db` from scratch: CC-CEDICT, 203k terms, takes about 6 s. Only terms are indexed; definitions, term/kanji meta and media stay in the zips. The lindera tokenizer dictionaries are downloaded to `tmp/lindera` on first use (`--lindera-dir`, `CJK_DICT_LINDERA_DIR`).
+- **`build`** updates `search.db` incrementally: it indexes new or changed dictionaries and removes deleted ones. It hashes the zips against the previous manifest to detect replacements. **`rebuild`** discards the current index and rebuilds it from scratch. Only terms are indexed; definitions, term/kanji meta and media stay in the zips. The lindera tokenizer dictionaries are downloaded to `tmp/lindera` when indexing is needed (`--lindera-dir`, `CJK_DICT_LINDERA_DIR`).
 - **`upload`** refuses a stale build. It copies the zips first, then `search.db`, then `manifest.json`, so the app never sees a manifest pointing at missing files. Then it deletes from R2 what was removed from the library. Behind a TLS-intercepting proxy, set `SSL_CERT_FILE`.
 
 ### R2 and rclone
