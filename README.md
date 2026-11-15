@@ -6,7 +6,7 @@ Yomitan dictionary search for Chinese, Japanese and Korean: a Tauri app (desktop
 - The **app** downloads the library, or only what changed, and searches on the device:
   - It queries `search.db` for matches.
   - It reads definitions and images straight from the zips, so nothing is indexed on the device.
-  - It also downloads the lindera tokenizer dictionaries (~300 MB, in the background on first launch), used to tokenize "~" queries.
+  - It also downloads the lindera tokenizer dictionaries (\~300 MB, in the background on first launch), used to tokenize "\~" queries.
 
 ```
 yomitan-parser/   Rust crate: Yomitan zip reader, search.db build + query, lindera tokenizer, pinyin
