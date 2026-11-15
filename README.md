@@ -47,6 +47,8 @@ pnpm admin add https://example.com/Other.zip --name Other --lang zh-CN
 pnpm admin add new/MyDict.zip --name MyDict --replace    # new revision
 pnpm admin remove MyDict
 pnpm admin list
+pnpm admin size                             # estimated R2 mirror size by language
+pnpm admin size --lang ja-JP                # only Japanese dictionary zips
 
 pnpm admin build                           # search.db + manifest.json
 pnpm admin rebuild                        # discard and rebuild the complete search index
@@ -56,6 +58,7 @@ pnpm admin upload --remote r2:cjk-dict     # rclone; or set CJK_DICT_REMOTE
 - **`add`** copies or downloads the zip into the library as `<name>.zip`, after checking that it is a Yomitan dictionary. `--lang` overrides the zip's `sourceLanguage`.
 - **Default dictionaries** (the list the app used to download itself): Pixiv, `ja`/`zh`/`ko.Wikipedia` (MarvNC), CC-CEDICT, KO-EN.KRDICT, and `wty-ja-en`/`wty-ko-en`/`wty-zh-en` (Wiktionary). GitHub-hosted ones resolve to the asset of the repo's latest release. Set `GITHUB_TOKEN` if you hit the API's unauthenticated rate limit.
 - **`build`** updates `search.db` incrementally: it indexes new or changed dictionaries and removes deleted ones. It hashes the zips against the previous manifest to detect replacements. **`rebuild`** discards the current index and rebuilds it from scratch. Only terms are indexed; definitions, term/kanji meta and media stay in the zips. The lindera tokenizer dictionaries are downloaded to `tmp/lindera` when indexing is needed (`--lindera-dir`, `CJK_DICT_LINDERA_DIR`).
+- **`size`** estimates the whole library's R2 mirror size, grouping dictionary ZIPs by language and counting shared files once. `--lang` filters the ZIP breakdown only; it does not change what `upload` sends. Run it after `build`; removing dictionaries and rebuilding lets you compare the updated storage estimate.
 - **`upload`** refuses a stale build. It copies the zips first, then `search.db`, then `manifest.json`, so the app never sees a manifest pointing at missing files. Then it deletes from R2 what was removed from the library. Behind a TLS-intercepting proxy, set `SSL_CERT_FILE`.
 
 ### R2 and rclone
