@@ -11,7 +11,7 @@ Yomitan dictionary search for Chinese, Japanese and Korean: a Tauri app (desktop
 ```
 yomitan-parser/   Rust crate: Yomitan zip reader, search.db build + query, lindera tokenizer, pinyin
 dict-admin/       Rust CLI: manage the library, build search.db, upload with rclone
-app/              Tauri app (Vue 3 + PrimeVue); app/src-tauri is its own Cargo workspace
+app/              Tauri app (Vue 3); app/src-tauri is its own Cargo workspace
 ```
 
 All commands below run from the repo root and work the same in bash and PowerShell. Run `pnpm install` once first.
@@ -101,4 +101,4 @@ On start, the app compares the remote `manifest.json` with its own copy and down
 - The search language (header) is the only setting; it is remembered per device.
 - Optional: search by reading (pinyin is expanded to all tones), auto-convert romaji to kana, and a clipboard monitor that searches whatever CJK text you copy.
 - Images in definitions are served from the zips through a `dict://` protocol.
-- The CSP allows inline styles (`style-src 'unsafe-inline'`), which PrimeVue's runtime theme needs.
+- The CSP allows inline styles (`style-src 'unsafe-inline'`), used for the download progress indicator.
