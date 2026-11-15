@@ -80,7 +80,7 @@ pnpm app android                           # tauri dev (Android) without Vite de
 pnpm app tauri android dev                 # tauri dev (Android) with Vite dev server. May require OS firewall setup.
 ```
 
-To make a release build, run `pnpm app tauri build`. On Windows, the app executable is at `app/src-tauri/target/release/cjk-dict.exe`, with installer bundles under `app/src-tauri/target/release/bundle/`. You can run the executable directly and create a shortcut instead of installing it.
+To make a desktop build, run `pnpm app tauri build`. On Windows, the app executable is at `app/src-tauri/target/release/cjk-dict-app.exe`, with installer bundles under `app/src-tauri/target/release/bundle/`. You can run the executable directly and create a shortcut instead of installing it.
 
 Where the app downloads the library from is set in `.env` or by environment variables. They are read when the app is built (compiled in) and can be overridden at runtime:
 
