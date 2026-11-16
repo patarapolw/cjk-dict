@@ -55,6 +55,7 @@
             =
           </button>
           <button
+            v-if="hasReadings"
             type="button"
             :aria-pressed="readingMode"
             title="Reading search: type only the reading, no {} needed"
@@ -86,7 +87,7 @@
             Next: {{ parsed.rest }}
           </button>
         </template>
-        <template v-else-if="readingMode">
+        <template v-else-if="readingSearch">
           Type only the reading<template v-if="examples.reading"
             >, e.g. <code>{{ examples.reading }}</code></template
           >
@@ -95,7 +96,6 @@
           Add a reading: <code>{{ examples.furigana }}</code
           >, or press <code>{}</code> to search by reading only
         </template>
-        <template v-else>Press <code>{}</code> to search by reading</template>
       </p>
       <nav>
         <label
@@ -213,6 +213,9 @@ const noResults = ref(false);
 
 /** reading search: the whole query is a reading, as if typed as `{reading}` */
 const readingMode = ref(false);
+/** Korean dictionaries have no readings: a Hangul term is its own reading */
+const hasReadings = computed(() => lang.value !== "ko-KR");
+const readingSearch = computed(() => readingMode.value && hasReadings.value);
 
 function toggleReadingMode() {
   readingMode.value = !readingMode.value;
@@ -222,7 +225,7 @@ function toggleReadingMode() {
 const parsed = computed(() => {
   const query = q.value.trim();
   // furigana syntax typed by hand still wins
-  if (readingMode.value && query && !/[<>{}＜＞｛｝]/u.test(query)) {
+  if (readingSearch.value && query && !/[<>{}＜＞｛｝]/u.test(query)) {
     return parseQuery(`{${query}}`);
   }
   return parseQuery(q.value);
@@ -262,7 +265,7 @@ const examples = computed(
 );
 
 const placeholder = computed(() =>
-  readingMode.value
+  readingSearch.value
     ? examples.value.reading || "Reading"
     : ({ "ja-JP": "日本語", "zh-CN": "中文", "ko-KR": "한국어" }[lang.value] ??
       "Search"),
