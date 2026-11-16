@@ -82,6 +82,8 @@ pnpm app tauri android dev                 # tauri dev (Android) with Vite dev s
 
 To make a desktop build, run `pnpm app tauri build`. On Windows, the app executable is at `app/src-tauri/target/release/cjk-dict-app.exe`, with installer bundles under `app/src-tauri/target/release/bundle/`. You can run the executable directly and create a shortcut instead of installing it.
 
+To debug in VS Code on Windows, use the launch configurations in [`.vscode/launch.json`](.vscode/launch.json), adapted from [Tauri's VS Code guide](https://tauri.app/develop/debug/vscode/): **App** builds and starts the app under the Visual Studio debugger (C/C++ extension) for breakpoints in Rust, **WebView** attaches to the frontend for breakpoints in TypeScript and Vue, and **App + WebView** does both. They start the app without the Tauri CLI, running Vite and `cargo build` as tasks instead.
+
 Where the app downloads the library from is set in `.env` or by environment variables. They are read when the app is built (compiled in) and can be overridden at runtime:
 
 | Variable                        | Value                                                            |

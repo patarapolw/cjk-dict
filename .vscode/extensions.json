@@ -3,6 +3,8 @@
     "Vue.volar",
     "esbenp.prettier-vscode",
     "rust-lang.rust-analyzer",
-    "tauri-apps.tauri-vscode"
+    "tauri-apps.tauri-vscode",
+    // the Visual Studio debugger (cppvsdbg) in launch.json
+    "ms-vscode.cpptools"
   ]
 }
