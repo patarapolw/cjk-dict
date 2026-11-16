@@ -91,6 +91,16 @@ CREATE INDEX IF NOT EXISTS idx_term_roman_score ON term_roman (score);
 const ROMAN_UPSERT: &str = "INSERT INTO term_roman (key, search_id, score) VALUES (?1, ?2, ?3)
      ON CONFLICT DO UPDATE SET score = excluded.score";
 
+/// [`korean::keys`] of the reading, e.g. 광속 for 光速, or else of the term.
+fn roman_keys(term: &str, reading: &str) -> Vec<String> {
+    let keys = korean::keys(reading.trim());
+    if keys.is_empty() {
+        korean::keys(term)
+    } else {
+        keys
+    }
+}
+
 fn has_table(conn: &Connection, name: &str) -> rusqlite::Result<bool> {
     Ok(conn
         .query_row(
@@ -196,18 +206,19 @@ async fn build_inner(
         progress("romanization keys", 0, 0);
         let tx = conn.transaction()?;
         {
-            let mut st = tx.prepare("SELECT id, term, score FROM term_search")?;
+            let mut st = tx.prepare("SELECT id, term, reading, score FROM term_search")?;
             let mut ins = tx.prepare(ROMAN_UPSERT)?;
             let rows = st.query_map([], |r| {
                 Ok((
                     r.get::<_, i64>(0)?,
                     r.get::<_, String>(1)?,
-                    r.get::<_, Option<i64>>(2)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, Option<i64>>(3)?,
                 ))
             })?;
             for row in rows {
-                let (id, term, score) = row?;
-                for key in korean::keys(&term) {
+                let (id, term, reading, score) = row?;
+                for key in roman_keys(&term, &reading) {
                     ins.execute(params![key, id, score])?;
                 }
             }
@@ -332,7 +343,7 @@ async fn build_inner(
                         |r| Ok((r.get(0)?, r.get(1)?)),
                     )?;
                     link.execute(params![search_id, dict_id, bank.index, idx as i64])?;
-                    for key in korean::keys(&p1) {
+                    for key in roman_keys(&p1, &p5) {
                         roman.execute(params![key, search_id, score])?;
                     }
                     count += 1;
@@ -354,6 +365,12 @@ async fn build_inner(
         });
     }
 
+    #[cfg(feature = "hangul-readings")]
+    {
+        progress("Hangul readings", 0, 0);
+        fill_hangul_readings(&mut conn)?;
+    }
+
     if !has_existing {
         progress("full-text index", 0, 0);
         conn.execute_batch(
@@ -366,6 +383,111 @@ async fn build_inner(
     drop(conn);
     std::fs::rename(&tmp, out)?;
     Ok(infos)
+}
+
+/// Korean dictionaries give no readings: give Korean headwords written in Hanja one in
+/// Hangul ([`crate::hanja::hangul_readings`]), so that `{광속}` finds 光速. Of the readings a
+/// word with characters of several readings can have (樂: 락, 낙, 악, 요), the one that is a
+/// Hangul headword too is kept, else the most likely one.
+///
+/// Runs after every build, so an update fills in a search.db from before this, and the rows
+/// of a re-indexed dictionary (inserted without a reading) are merged into the rows that
+/// already have one.
+#[cfg(feature = "hangul-readings")]
+fn fill_hangul_readings(conn: &mut Connection) -> Result<usize, YomitanError> {
+    use crate::hanja::hangul_readings;
+    use hanja_hangul::contains_hanja;
+
+    let tx = conn.transaction()?;
+    let mut filled = 0;
+    {
+        // Korean only: a dictionary without a language gives Han terms tokens of every language
+        let mut st = tx.prepare(
+            "SELECT id, term FROM term_search
+             WHERE reading = '' AND term_ko != '' AND term_ja = '' AND term_zh = ''",
+        )?;
+        let mut rows: Vec<(i64, String)> = st
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<Result<_, _>>()?;
+        rows.retain(|(_, term)| contains_hanja(term));
+
+        let mut is_headword =
+            tx.prepare("SELECT 1 FROM term_search WHERE term = ?1 AND term_ko != '' LIMIT 1")?;
+        let mut set = tx.prepare(
+            "UPDATE OR IGNORE term_search SET reading = ?2 WHERE id = ?1 RETURNING score",
+        )?;
+        // the row already there with this term and reading, for the same languages
+        let mut same = tx.prepare(
+            "SELECT t.id FROM term_search s JOIN term_search t ON t.term = s.term
+             WHERE s.id = ?1 AND t.reading = ?2 AND t.id != s.id
+               AND (t.term_ja != '') = (s.term_ja != '') AND (t.term_zh != '') = (s.term_zh != '')
+               AND (t.term_ko != '') = (s.term_ko != '')",
+        )?;
+        // merged like the build's upsert
+        let mut merge = tx.prepare(
+            "UPDATE term_search AS t SET
+               def_tags = CASE WHEN t.def_tags IS s.def_tags THEN t.def_tags ELSE NULLIF(trim(printf('%s %s', t.def_tags, s.def_tags)), '') END,
+               rules = CASE WHEN t.rules IS s.rules THEN t.rules ELSE NULLIF(trim(printf('%s %s', t.rules, s.rules)), '') END,
+               tags = CASE WHEN t.tags IS s.tags THEN t.tags ELSE NULLIF(trim(printf('%s %s', t.tags, s.tags)), '') END,
+               score = max(coalesce(t.score, s.score), coalesce(s.score, t.score))
+             FROM term_search AS s WHERE t.id = ?1 AND s.id = ?2
+             RETURNING score",
+        )?;
+        let mut move_links = tx.prepare(
+            "INSERT OR IGNORE INTO term_link (search_id, dict_id, bank, idx)
+             SELECT ?1, dict_id, bank, idx FROM term_link WHERE search_id = ?2",
+        )?;
+        let mut drop_links = tx.prepare("DELETE FROM term_link WHERE search_id = ?1")?;
+        let mut drop_roman = tx.prepare("DELETE FROM term_roman WHERE search_id = ?1")?;
+        let mut drop_row = tx.prepare("DELETE FROM term_search WHERE id = ?1")?;
+        let mut roman_score =
+            tx.prepare("UPDATE term_roman SET score = ?2 WHERE search_id = ?1")?;
+        let mut roman = tx.prepare(ROMAN_UPSERT)?;
+
+        for (id, term) in rows {
+            let readings = hangul_readings(&term);
+            let Some(mut reading) = readings.first().cloned() else {
+                continue;
+            };
+            if readings.len() > 1 {
+                for r in &readings {
+                    if is_headword.exists([normalize_text(r)])? {
+                        reading = r.clone();
+                        break;
+                    }
+                }
+            }
+            let reading = format!(" {} ", normalize_text(&reading));
+
+            let (target, score): (i64, Option<i64>) = match set
+                .query_row(params![id, reading], |r| r.get(0))
+                .optional()?
+            {
+                Some(score) => (id, score),
+                None => {
+                    let Some(target) = same
+                        .query_row(params![id, reading], |r| r.get::<_, i64>(0))
+                        .optional()?
+                    else {
+                        continue;
+                    };
+                    let score = merge.query_row(params![target, id], |r| r.get(0))?;
+                    move_links.execute(params![target, id])?;
+                    drop_links.execute([id])?;
+                    drop_roman.execute([id])?;
+                    drop_row.execute([id])?;
+                    roman_score.execute(params![target, score])?;
+                    (target, score)
+                }
+            };
+            for key in roman_keys(&term, &reading) {
+                roman.execute(params![key, target, score])?;
+            }
+            filled += 1;
+        }
+    }
+    tx.commit()?;
+    Ok(filled)
 }
 
 #[cfg(test)]
@@ -1034,7 +1156,39 @@ impl SearchDb {
                 format!("term_{lang} != '' AND ")
             };
 
-            if let (Some(roman), true) = (&roman, self.has_roman) {
+            // Korean: a Hangul word is its own reading. Typed as a term or as `{reading}`, it
+            // finds Hangul headwords spelled so and Hanja headwords read so (광속: 光速).
+            let is_fts = req.kind.as_deref() == Some("fts");
+            let hangul_word = if roman.is_some() || is_fts || !["", "ko"].contains(&lang) {
+                None
+            } else if reading.is_empty() && req.reading_glob.trim().is_empty() {
+                Some(req.term.trim())
+            } else if req.term.trim().is_empty() && readings.len() == 1 {
+                Some(reading)
+            } else {
+                None
+            }
+            .filter(|w| korean::is_hangul(w))
+            .map(normalize_text);
+
+            if let Some(word) = hangul_word {
+                let (op, term) = if is_exact {
+                    ("=", word.clone())
+                } else {
+                    ("GLOB", format!("{word}*"))
+                };
+                let sql = format!(
+                    "SELECT * FROM term_search WHERE {lang_filter}id IN (
+                       SELECT id FROM term_search WHERE term {op} ?1
+                       UNION SELECT rowid FROM term_search_fts WHERE term_search_fts MATCH ?2
+                     ) ORDER BY score DESC LIMIT {} OFFSET {}",
+                    limit + 1,
+                    offset
+                );
+                let mut st = conn.prepare_cached(&sql)?;
+                st.query_map(params![term, reading_match(&[word], !is_exact)], map_row)?
+                    .collect::<Result<_, _>>()?
+            } else if let (Some(roman), true) = (&roman, self.has_roman) {
                 search_roman(&conn, roman, &lang_filter, limit + 1, offset, map_row)?
             } else if let Some(roman) = roman {
                 // search.db from before `term_roman`: the rows whose first character the query
@@ -1068,7 +1222,7 @@ impl SearchDb {
                     st.query_map(params_from_iter(ps.iter()), map_row)?
                         .collect::<Result<_, _>>()?
                 }
-            } else if req.kind.as_deref() == Some("fts") {
+            } else if is_fts {
                 let langs: Vec<&str> = if lang.is_empty() {
                     vec!["ja", "zh", "ko"]
                 } else {
@@ -1308,5 +1462,159 @@ impl SearchDb {
             .query_row("SELECT 1 FROM dict WHERE name = ?1", [name], |_| Ok(()))
             .optional()?
             .is_some())
+    }
+}
+
+#[cfg(all(test, feature = "hangul-readings"))]
+mod hangul_reading_tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn terms(db: &SearchDb, req: SearchRequest) -> Vec<String> {
+        db.search(&SearchRequest {
+            lang: "ko-KR".into(),
+            ..req
+        })
+        .unwrap()
+        .items
+        .into_iter()
+        .map(|i| i.term)
+        .collect()
+    }
+
+    /// A build gives Korean Hanja headwords Hangul readings, which search then finds.
+    #[tokio::test]
+    async fn hanja_headwords_get_hangul_readings() {
+        let id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("cjk-dict-hanja-{}-{id}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("search.db");
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        conn.execute_batch(FTS_TRIGGERS).unwrap();
+        conn.execute("INSERT INTO dict (name, title) VALUES ('ko', 'Korean')", [])
+            .unwrap();
+        // (term, reading, score); Korean unless noted
+        for (term, reading, score) in [
+            ("光速", "", 10),
+            ("광속", "", 20),
+            ("光나다", "", 0),
+            // 樂 is read 악, 낙, 요, ...: 요 is the one that is a headword here
+            ("樂", "", 0),
+            ("요", "", 0),
+            // the same word from a dictionary that was indexed again: merged into the row
+            // that already has the reading
+            ("克己", " 극기 ", 5),
+            ("克己", "", 7),
+        ] {
+            conn.execute(
+                "INSERT INTO term_search (term, term_ko, reading, score, tags) VALUES (?1, ?1, ?2, ?3, ?4)",
+                params![term, reading, score, format!("t{score}")],
+            )
+            .unwrap();
+        }
+        // Japanese: no Hangul reading
+        conn.execute(
+            "INSERT INTO term_search (term, term_ja, reading) VALUES ('光速', '光速', ' こうそく ')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO term_search (term, term_ja, term_zh, term_ko) VALUES ('光', '光', '光', '光')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO term_link (search_id, dict_id, bank, idx) SELECT id, 1, 1, id FROM term_search",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let tok = TokenizerMapper::new(dir.clone());
+        build_incremental(&db_path, &[], &[], &tok, |_, _, _| {})
+            .await
+            .unwrap();
+
+        let conn = Connection::open(&db_path).unwrap();
+        let readings: Vec<(String, String, Option<i64>, Option<String>, i64)> = conn
+            .prepare(
+                "SELECT term, reading, score, tags, (SELECT count(*) FROM term_link WHERE search_id = id)
+                 FROM term_search ORDER BY id",
+            )
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        let readings: Vec<_> = readings
+            .iter()
+            .map(|(t, r, s, tags, links)| {
+                (
+                    t.as_str(),
+                    r.as_str(),
+                    *s,
+                    tags.as_deref().unwrap_or(""),
+                    *links,
+                )
+            })
+            .collect();
+        assert_eq!(
+            readings,
+            [
+                ("光速", " 광속 ", Some(10), "t10", 1),
+                ("광속", "", Some(20), "t20", 1),
+                ("光나다", " 광나다 ", Some(0), "t0", 1),
+                ("樂", " 요 ", Some(0), "t0", 1),
+                ("요", "", Some(0), "t0", 1),
+                ("克己", " 극기 ", Some(7), "t5 t7", 2),
+                ("光速", " こうそく ", None, "", 1),
+                ("光", "", None, "", 1),
+            ]
+        );
+        drop(conn);
+
+        let db = SearchDb::open(&db_path, &dir).unwrap();
+        let req = |term: &str, reading: &str, kind: Option<&str>| SearchRequest {
+            term: term.into(),
+            reading: reading.into(),
+            kind: kind.map(String::from),
+            ..Default::default()
+        };
+        // {광속}: by reading; a Hangul word is its own reading
+        assert_eq!(terms(&db, req("", "광속", Some("exact"))), ["광속", "光速"]);
+        assert_eq!(terms(&db, req("", "광", None)), ["광속", "光速", "光나다"]);
+        // 광속: Hanja headwords read so too
+        assert_eq!(terms(&db, req("광속", "", Some("exact"))), ["광속", "光速"]);
+        // <光速>{광속}
+        assert_eq!(terms(&db, req("光速", "광속", Some("exact"))), ["光速"]);
+        assert_eq!(
+            terms(&db, req("光나다", "광나다", Some("exact"))),
+            ["光나다"]
+        );
+        // by romanization
+        assert_eq!(
+            terms(
+                &db,
+                SearchRequest {
+                    romanized: true,
+                    ..req("gwangsok", "", Some("exact"))
+                }
+            ),
+            ["광속", "光速"]
+        );
+        // Japanese is left alone
+        let ja = db
+            .search(&SearchRequest {
+                lang: "ja-JP".into(),
+                ..req("", "こうそく", Some("exact"))
+            })
+            .unwrap();
+        assert_eq!(ja.items.len(), 1);
+        drop(db);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

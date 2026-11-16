@@ -299,6 +299,12 @@ pub fn keys(term: &str) -> Vec<String> {
     }
 }
 
+/// `text` is Hangul syllables, possibly with spaces: a Korean word that spells its own reading.
+pub fn is_hangul(text: &str) -> bool {
+    text.chars().any(|c| decompose(c).is_some())
+        && text.chars().all(|c| decompose(c).is_some() || c == ' ')
+}
+
 /// Typed text is romanization: Latin letters, with optional `-`, `'`, `.` or spaces.
 pub fn is_romanization(text: &str) -> bool {
     text.chars().any(|c| c.is_ascii_alphabetic())
@@ -459,6 +465,17 @@ mod tests {
         assert_eq!(q("ha", true).rank("해"), 2);
         assert_eq!(q("ha", true).rank("하늘"), 1);
         assert_eq!(q("hangug", false).rank("한국어"), 0);
+    }
+
+    #[test]
+    fn hangul_words() {
+        assert!(is_hangul("광속"));
+        assert!(is_hangul("한국 사람"));
+        assert!(!is_hangul("光速"));
+        assert!(!is_hangul("光나다"));
+        assert!(!is_hangul("ㄱ"));
+        assert!(!is_hangul(" "));
+        assert!(!is_hangul(""));
     }
 
     #[test]

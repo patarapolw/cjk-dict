@@ -10,6 +10,9 @@ default = []
 zip = ["dep:zip"]
 # search.db: build it from zips (dict-admin) and query it, reading entries/media from the zips (app)
 search = ["zip", "dep:rusqlite"]
+# search.db build: Hangul readings for Korean headwords written in Hanja (dict-admin only;
+# hanja_hangul embeds its tables, partly CC BY-SA 2.0 KR, so the app leaves it out)
+hangul-readings = ["search", "dep:hanja_hangul"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -17,6 +20,7 @@ serde_json = { version = "1", features = ["raw_value"] }
 tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread", "sync"] }
 zip = { version = "8.6.0", optional = true }
 rusqlite = { version = "0.37", features = ["bundled", "functions"], optional = true }
+hanja_hangul = { version = "0.2", optional = true }
 lindera = "6.2.0"
 lindera-analysis = "6.2.0"
 unicode-normalization = "0.1"
