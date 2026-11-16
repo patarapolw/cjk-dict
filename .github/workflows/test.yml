@@ -49,3 +49,5 @@ jobs:
         with:
           components: rustfmt
       - run: cargo fmt --all --check
+      # the Tauri app is its own workspace, which the root one excludes
+      - run: cargo fmt --all --check --manifest-path app/src-tauri/Cargo.toml

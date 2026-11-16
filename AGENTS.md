@@ -27,8 +27,10 @@
   you changed:
 
   ```sh
-  pnpm format       # Prettier: TypeScript, Vue, JSON, Markdown, ... (see .prettierignore)
-  cargo fmt --all   # Rust
+  pnpm format      # Prettier: TypeScript, Vue, JSON, Markdown, ... (see .prettierignore)
+  cargo fmt --all  # Rust workspace
+  # the Tauri app is its own Rust workspace, which the one above excludes
+  cargo fmt --all --manifest-path app/src-tauri/Cargo.toml
   ```
 
 - Commit formatting changes to files you didn't otherwise touch too (leftovers from
