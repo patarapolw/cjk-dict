@@ -1,4 +1,6 @@
 pub mod error;
+#[cfg(feature = "hangul-readings")]
+pub mod hanja;
 pub mod korean;
 #[cfg(feature = "zip")]
 pub mod parser;

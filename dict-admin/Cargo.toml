@@ -5,7 +5,7 @@ edition = "2024"
 description = "Admin CLI: manage the Yomitan dictionary library, build search.db, upload to R2 with rclone"
 
 [dependencies]
-yomitan-parser = { path = "../yomitan-parser", features = ["search"] }
+yomitan-parser = { path = "../yomitan-parser", features = ["search", "hangul-readings"] }
 anyhow = "1"
 dotenvy = "0.15"
 regex = "1"

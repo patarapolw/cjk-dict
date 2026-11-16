@@ -6,6 +6,8 @@ import { toHiragana } from "wanakana";
  */
 
 const KANA = /^[\p{scx=Hiragana}\p{scx=Katakana}ー]+$/u;
+/** spells its own reading outside `<>{}`: kana, and Hangul (`<光>{광}나다`) */
+const SELF_READING = /^[\p{scx=Hiragana}\p{scx=Katakana}ー\p{sc=Hangul}]+$/u;
 const KANA_OR_WILDCARD = /^[\p{scx=Hiragana}\p{scx=Katakana}ー*?]+$/u;
 /** a run of characters whose reading the IME (or the dictionary) supplies */
 const KANJI_RUN = /([\p{sc=Han}\p{N}々〆ヵヶ]+)/u;
@@ -63,8 +65,8 @@ export function parseQuery(raw: string): ParsedQuery {
     } else if (plain !== undefined) {
       const text = plain.replace(/[<>]/g, "");
       term += text;
-      // kana spell themselves; anything else is a reading to fill in
-      for (const c of text) reading += KANA.test(c) ? c : "*";
+      // kana and Hangul spell themselves; anything else is a reading to fill in
+      for (const c of text) reading += SELF_READING.test(c) ? c : "*";
     }
   }
 

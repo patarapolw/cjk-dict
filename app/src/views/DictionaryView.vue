@@ -55,7 +55,6 @@
             =
           </button>
           <button
-            v-if="hasReadings"
             type="button"
             :aria-pressed="readingMode"
             title="Reading search: type only the reading, no {} needed"
@@ -88,7 +87,7 @@
             Next: {{ parsed.rest }}
           </button>
         </template>
-        <template v-else-if="readingSearch">
+        <template v-else-if="readingMode">
           Type only the reading<template v-if="examples.reading"
             >, e.g. <code>{{ examples.reading }}</code></template
           >
@@ -221,11 +220,11 @@ const items = ref<Item[]>([]);
 const openedItems = ref<number[]>([]);
 const noResults = ref(false);
 
-/** reading search: the whole query is a reading, as if typed as `{reading}` */
+/**
+ * reading search: the whole query is a reading, as if typed as `{reading}`. Korean
+ * headwords in Hanja get Hangul readings in search.db; a Hangul headword is its own reading.
+ */
 const readingMode = ref(false);
-/** Korean dictionaries have no readings: a Hangul term is its own reading */
-const hasReadings = computed(() => lang.value !== "ko-KR");
-const readingSearch = computed(() => readingMode.value && hasReadings.value);
 
 function toggleReadingMode() {
   readingMode.value = !readingMode.value;
@@ -235,7 +234,7 @@ function toggleReadingMode() {
 const parsed = computed(() => {
   const query = q.value.trim();
   // furigana syntax typed by hand still wins
-  if (readingSearch.value && query && !/[<>{}＜＞｛｝]/u.test(query)) {
+  if (readingMode.value && query && !/[<>{}＜＞｛｝]/u.test(query)) {
     return parseQuery(`{${query}}`);
   }
   return parseQuery(q.value);
@@ -283,11 +282,12 @@ const examples = computed(
       "ja-JP": { furigana: "<日本>{にほん}語", reading: "にほんご" },
       "": { furigana: "<日本>{にほん}語", reading: "にほんご" },
       "zh-CN": { furigana: "<中国>{zhong guo}", reading: "zhong1 guo2" },
+      "ko-KR": { furigana: "<光速>{광속}", reading: "광속" },
     })[lang.value] ?? { furigana: "", reading: "" },
 );
 
 const placeholder = computed(() =>
-  readingSearch.value
+  readingMode.value
     ? examples.value.reading || "Reading"
     : ({ "ja-JP": "日本語", "zh-CN": "中文", "ko-KR": "한국어" }[lang.value] ??
       "Search"),
@@ -575,7 +575,8 @@ function headTerm(it: Item) {
 }
 
 function headReading(it: Item) {
-  const reading = it.entries[0]?.reading;
+  // Korean dictionaries give none: search.db's, e.g. 광속 for 光速
+  const reading = it.entries[0]?.reading || it.reading.trim();
   return reading && reading !== headTerm(it) ? reading : "";
 }
 

@@ -26,6 +26,8 @@ interface SearchOpts {
 export interface ISearchTerm {
   id: number;
   term: string;
+  /** space-padded; for Korean, generated from Hanja (光速: ` 광속 `) */
+  reading: string;
 }
 
 export interface ITerm {
