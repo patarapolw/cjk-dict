@@ -31,6 +31,23 @@
       "label": "dev",
       "dependsOn": ["build:debug", "ui:dev"],
       "group": { "kind": "build" }
+    },
+    {
+      // postDebugTask: debug sessions don't stop the background tasks they started
+      "label": "ui:stop",
+      "detail": "stop the ui:dev task",
+      "type": "shell",
+      "command": "echo ${input:terminateUiDev}",
+      "presentation": { "reveal": "never" },
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "terminateUiDev",
+      "type": "command",
+      "command": "workbench.action.tasks.terminate",
+      "args": "ui:dev"
     }
   ]
 }

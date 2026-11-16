@@ -16,7 +16,8 @@
           "value": "--remote-debugging-port=9222"
         }
       ],
-      "preLaunchTask": "dev"
+      "preLaunchTask": "dev",
+      "postDebugTask": "ui:stop"
     },
     {
       "name": "WebView",
