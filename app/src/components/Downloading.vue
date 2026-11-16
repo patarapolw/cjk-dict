@@ -56,11 +56,13 @@ function formatFileSize(n: number) {
   const units = ["bytes", "KB", "MB"];
   let i = 0;
 
-  while (i++ < units.length) {
-    if (n < 1024) break;
+  while (n >= 1024 && i < units.length - 1) {
     n /= 1024;
+    i++;
   }
-  return `${n.toPrecision(3)} ${units[i - 1]}`;
+  // toPrecision(3) gives exponent notation ("1.03e+3") from 999.5 up,
+  // which happens in the last unit (MB), so show whole digits instead
+  return `${(n >= 999.5 ? Math.round(n) : n.toPrecision(3)).toLocaleString()} ${units[i]}`;
 }
 
 const unlisteners = ref<UnlistenFn[]>([]);

@@ -123,3 +123,8 @@ export function toFurigana(text: string, reading: string): string {
 export function isImeReading(s: string): boolean {
   return KANA.test(s.replace(/ｎ/g, "ん"));
 }
+
+/** Latin letters, as typed for Korean romanization: `hangugeo`, `hangug-eo` */
+export function isRomanization(s: string): boolean {
+  return /[a-z]/i.test(s) && /^[a-z\-'’. ]+$/i.test(s);
+}

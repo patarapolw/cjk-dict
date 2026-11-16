@@ -13,12 +13,15 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use rusqlite::{Connection, OpenFlags, OptionalExtension, params, params_from_iter};
+use rusqlite::{
+    Connection, OpenFlags, OptionalExtension, functions::FunctionFlags, params, params_from_iter,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, value::RawValue};
 
 use crate::{
     error::YomitanError,
+    korean::{self, RomanQuery},
     parser::{BankKind, YomitanZip},
     pinyin::{expand_pinyin, normalize_pinyin},
     tokenize::{Lang, TokenizerMapper},
@@ -70,6 +73,34 @@ CREATE VIRTUAL TABLE term_search_fts USING fts5 (
   tokenize="unicode61 tokenchars '-'"
 );
 "#;
+
+/// Korean romanization keys ([`crate::korean::keys`]), to search Hangul terms by typing
+/// romanization. Created on an existing search.db too, which an update then backfills.
+const ROMAN_SCHEMA: &str = r#"
+CREATE TABLE IF NOT EXISTS term_roman (
+  key         TEXT NOT NULL,            -- loosened romanization, e.g. hangugo for 한국어
+  search_id   INTEGER NOT NULL,
+  score       INTEGER,                  -- term_search.score
+  PRIMARY KEY (key, search_id)
+) WITHOUT ROWID;
+-- to walk the matches of a short prefix by score
+CREATE INDEX IF NOT EXISTS idx_term_roman_score ON term_roman (score);
+"#;
+
+/// the score follows term_search's, which grows as dictionaries add the term
+const ROMAN_UPSERT: &str = "INSERT INTO term_roman (key, search_id, score) VALUES (?1, ?2, ?3)
+     ON CONFLICT DO UPDATE SET score = excluded.score";
+
+fn has_table(conn: &Connection, name: &str) -> rusqlite::Result<bool> {
+    Ok(conn
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
+            [name],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
+}
 
 const FTS_TRIGGERS: &str = r#"
 CREATE TRIGGER IF NOT EXISTS term_search_ai AFTER INSERT ON term_search BEGIN
@@ -157,7 +188,32 @@ async fn build_inner(
     if !has_existing {
         conn.execute_batch(SCHEMA)?;
     }
+    let backfill_roman = has_existing && !has_table(&conn, "term_roman")?;
+    conn.execute_batch(ROMAN_SCHEMA)?;
     conn.execute_batch(FTS_TRIGGERS)?;
+
+    if backfill_roman {
+        progress("romanization keys", 0, 0);
+        let tx = conn.transaction()?;
+        {
+            let mut st = tx.prepare("SELECT id, term, score FROM term_search")?;
+            let mut ins = tx.prepare(ROMAN_UPSERT)?;
+            let rows = st.query_map([], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, Option<i64>>(2)?,
+                ))
+            })?;
+            for row in rows {
+                let (id, term, score) = row?;
+                for key in korean::keys(&term) {
+                    ins.execute(params![key, id, score])?;
+                }
+            }
+        }
+        tx.commit()?;
+    }
 
     if has_existing {
         let tx = conn.transaction()?;
@@ -170,6 +226,10 @@ async fn build_inner(
         }
         tx.execute(
             "DELETE FROM term_search WHERE id NOT IN (SELECT DISTINCT search_id FROM term_link)",
+            [],
+        )?;
+        tx.execute(
+            "DELETE FROM term_roman WHERE search_id NOT IN (SELECT id FROM term_search)",
             [],
         )?;
         tx.commit()?;
@@ -213,11 +273,12 @@ async fn build_inner(
                   rules = CASE WHEN rules IS excluded.rules THEN rules ELSE NULLIF(trim(printf('%s %s', rules, excluded.rules)), '') END,
                   tags = CASE WHEN tags IS excluded.tags THEN tags ELSE NULLIF(trim(printf('%s %s', tags, excluded.tags)), '') END,
                   score = max(coalesce(score, excluded.score), coalesce(excluded.score, score))
-                RETURNING id"#,
+                RETURNING id, score"#,
             )?;
             let mut link = tx.prepare(
                 "INSERT OR IGNORE INTO term_link (search_id, dict_id, bank, idx) VALUES (?1, ?2, ?3, ?4)",
             )?;
+            let mut roman = tx.prepare(ROMAN_UPSERT)?;
 
             for (bi, bank) in banks.iter().enumerate() {
                 progress(&d.name, bi + 1, banks.len());
@@ -256,7 +317,7 @@ async fn build_inner(
                         .map(|s| format!(" {s} "))
                         .unwrap_or_default();
 
-                    let search_id: i64 = upsert.query_row(
+                    let (search_id, score): (i64, Option<i64>) = upsert.query_row(
                         params![
                             p1,
                             ja,
@@ -268,9 +329,12 @@ async fn build_inner(
                             score.map(|s| s.round() as i64),
                             tags.non_empty_trimmed()
                         ],
-                        |r| r.get(0),
+                        |r| Ok((r.get(0)?, r.get(1)?)),
                     )?;
                     link.execute(params![search_id, dict_id, bank.index, idx as i64])?;
+                    for key in korean::keys(&p1) {
+                        roman.execute(params![key, search_id, score])?;
+                    }
                     count += 1;
                 }
             }
@@ -478,6 +542,184 @@ mod reading_tests {
     }
 }
 
+#[cfg(test)]
+mod romanized_tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn found(db: &SearchDb, term: &str, kind: Option<&str>, romanized: bool) -> Vec<String> {
+        db.search(&SearchRequest {
+            kind: kind.map(String::from),
+            lang: "ko-KR".into(),
+            term: term.into(),
+            romanized,
+            ..Default::default()
+        })
+        .unwrap()
+        .items
+        .into_iter()
+        .map(|i| i.term)
+        .collect()
+    }
+
+    fn check(db: &SearchDb) {
+        for typed in ["hangugeo", "hangukeo", "hangug-eo"] {
+            assert_eq!(found(db, typed, Some("exact"), true), ["한국어"], "{typed}");
+            // prefix: the exact match first, then by score
+            assert_eq!(
+                found(db, typed, None, true),
+                ["한국어", "한국어학"],
+                "{typed}"
+            );
+        }
+        assert_eq!(
+            found(db, "hanguk", None, true),
+            ["한국", "한국어", "한국어학"]
+        );
+        assert_eq!(found(db, "gungmul", Some("exact"), true), ["국물"]);
+        assert_eq!(found(db, "gukmul", Some("exact"), true), ["국물"]);
+        assert_eq!(found(db, "silla", Some("exact"), true), ["신라"]);
+        assert_eq!(found(db, "gachi", Some("exact"), true), ["같이"]);
+        // cut off in the middle of eu: se → su
+        assert_eq!(found(db, "se", None, true), ["세우다"]);
+        // Hangul is unaffected
+        assert_eq!(found(db, "한국어", Some("exact"), true), ["한국어"]);
+        // off: a plain term search (nothing Korean is spelled in Latin letters here)
+        assert!(found(db, "hangugeo", Some("exact"), false).is_empty());
+    }
+
+    /// A letter or two matches too many keys to sort them all: exact matches, then the rest
+    /// by score, page by page.
+    #[tokio::test]
+    async fn common_prefix_walks_by_score() {
+        let id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "cjk-dict-romanized-common-{}-{id}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("search.db");
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        conn.execute_batch(ROMAN_SCHEMA).unwrap();
+        let mut terms: Vec<(String, i64)> = vec![
+            ("하늘".into(), 50),
+            ("한국".into(), 40),
+            ("하".into(), 1),
+            ("해".into(), 2),
+            ("나라".into(), 99),
+        ];
+        // filler: 하가, 하각, ... with score 0
+        terms.extend(
+            (0..=COMMON_PREFIX_KEYS as u32)
+                .map(|i| char::from_u32(0xAC00 + i).unwrap())
+                .filter(|&c| c != '늘')
+                .map(|c| (format!("하{c}"), 0)),
+        );
+        conn.execute_batch("BEGIN").unwrap();
+        for (term, score) in &terms {
+            let id: i64 = conn
+                .query_row(
+                    "INSERT INTO term_search (term, term_ko, score) VALUES (?1, ?1, ?2) RETURNING id",
+                    params![term, score],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            for key in korean::keys(term) {
+                conn.execute(ROMAN_UPSERT, params![key, id, score]).unwrap();
+            }
+        }
+        conn.execute_batch("COMMIT").unwrap();
+        drop(conn);
+        let db = SearchDb::open(&db_path, &dir).unwrap();
+        let page = |offset: u32| -> Vec<String> {
+            db.search(&SearchRequest {
+                lang: "ko-KR".into(),
+                term: "ha".into(),
+                romanized: true,
+                limit: Some(3),
+                offset: Some(offset),
+                ..Default::default()
+            })
+            .unwrap()
+            .items
+            .into_iter()
+            .map(|i| i.term)
+            .collect()
+        };
+        // ha, and he (ae) for an unfinished hae, are exact: 해, 하
+        assert_eq!(page(0), ["해", "하", "하늘"]);
+        assert_eq!(page(1), ["하", "하늘", "한국"]);
+        assert_eq!(page(3).len(), 3);
+        drop(db);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A search.db from before `term_roman` is searched by romanizing each row, and gets the
+    /// table on its next update.
+    #[tokio::test]
+    async fn romanization_finds_hangul_terms() {
+        let id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir =
+            std::env::temp_dir().join(format!("cjk-dict-romanized-{}-{id}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("search.db");
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        conn.execute("INSERT INTO dict (name, title) VALUES ('ko', 'Korean')", [])
+            .unwrap();
+        for (term, score) in [
+            ("한국어", 10),
+            ("한국", 20),
+            ("한국어학", 5),
+            ("국물", 0),
+            ("신라", 0),
+            ("같이", 0),
+            ("세우다", 0),
+            ("하늘", 0),
+        ] {
+            conn.execute(
+                "INSERT INTO term_search (term, term_ko, score) VALUES (?1, ?1, ?2)",
+                params![term, score],
+            )
+            .unwrap();
+        }
+        conn.execute(
+            "INSERT INTO term_search (term, term_ja) VALUES ('HANGUGEO', 'HANGUGEO')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO term_link (search_id, dict_id, bank, idx) SELECT id, 1, 1, id FROM term_search",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let db = SearchDb::open(&db_path, &dir).unwrap();
+        assert!(!db.has_roman);
+        check(&db);
+        drop(db);
+
+        let tok = TokenizerMapper::new(dir.clone());
+        build_incremental(&db_path, &[], &[], &tok, |_, _, _| {})
+            .await
+            .unwrap();
+        let db = SearchDb::open(&db_path, &dir).unwrap();
+        assert!(db.has_roman);
+        check(&db);
+
+        drop(db);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
 #[derive(Debug, Default, Deserialize)]
 pub struct SearchRequest {
     /// "fts" = token search; "exact" = term equality; anything else = prefix search
@@ -498,6 +740,11 @@ pub struct SearchRequest {
     /// fts: tokenized `term`, space-separated, per short language ("ja", "zh", "ko")
     #[serde(default)]
     pub tokens: HashMap<String, String>,
+    /// `term` may be Korean romanization (`hangugeo` for 한국어), matched against how Hangul
+    /// terms are romanized. Ignored unless `term` is all Latin letters. "fts" is a prefix
+    /// search then.
+    #[serde(default)]
+    pub romanized: bool,
     #[serde(default)]
     pub limit: Option<u32>,
     #[serde(default)]
@@ -557,9 +804,134 @@ pub struct SearchDb {
     dicts_dir: PathBuf,
     /// dict_id -> name
     names: HashMap<i64, String>,
+    /// search.db has `term_roman`; built before it, romanized searches romanize each row
+    has_roman: bool,
     zips: Mutex<HashMap<String, YomitanZip>>,
     /// most recently used first; (key, rows, JSON bytes)
     banks: Mutex<VecDeque<(BankKey, Bank, usize)>>,
+}
+
+/// `ko_roman_rank(term, query)`: [`RomanQuery::rank`], `query` from [`RomanQuery::encode`].
+fn register_functions(conn: &Connection) -> rusqlite::Result<()> {
+    let cache: Mutex<Option<(String, RomanQuery)>> = Mutex::new(None);
+    conn.create_scalar_function(
+        "ko_roman_rank",
+        2,
+        FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+        move |ctx| {
+            let term = ctx.get_raw(0).as_str().unwrap_or("");
+            let encoded = ctx.get_raw(1).as_str().unwrap_or("");
+            let mut cache = cache.lock().unwrap_or_else(|e| e.into_inner());
+            if cache.as_ref().is_none_or(|(k, _)| k != encoded) {
+                *cache = Some((encoded.to_string(), RomanQuery::decode(encoded)));
+            }
+            Ok(cache.as_ref().map_or(0, |(_, q)| q.rank(term)) as i64)
+        },
+    )
+}
+
+/// A prefix whose keys reach this many is common (a letter or two): walking the keys by
+/// score finds a page sooner than sorting every match.
+const COMMON_PREFIX_KEYS: usize = 1000;
+
+/// Romanized search over `term_roman`: terms romanizing to the query first, then (prefix
+/// search) those starting with it, each by score. `lang_filter`: SQL ending in `AND`, or "".
+fn search_roman(
+    conn: &Connection,
+    roman: &RomanQuery,
+    lang_filter: &str,
+    limit: u32,
+    offset: u32,
+    map_row: impl Fn(&rusqlite::Row) -> rusqlite::Result<SearchItem>,
+) -> Result<Vec<SearchItem>, YomitanError> {
+    let patterns = roman.patterns();
+    let exact_in = (1..=patterns.len())
+        .map(|i| format!("?{i}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    // key ranges `>= p AND < p{` ('{' follows 'z'), with the patterns as ?1..?n
+    let mut ps: Vec<String> = patterns.to_vec();
+    let mut ranges = vec![];
+    for (i, p) in patterns.iter().enumerate() {
+        ps.push(format!("{p}{{"));
+        ranges.push(format!("(key >= ?{} AND key < ?{})", i + 1, ps.len()));
+    }
+    let ranges = ranges.join(" OR ");
+
+    let common = roman.prefix
+        && {
+            let sql = format!(
+                "SELECT count(*) FROM (SELECT 1 FROM term_roman WHERE {ranges} LIMIT {COMMON_PREFIX_KEYS})"
+            );
+            let n: i64 = conn
+                .prepare_cached(&sql)?
+                .query_row(params_from_iter(ps.iter()), |r| r.get(0))?;
+            n as usize >= COMMON_PREFIX_KEYS
+        };
+
+    if !common {
+        // few matches: sort them all
+        let (wh, ps) = if roman.prefix {
+            (ranges, &ps[..])
+        } else {
+            (format!("key IN ({exact_in})"), patterns)
+        };
+        let sql = format!(
+            "SELECT s.*, max(r.key IN ({exact_in})) AS roman_exact
+             FROM term_roman r JOIN term_search s ON s.id = r.search_id
+             WHERE {lang_filter}({wh})
+             GROUP BY s.id ORDER BY roman_exact DESC, s.score DESC LIMIT {limit} OFFSET {offset}"
+        );
+        let mut st = conn.prepare_cached(&sql)?;
+        return Ok(st
+            .query_map(params_from_iter(ps.iter()), map_row)?
+            .collect::<Result<_, _>>()?);
+    }
+
+    // exact matches (few, by the key index), then the keys in the prefix ranges, walking the
+    // score index until a page is found. A term has up to two keys: skip the repeats.
+    let mut ids: Vec<i64> = vec![];
+    let mut seen = std::collections::HashSet::new();
+    let mut skip = offset as usize;
+    let mut take = |id: i64, ids: &mut Vec<i64>| {
+        if seen.insert(id) {
+            if skip > 0 {
+                skip -= 1;
+            } else {
+                ids.push(id);
+            }
+        }
+        ids.len() < limit as usize
+    };
+    let mut st = conn.prepare_cached(&format!(
+        "SELECT search_id FROM term_roman WHERE key IN ({exact_in}) ORDER BY score DESC"
+    ))?;
+    let mut rows = st.query(params_from_iter(patterns.iter()))?;
+    let mut more = true;
+    while more && let Some(r) = rows.next()? {
+        more = take(r.get(0)?, &mut ids);
+    }
+    drop(rows);
+    let mut st = conn.prepare_cached(&format!(
+        "SELECT search_id FROM term_roman INDEXED BY idx_term_roman_score
+         WHERE {ranges} ORDER BY score DESC"
+    ))?;
+    let mut rows = st.query(params_from_iter(ps.iter()))?;
+    while more && let Some(r) = rows.next()? {
+        more = take(r.get(0)?, &mut ids);
+    }
+    drop(rows);
+
+    let mut st = conn.prepare_cached(&format!(
+        "SELECT * FROM term_search WHERE {lang_filter}id = ?1"
+    ))?;
+    let mut out = vec![];
+    for id in ids {
+        if let Some(item) = st.query_row([id], &map_row).optional()? {
+            out.push(item);
+        }
+    }
+    Ok(out)
 }
 
 fn fts_phrase(s: &str) -> String {
@@ -588,12 +960,15 @@ impl SearchDb {
             db,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
+        register_functions(&conn)?;
         let names = {
             let mut st = conn.prepare("SELECT id, name FROM dict")?;
             st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
                 .collect::<Result<HashMap<i64, String>, _>>()?
         };
+        let has_roman = has_table(&conn, "term_roman")?;
         Ok(Self {
+            has_roman,
             conn: Mutex::new(conn),
             dicts_dir: dicts_dir.to_path_buf(),
             names,
@@ -647,7 +1022,53 @@ impl SearchDb {
                 })
             };
 
-            if req.kind.as_deref() == Some("fts") {
+            let is_exact = req.kind.as_deref() == Some("exact");
+            let roman = req
+                .romanized
+                .then(|| RomanQuery::new(req.term.trim(), !is_exact))
+                .flatten();
+
+            let lang_filter = if lang.is_empty() {
+                String::new()
+            } else {
+                format!("term_{lang} != '' AND ")
+            };
+
+            if let (Some(roman), true) = (&roman, self.has_roman) {
+                search_roman(&conn, roman, &lang_filter, limit + 1, offset, map_row)?
+            } else if let Some(roman) = roman {
+                // search.db from before `term_roman`: the rows whose first character the query
+                // can start with, by the index on `term`; then romanize each one
+                let ranges = roman.first_char_ranges();
+                let mut ps: Vec<String> = vec![roman.encode()];
+                let mut or = vec![];
+                for (a, b) in ranges {
+                    ps.push(a.to_string());
+                    ps.push(b.to_string());
+                    or.push(format!(
+                        "(term >= ?{} AND term < ?{})",
+                        ps.len() - 1,
+                        ps.len()
+                    ));
+                }
+                if or.is_empty() {
+                    vec![]
+                } else {
+                    let sql = format!(
+                        "SELECT * FROM (
+                           SELECT *, ko_roman_rank(term, ?1) AS roman_rank FROM term_search
+                           WHERE {lang_filter}({})
+                         ) WHERE roman_rank > 0
+                         ORDER BY roman_rank DESC, score DESC LIMIT {} OFFSET {}",
+                        or.join(" OR "),
+                        limit + 1,
+                        offset
+                    );
+                    let mut st = conn.prepare_cached(&sql)?;
+                    st.query_map(params_from_iter(ps.iter()), map_row)?
+                        .collect::<Result<_, _>>()?
+                }
+            } else if req.kind.as_deref() == Some("fts") {
                 let langs: Vec<&str> = if lang.is_empty() {
                     vec!["ja", "zh", "ko"]
                 } else {
@@ -680,7 +1101,6 @@ impl SearchDb {
                         .collect::<Result<_, _>>()?
                 }
             } else {
-                let is_exact = req.kind.as_deref() == Some("exact");
                 let mut q_term = normalize_text(&req.term);
                 if !is_exact && !q_term.is_empty() && !q_term.ends_with(' ') {
                     q_term.push('*');
