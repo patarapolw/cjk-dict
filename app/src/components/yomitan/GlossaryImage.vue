@@ -109,6 +109,28 @@ function onLoad(e: Event) {
   loadState.value = "loaded";
 }
 
+/** within 5% */
+const near = (a: number, b: number) => Math.abs(a / b - 1) < 0.05;
+
+/**
+ * The dictionary's width and height, swapped when the image is clearly the other way
+ * round. Some smk8 images in vertical-text (縦中横) spans, e.g. fractions, give the size
+ * for vertical writing: 1em x 0.5em for a 1:2 image, which would leave a 0.25em sliver.
+ */
+function preferredSize(
+  { width, height }: ImageData,
+  natural: { width: number; height: number } | null,
+): [unknown, unknown] {
+  if (!num(width) || !num(height) || !natural || width === height) {
+    return [width, height];
+  }
+  const given = width / height;
+  const actual = natural.width / natural.height;
+  return !near(given, actual) && near(given, 1 / actual)
+    ? [height, width]
+    : [width, height];
+}
+
 // Same sizing as Yomitan. Its importer turns the dictionary's `width`/`height` into
 // `preferredWidth`/`preferredHeight` and stores the file's pixel size as `width`/`height`;
 // here the data comes straight from the dictionary, so its `width`/`height` are the
@@ -116,16 +138,14 @@ function onLoad(e: Event) {
 // aspect ratio is kept, and sizes are in px unless sizeUnits is "em" (which only applies to
 // preferred sizes). Width is capped at the container width.
 const containerStyle = computed(() => {
-  const {
-    width: preferredWidth,
-    height: preferredHeight,
-    sizeUnits,
-    border,
-    borderRadius,
-  } = props.image;
+  const { sizeUnits, border, borderRadius } = props.image;
   // before the image loads, a size the dictionary doesn't give is a guess
   const w = natural.value?.width ?? 100;
   const h = natural.value?.height ?? 100;
+  const [preferredWidth, preferredHeight] = preferredSize(
+    props.image,
+    natural.value,
+  );
   const hasPW = num(preferredWidth);
   const hasPH = num(preferredHeight);
   const invAspect = hasPW && hasPH ? preferredHeight / preferredWidth : h / w;

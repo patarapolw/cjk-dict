@@ -54,7 +54,8 @@
   max-width: 100%;
   line-height: 1;
   color: var(--app-link);
-  vertical-align: top;
+  /* no vertical-align, as in Yomitan: images sit on the baseline unless the
+     dictionary sets verticalAlign (the data-vertical-align rules below) */
 }
 
 .gloss-image-container {
