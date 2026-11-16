@@ -66,7 +66,9 @@ const src = computed(() =>
 );
 
 const loadState = ref<"loading" | "loaded" | "error">("loading");
-const expanded = ref(false);
+// Unlike Yomitan, images the dictionary marks `collapsed` (e.g. sankoku8 illustrations)
+// start expanded; tapping one collapses it to "[Image]", and tapping that shows it again.
+const expanded = ref(true);
 const collapsed = computed(() => !!props.image.collapsed && !expanded.value);
 
 function toggle() {

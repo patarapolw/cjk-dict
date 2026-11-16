@@ -143,7 +143,8 @@
   content: "]";
 }
 
-/* collapsed images show as "[Image]"; tapping it shows the image */
+/* collapsed images (tapped closed; they start expanded) show as "[Image]"; tapping it shows
+   the image again */
 .gloss-image-link[data-collapsed="true"] {
   vertical-align: baseline;
 }
