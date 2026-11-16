@@ -569,8 +569,11 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .container {
+  box-sizing: border-box;
   padding: 1em;
-  height: calc(100vh - 3em);
+  /* Fill the layout's 1fr row instead of guessing the app header's height */
+  min-height: 0;
+  height: 100%;
   display: grid;
   grid-template-rows: auto 1fr;
 
@@ -664,6 +667,8 @@ onBeforeUnmount(() => {
 }
 
 .scroller {
+  /* Let the 1fr row shrink below the content height so this element scrolls */
+  min-height: 0;
   overflow: auto;
 }
 
