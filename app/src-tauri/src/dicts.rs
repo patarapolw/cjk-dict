@@ -428,6 +428,9 @@ pub fn asset_protocol(
             Response::builder()
                 .header("Content-Type", mime)
                 .header("Cache-Control", "max-age=31536000, immutable")
+                // the page (tauri.localhost) loads these cross-origin, and CSS masks
+                // (monochrome images) are fetched with CORS: without this they don't show
+                .header("Access-Control-Allow-Origin", "*")
                 .body(bytes)
                 .unwrap()
         }
