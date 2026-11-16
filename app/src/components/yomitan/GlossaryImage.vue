@@ -20,7 +20,7 @@
         :src="src"
         :alt="image.alt ?? title ?? ''"
         loading="lazy"
-        @load="loadState = 'loaded'"
+        @load="onLoad"
         @error="loadState = 'error'"
       />
     </span>
@@ -34,13 +34,12 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 
-/** Yomitan `img` structured content / `image` glossary */
+/** Yomitan `img` structured content / `image` glossary, as the dictionary has it */
 export interface ImageData {
   path: string;
+  /** preferred display size, in px or `sizeUnits` */
   width?: number;
   height?: number;
-  preferredWidth?: number;
-  preferredHeight?: number;
   title?: string;
   alt?: string;
   description?: string;
@@ -99,21 +98,34 @@ const appearance = computed(() =>
 const num = (n: unknown): n is number =>
   typeof n === "number" && Number.isFinite(n) && n > 0;
 
-// Same sizing as Yomitan: preferred* sizes win, the aspect ratio is kept, and sizes are in
-// px unless sizeUnits is "em" (which only applies to preferred sizes). Width is capped at
-// the container width.
+/** the image file's own size, known once it loads */
+const natural = ref<{ width: number; height: number } | null>(null);
+
+function onLoad(e: Event) {
+  const img = e.target as HTMLImageElement;
+  if (img.naturalWidth && img.naturalHeight) {
+    natural.value = { width: img.naturalWidth, height: img.naturalHeight };
+  }
+  loadState.value = "loaded";
+}
+
+// Same sizing as Yomitan. Its importer turns the dictionary's `width`/`height` into
+// `preferredWidth`/`preferredHeight` and stores the file's pixel size as `width`/`height`;
+// here the data comes straight from the dictionary, so its `width`/`height` are the
+// preferred sizes and the pixel size comes from the loaded image. Preferred sizes win, the
+// aspect ratio is kept, and sizes are in px unless sizeUnits is "em" (which only applies to
+// preferred sizes). Width is capped at the container width.
 const containerStyle = computed(() => {
   const {
-    width = 100,
-    height = 100,
-    preferredWidth,
-    preferredHeight,
+    width: preferredWidth,
+    height: preferredHeight,
     sizeUnits,
     border,
     borderRadius,
   } = props.image;
-  const w = num(width) ? width : 100;
-  const h = num(height) ? height : 100;
+  // before the image loads, a size the dictionary doesn't give is a guess
+  const w = natural.value?.width ?? 100;
+  const h = natural.value?.height ?? 100;
   const hasPW = num(preferredWidth);
   const hasPH = num(preferredHeight);
   const invAspect = hasPW && hasPH ? preferredHeight / preferredWidth : h / w;
