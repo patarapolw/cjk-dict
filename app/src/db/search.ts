@@ -16,6 +16,8 @@ interface SearchOpts {
   reading: string;
   /** kana reading pattern for `term` (furigana syntax), e.g. `にほん*` */
   readingGlob: string;
+  /** `term` may be Korean romanization: `hangugeo` finds 한국어 */
+  romanized?: boolean;
   limit: number;
   offset: number;
   type: string | null;
@@ -57,7 +59,8 @@ class SearchDatabase {
 
       let type = opts.type;
       let tokens: Record<string, string> | undefined;
-      if (type === "fts") {
+      // romanized Korean is matched by prefix instead, without tokens
+      if (type === "fts" && !opts.romanized) {
         tokens = await this.tokens(opts.term, lang);
         if (opts.term && !Object.keys(tokens).length) {
           // tokenizer not downloaded (yet) or failed: fall back to prefix search
@@ -72,6 +75,7 @@ class SearchDatabase {
         term: opts.term,
         reading: opts.reading,
         reading_glob: opts.readingGlob,
+        romanized: opts.romanized ?? false,
         tokens,
         limit: opts.limit,
         offset: opts.offset,

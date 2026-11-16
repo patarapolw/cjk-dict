@@ -1,4 +1,5 @@
 pub mod error;
+pub mod korean;
 #[cfg(feature = "zip")]
 pub mod parser;
 pub mod pinyin;

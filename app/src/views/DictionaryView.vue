@@ -74,6 +74,7 @@
             {{ parsed.term ? "read" : "by reading" }}
             <code>{{ hintReading }}</code>
           </template>
+          <template v-if="romanizedQuery"> as romanization</template>
           <template v-if="qState === 'exact'"> (exact)</template>
           <template v-else-if="qState === 'fts'">
             (words containing it)</template
@@ -112,6 +113,14 @@
         >
           <input type="checkbox" name="imefurigana" v-model="imeFurigana" />
           <span>Get reading from IME</span>
+        </label>
+
+        <label
+          v-if="isKorean"
+          title="Type Revised Romanization to find Hangul: hangugeo → 한국어"
+        >
+          <input type="checkbox" name="romanko" v-model="romanKo" />
+          <span>Search by romanization</span>
         </label>
 
         <label>
@@ -197,6 +206,7 @@ import Term from "../components/yomitan/Term.vue";
 import { ISearchTerm, ITerm, searchDB } from "../db/search";
 import {
   isImeReading,
+  isRomanization,
   normalizeQuery,
   parseQuery,
   toFurigana,
@@ -248,6 +258,18 @@ function toggleItem(id: number) {
 const isJapanese = computed(() => ["", "ja-JP"].includes(lang.value));
 const autoKana = ref(lang.value === "ja-JP");
 const imeFurigana = ref(true);
+
+const isKorean = computed(() => lang.value === "ko-KR");
+/** search Korean by typing romanization: hangugeo → 한국어 */
+const romanKo = ref(true);
+/** the term is Latin letters, matched against how Hangul terms are romanized */
+const romanizedQuery = computed(
+  () =>
+    isKorean.value &&
+    romanKo.value &&
+    isRomanization(parsed.value.term) &&
+    !parsed.value.reading,
+);
 
 /** the parsed reading, e.g. `にほん*` (`*`: the rest of the reading is unknown) */
 const hintReading = computed(
@@ -335,7 +357,7 @@ async function clearQuery() {
 const SEARCH_DEBOUNCE_MS = 200;
 let searchTimer: ReturnType<typeof setTimeout> | undefined;
 
-watch([q, qState, readingMode, lang, dictsVersion], () => {
+watch([q, qState, readingMode, lang, dictsVersion, romanKo], () => {
   // bump now, so an in-flight search for the old query discards its results
   const id = ++requestId;
   clearTimeout(searchTimer);
@@ -455,6 +477,7 @@ async function loadMore(isNew?: boolean) {
   const query = parsed.value;
   const term = query.term.trim();
   const { reading, readingGlob, rest } = query;
+  const romanized = romanizedQuery.value;
 
   if (!(term || reading)) {
     // empty query: don't leave the previous query's results up
@@ -485,6 +508,7 @@ async function loadMore(isNew?: boolean) {
         term,
         reading,
         readingGlob,
+        romanized,
         limit: 5,
         offset,
         type,
@@ -499,6 +523,7 @@ async function loadMore(isNew?: boolean) {
         !rest &&
         !reading &&
         !readingGlob &&
+        !romanized &&
         type !== "fts" &&
         [...term].length > 1
       ) {
