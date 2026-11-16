@@ -54,24 +54,48 @@
           >
             =
           </button>
+          <button
+            type="button"
+            :aria-pressed="readingMode"
+            title="Reading search: type only the reading, no {} needed"
+            @click="toggleReadingMode"
+          >
+            {}
+          </button>
         </div>
       </div>
       <p class="search-hint">
-        <template v-if="parsed.rest">
-          Searching “{{ parsed.term || braced(parsed.reading) }}”.
-          <button type="button" class="link-button" @click="searchNext">
+        <!-- what the query is understood as, so the syntax and modes explain themselves -->
+        <template v-if="parsed.term || hintReading">
+          Searching
+          <code v-if="parsed.term">{{ parsed.term }}</code>
+          <template v-if="hintReading">
+            {{ parsed.term ? "read" : "by reading" }}
+            <code>{{ hintReading }}</code>
+          </template>
+          <template v-if="qState === 'exact'"> (exact)</template>
+          <template v-else-if="qState === 'fts'">
+            (words containing it)</template
+          >
+          <button
+            v-if="parsed.rest"
+            type="button"
+            class="link-button"
+            @click="searchNext"
+          >
             Next: {{ parsed.rest }}
           </button>
         </template>
-        <template v-else-if="isJapanese">
-          Reading: <code>&lt;日本&gt;{にほん}語</code>, or only
-          <code>{にほんご}</code>
+        <template v-else-if="readingMode">
+          Type only the reading<template v-if="examples.reading"
+            >, e.g. <code>{{ examples.reading }}</code></template
+          >
         </template>
-        <template v-else-if="lang === 'zh-CN'">
-          Reading: <code>&lt;中国&gt;{zhong guo}</code>, or only
-          <code>{zhong1 guo2}</code>
+        <template v-else-if="examples.furigana">
+          Add a reading: <code>{{ examples.furigana }}</code
+          >, or press <code>{}</code> to search by reading only
         </template>
-        <template v-else>Reading: <code>{reading}</code></template>
+        <template v-else>Press <code>{}</code> to search by reading</template>
       </p>
       <nav>
         <label v-if="isJapanese">
@@ -181,7 +205,22 @@ const items = ref<Item[]>([]);
 const openedItems = ref<number[]>([]);
 const noResults = ref(false);
 
-const parsed = computed(() => parseQuery(q.value));
+/** reading search: the whole query is a reading, as if typed as `{reading}` */
+const readingMode = ref(false);
+
+function toggleReadingMode() {
+  readingMode.value = !readingMode.value;
+  elSearchInput.value?.focus();
+}
+
+const parsed = computed(() => {
+  const query = q.value.trim();
+  // furigana syntax typed by hand still wins
+  if (readingMode.value && query && !/[<>{}＜＞｛｝]/u.test(query)) {
+    return parseQuery(`{${query}}`);
+  }
+  return parseQuery(q.value);
+});
 
 // "~" needs the lindera tokenizer, which downloads in the background on first launch
 const tokenizerPending = computed(() => toBeLoaded.value.some((d) => !d.dict));
@@ -201,10 +240,26 @@ const isJapanese = computed(() => ["", "ja-JP"].includes(lang.value));
 const autoKana = ref(lang.value === "ja-JP");
 const imeFurigana = ref(true);
 
-const placeholder = computed(
+/** the parsed reading, e.g. `にほん*` (`*`: the rest of the reading is unknown) */
+const hintReading = computed(
+  () => parsed.value.reading || parsed.value.readingGlob,
+);
+
+/** per-language examples for the search hint and placeholder */
+const examples = computed(
   () =>
-    ({ "ja-JP": "日本語", "zh-CN": "中文", "ko-KR": "한국어" })[lang.value] ??
-    "Search",
+    ({
+      "ja-JP": { furigana: "<日本>{にほん}語", reading: "にほんご" },
+      "": { furigana: "<日本>{にほん}語", reading: "にほんご" },
+      "zh-CN": { furigana: "<中国>{zhong guo}", reading: "zhong1 guo2" },
+    })[lang.value] ?? { furigana: "", reading: "" },
+);
+
+const placeholder = computed(() =>
+  readingMode.value
+    ? examples.value.reading || "Reading"
+    : ({ "ja-JP": "日本語", "zh-CN": "中文", "ko-KR": "한국어" }[lang.value] ??
+      "Search"),
 );
 
 const loading = ref(false);
@@ -226,11 +281,12 @@ async function setRouteQuery() {
   const query = {
     q: q.value,
     qState: qState.value || "",
+    reading: readingMode.value ? "1" : "",
   };
 
   const oldQuery = (() => {
-    const { q = "", qState = "" } = route.query;
-    return { q, qState };
+    const { q = "", qState = "", reading = "" } = route.query;
+    return { q, qState, reading };
   })();
 
   if (JSON.stringify(query) === JSON.stringify(oldQuery)) return;
@@ -243,12 +299,15 @@ function loadFromRouteQuery() {
 
   q.value = String(route.query.q || "");
   qState.value = String(route.query.qState || "") || null;
+  readingMode.value = route.query.reading === "1";
 }
 
 /** Search for something else, keeping the current search in the history (back button). */
 async function searchFor(query: string, state: string | null = qState.value) {
   await setRouteQuery();
   qState.value = state;
+  // a term, or a reading in {} syntax: never wrap it in {} again
+  readingMode.value = false;
   q.value = query;
   await setRouteQuery();
 }
@@ -267,7 +326,7 @@ async function clearQuery() {
 const SEARCH_DEBOUNCE_MS = 200;
 let searchTimer: ReturnType<typeof setTimeout> | undefined;
 
-watch([q, qState, lang, dictsVersion], () => {
+watch([q, qState, readingMode, lang, dictsVersion], () => {
   // bump now, so an in-flight search for the old query discards its results
   const id = ++requestId;
   clearTimeout(searchTimer);
@@ -541,6 +600,7 @@ function toggleClipboardMonitor() {
       if (clipboardText.value === newText) return;
 
       clipboardText.value = newText;
+      readingMode.value = false; // copied text is a term, not a reading
       q.value = newText;
     }, 1000);
   }
