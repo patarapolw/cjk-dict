@@ -21,6 +21,49 @@
   old remote branch (`git push origin --delete <old-name>`) only when nothing else,
   such as an open pull request, uses it.
 
+## Formatting
+
+- Before every commit, format every code file in the repository, not only the files
+  you changed:
+
+  ```sh
+  pnpm format      # Prettier: TypeScript, Vue, JSON, Markdown, ... (see .prettierignore)
+  cargo fmt --all  # Rust workspace
+  # the Tauri app is its own Rust workspace, which the one above excludes
+  cargo fmt --all --manifest-path app/src-tauri/Cargo.toml
+  ```
+
+- Commit formatting changes to files you didn't otherwise touch too (leftovers from
+  earlier commits), in the same commit. Don't revert them.
+
+## Checking the app
+
+Check a UI change in the running app, not in a page made to look like it. On Windows the
+app's webview is WebView2, which can expose the Chrome DevTools Protocol, and
+[`scripts/webview.mjs`](scripts/webview.mjs) drives it with no dependencies:
+
+```sh
+# start the app with remote debugging (Git Bash; run it in the background).
+# The first build takes a few minutes.
+WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222 pnpm app start
+# PowerShell: $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=9222"; pnpm app start
+
+curl -s http://127.0.0.1:9222/json/list                  # ready once it lists the page
+node scripts/webview.mjs open "#/dictionary?q=逆数&qState=exact"
+node scripts/webview.mjs eval "document.querySelectorAll('.gloss-image-link').length"
+node scripts/webview.mjs screenshot shot.png [css-selector]
+```
+
+- The app uses hash routes: `#/dictionary?q=<query>&qState=exact|fts&reading=1`.
+- It searches the dictionaries already downloaded to `%APPDATA%\cc.polv.cjk-dict`.
+- `tauri dev` hot-reloads frontend changes, and rebuilds and restarts the app on Rust
+  changes. Stop the app when you're done: stopping `pnpm app start` can leave
+  `cjk-dict-app.exe` and Vite (port 1420) running, so end those too.
+- Save screenshots outside the repository.
+- For debugging by hand, the user has VS Code launch configurations (see the README), and
+  devtools open with `Ctrl+Shift+I`; see also
+  [Tauri's debugging guide](https://tauri.app/develop/debug/).
+
 ## Commit messages
 
 Use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/):

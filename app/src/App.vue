@@ -185,8 +185,9 @@ async function loadAll() {
 <style scoped>
 .layout {
   height: 100vh;
+  height: 100dvh;
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
 }
 

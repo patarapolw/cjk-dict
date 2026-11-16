@@ -65,7 +65,10 @@ mod android {
             .map_err(|e| AppError::Error(format!("clipboard read failed: {e}")))
     }
 
-    fn read_primary_clip(env: &mut JNIEnv, activity: &JObject) -> jni::errors::Result<Option<String>> {
+    fn read_primary_clip(
+        env: &mut JNIEnv,
+        activity: &JObject,
+    ) -> jni::errors::Result<Option<String>> {
         let service = env.new_string("clipboard")?; // Context.CLIPBOARD_SERVICE
         let manager = env
             .call_method(
@@ -80,7 +83,12 @@ mod android {
         }
 
         let clip = env
-            .call_method(&manager, "getPrimaryClip", "()Landroid/content/ClipData;", &[])?
+            .call_method(
+                &manager,
+                "getPrimaryClip",
+                "()Landroid/content/ClipData;",
+                &[],
+            )?
             .l()?;
         if clip.is_null() {
             return Ok(None);

@@ -82,6 +82,8 @@ pnpm app tauri android dev                 # tauri dev (Android) with Vite dev s
 
 To make a desktop build, run `pnpm app tauri build`. On Windows, the app executable is at `app/src-tauri/target/release/cjk-dict-app.exe`, with installer bundles under `app/src-tauri/target/release/bundle/`. You can run the executable directly and create a shortcut instead of installing it.
 
+To debug in VS Code on Windows, use the launch configurations in [`.vscode/launch.json`](.vscode/launch.json), adapted from [Tauri's VS Code guide](https://tauri.app/develop/debug/vscode/): **App** builds and starts the app under the Visual Studio debugger (C/C++ extension) for breakpoints in Rust, **WebView** attaches to the frontend for breakpoints in TypeScript and Vue, and **App + WebView** does both. They start the app without the Tauri CLI, running Vite and `cargo build` as tasks instead.
+
 Where the app downloads the library from is set in `.env` or by environment variables. They are read when the app is built (compiled in) and can be overridden at runtime:
 
 | Variable                        | Value                                                            |
@@ -98,8 +100,12 @@ The app signs its R2 requests itself, with presigned URLs. For development witho
 On start, the app compares the remote `manifest.json` with its own copy and downloads only changed files, in the background and resumably. They go to a staging folder and replace the old files only when all of them have arrived and their checksums match. Until then, the app keeps searching the previous version.
 
 - Search modes: prefix (default), `=` exact, and `~` token search. `~` needs the tokenizer; until it has downloaded, `~` is disabled and falls back to prefix search.
+- One search box. Readings use furigana syntax: `<日本>{にほん}語` matches 日本語 read にほん…, and `{reading}` alone searches by reading (`{zhong1 guo2}`; pinyin is expanded to all tones).
+- A space marks a word boundary: only the first word is looked up, and "Next" moves on to the rest. When nothing matches a longer text (e.g. a copied sentence), it is split into words with the tokenizer.
+- Each result links to an exact search for itself, `~` words containing it, and words with the same reading. In-dictionary links and the back button keep a search history.
 - The search language (header) is the only setting; it is remembered per device.
 - The app follows the device's light or dark color-scheme preference.
-- Optional: search by reading (pinyin is expanded to all tones), auto-convert romaji to kana, and a clipboard monitor that searches whatever CJK text you copy.
+- Optional: auto-convert romaji to kana, IME furigana (a Japanese IME's reading is kept as `<漢字>{かんじ}` when you convert), and a clipboard monitor that searches whatever CJK text you copy.
+- Definitions render as in Yomitan: structured content (only the schema's elements and styles, `data` as `data-sc-*` attributes), each dictionary's own `styles.css` scoped to its entries, and images sized from `width`/`height`/`sizeUnits`, including monochrome images. Where the app differs from Yomitan, for example showing images that dictionaries mark collapsed, is listed in [docs/yomitan-differences.md](docs/yomitan-differences.md).
 - Images in definitions are served from the zips through a `dict://` protocol.
-- The CSP allows inline styles (`style-src 'unsafe-inline'`), used for the download progress indicator.
+- The CSP allows inline styles (`style-src 'unsafe-inline'`), used for the download progress indicator, structured content styles and dictionaries' `styles.css`.

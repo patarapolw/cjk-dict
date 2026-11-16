@@ -20,6 +20,11 @@ body {
   --app-focus: #2563eb;
   --app-progress-track: #e5e7eb;
   --app-error: #b91c1c;
+  --app-text-muted: #6b7280;
+  --app-link: #1d4ed8;
+  --app-tag-background: #6b7280;
+  --app-tag-dictionary-background: #8e44ad;
+  --app-gloss-image-background: #eeeeee;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -42,6 +47,11 @@ body {
     --app-focus: #60a5fa;
     --app-progress-track: #374151;
     --app-error: #f87171;
+    --app-text-muted: #9ca3af;
+    --app-link: #93c5fd;
+    --app-tag-background: #4b5563;
+    --app-tag-dictionary-background: #7d3c98;
+    --app-gloss-image-background: #374151;
   }
 }
 

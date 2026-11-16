@@ -360,6 +360,120 @@ mod incremental_tests {
             .unwrap();
         assert_eq!(dict_count, 0);
         assert_eq!(term_count, 0);
+        // Windows can't delete a file that is still open
+        drop(conn);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod reading_tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// search.db with a few terms and no zips (entries come back empty)
+    fn fixture() -> (PathBuf, SearchDb) {
+        let id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir =
+            std::env::temp_dir().join(format!("cjk-dict-reading-{}-{id}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("search.db");
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        conn.execute_batch(FTS_TRIGGERS).unwrap();
+        for (term, reading) in [
+            ("日本", " にほん "),
+            ("日本", " にっぽん "),
+            ("日本語", " にほんご "),
+            ("日本橋", " にほんばし "),
+            ("日本橋", " にっぽんばし "),
+        ] {
+            conn.execute(
+                "INSERT INTO term_search (term, term_ja, reading) VALUES (?1, ?1, ?2)",
+                [term, reading],
+            )
+            .unwrap();
+        }
+        drop(conn);
+        let db = SearchDb::open(&db_path, &dir).unwrap();
+        (dir, db)
+    }
+
+    fn found(db: &SearchDb, req: SearchRequest) -> Vec<(String, String)> {
+        let mut out: Vec<_> = db
+            .search(&req)
+            .unwrap()
+            .items
+            .into_iter()
+            .map(|i| (i.term, i.reading.trim().to_string()))
+            .collect();
+        out.sort();
+        out
+    }
+
+    fn pairs(v: &[(&str, &str)]) -> Vec<(String, String)> {
+        v.iter()
+            .map(|(a, b)| (a.to_string(), b.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn reading_glob_narrows_a_term_search() {
+        let (dir, db) = fixture();
+        let req = |kind: Option<&str>, term: &str, glob: &str| SearchRequest {
+            kind: kind.map(String::from),
+            term: term.into(),
+            reading_glob: glob.into(),
+            ..Default::default()
+        };
+
+        // <日本>{にほん} (prefix): both readings that start with にほん
+        assert_eq!(
+            found(&db, req(None, "日本", "にほん")),
+            pairs(&[
+                ("日本", "にほん"),
+                ("日本橋", "にほんばし"),
+                ("日本語", "にほんご")
+            ])
+        );
+        // =<日本>{にほん}
+        assert_eq!(
+            found(&db, req(Some("exact"), "日本", "にほん")),
+            pairs(&[("日本", "にほん")])
+        );
+        // =<日本>{にっぽん}橋: the unknown 橋 reading is a wildcard
+        assert_eq!(
+            found(&db, req(Some("exact"), "日本橋", "にっぽん*")),
+            pairs(&[("日本橋", "にっぽんばし")])
+        );
+        // a pattern of wildcards only does not filter
+        assert_eq!(found(&db, req(Some("exact"), "日本", "*")).len(), 2);
+        // Windows can't delete a file that is still open
+        drop(db);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn reading_alone_is_a_prefix_search_unless_exact() {
+        let (dir, db) = fixture();
+        let req = |kind: Option<&str>, reading: &str| SearchRequest {
+            kind: kind.map(String::from),
+            lang: "ja-JP".into(),
+            reading: reading.into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            found(&db, req(None, "にっぽん")),
+            pairs(&[("日本", "にっぽん"), ("日本橋", "にっぽんばし")])
+        );
+        assert_eq!(
+            found(&db, req(Some("exact"), "にっぽん")),
+            pairs(&[("日本", "にっぽん")])
+        );
+        drop(db);
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
@@ -377,6 +491,10 @@ pub struct SearchRequest {
     /// pinyin is expanded to every tone combination when lang is zh-CN or empty
     #[serde(default)]
     pub reading: String,
+    /// GLOB pattern over the whole reading (e.g. `にほん*` from `<日本>{にほん}語`), applied
+    /// on top of `term`. Prefix search also matches readings that only start with it.
+    #[serde(default)]
+    pub reading_glob: String,
     /// fts: tokenized `term`, space-separated, per short language ("ja", "zh", "ko")
     #[serde(default)]
     pub tokens: HashMap<String, String>,
@@ -448,10 +566,12 @@ fn fts_phrase(s: &str) -> String {
     format!("\"{}\"", s.replace('"', " "))
 }
 
-fn reading_match(readings: &[String]) -> String {
+/// `prefix`: the last syllable may be incomplete, e.g. "にほん" matches "にほんご".
+fn reading_match(readings: &[String], prefix: bool) -> String {
+    let star = if prefix { "*" } else { "" };
     let q = readings
         .iter()
-        .map(|r| fts_phrase(r))
+        .map(|r| format!("{}{star}", fts_phrase(r)))
         .collect::<Vec<_>>()
         .join(" OR ");
     if readings.len() > 1 {
@@ -544,9 +664,9 @@ impl SearchDb {
                 if !readings.is_empty() {
                     // Reading expansion can get large. Put term match first.
                     q = if q.is_empty() {
-                        reading_match(&readings)
+                        reading_match(&readings, false)
                     } else {
-                        format!("({q}) AND {}", reading_match(&readings))
+                        format!("({q}) AND {}", reading_match(&readings, false))
                     };
                 }
                 if q.is_empty() {
@@ -579,8 +699,17 @@ impl SearchDb {
                         ps.len()
                     ));
                 }
+                // only alongside a term: the term's index narrows the rows to scan
+                let reading_glob = normalize_text(req.reading_glob.trim());
+                if !ps.is_empty() && reading_glob.chars().any(|c| !"*?".contains(c)) {
+                    ps.push(format!(
+                        " {reading_glob}{}",
+                        if is_exact { " " } else { "*" }
+                    ));
+                    wh.push(format!("reading GLOB ?{}", ps.len()));
+                }
                 if !readings.is_empty() {
-                    ps.push(reading_match(&readings));
+                    ps.push(reading_match(&readings, !is_exact));
                     wh.push(format!(
                         "id IN (SELECT rowid FROM term_search_fts WHERE term_search_fts MATCH ?{})",
                         ps.len()
@@ -702,7 +831,9 @@ impl SearchDb {
                 return Ok(rows);
             }
         }
-        let text = self.with_zip(name, |z| z.read_to_string(&format!("term_bank_{bank}.json")))?;
+        let text = self.with_zip(name, |z| {
+            z.read_to_string(&format!("term_bank_{bank}.json"))
+        })?;
         let size = text.len();
         let rows: Bank = Arc::new(serde_json::from_str(&text)?);
         drop(text);
@@ -728,11 +859,7 @@ impl SearchDb {
         if !self.names.values().any(|n| n == name) {
             return Ok(None);
         }
-        self.with_zip(name, |z| z.read_bytes(path).map(Some))
-            .or_else(|e| match e {
-                YomitanError::ZipError(zip::result::ZipError::FileNotFound) => Ok(None),
-                e => Err(e),
-            })
+        self.with_zip(name, |z| z.read_asset(path))
     }
 
     /// Dict info rows, e.g. for a settings/about view.

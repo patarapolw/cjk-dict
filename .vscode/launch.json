@@ -1,0 +1,40 @@
+{
+  // https://tauri.app/develop/debug/vscode/ (Windows: the Visual Studio debugger, from
+  // the C/C++ extension). "App" debugs the Rust side; "WebView" attaches to the frontend
+  // through the remote debugging port "App" opens; "App + WebView" does both.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "App",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/app/src-tauri/target/debug/cjk-dict-app.exe",
+      "cwd": "${workspaceFolder}",
+      "environment": [
+        {
+          "name": "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+          "value": "--remote-debugging-port=9222"
+        }
+      ],
+      "preLaunchTask": "dev",
+      "postDebugTask": "ui:stop"
+    },
+    {
+      "name": "WebView",
+      "type": "msedge",
+      "request": "attach",
+      "port": 9222,
+      "useWebView": true,
+      "webRoot": "${workspaceFolder}/app",
+      // with "App + WebView", keep retrying while "App" builds and starts
+      "timeout": 300000
+    }
+  ],
+  "compounds": [
+    {
+      "name": "App + WebView",
+      "configurations": ["App", "WebView"],
+      "stopAll": true
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  // Debugging the app (see launch.json and https://tauri.app/develop/debug/vscode/):
+  // Vite and the Rust build run as tasks, since the debugger starts the app without the
+  // Tauri CLI. build.rs reads the repo-root .env itself.
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "ui:dev",
+      "detail": "Vite dev server (beforeDevCommand)",
+      "type": "shell",
+      "command": "pnpm app dev",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "vite",
+        "pattern": { "regexp": "^never-matches$" },
+        "background": {
+          "activeBegins": true,
+          "beginsPattern": "VITE",
+          "endsPattern": "Local:"
+        }
+      }
+    },
+    {
+      "label": "build:debug",
+      "detail": "cargo build of the Tauri app (debug)",
+      "type": "shell",
+      "command": "cargo build --manifest-path app/src-tauri/Cargo.toml",
+      "problemMatcher": "$rustc"
+    },
+    {
+      "label": "dev",
+      "dependsOn": ["build:debug", "ui:dev"],
+      "group": { "kind": "build" }
+    },
+    {
+      // postDebugTask: debug sessions don't stop the background tasks they started
+      "label": "ui:stop",
+      "detail": "stop the ui:dev task",
+      "type": "shell",
+      "command": "echo ${input:terminateUiDev}",
+      "presentation": { "reveal": "never" },
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "terminateUiDev",
+      "type": "command",
+      "command": "workbench.action.tasks.terminate",
+      "args": "ui:dev"
+    }
+  ]
+}

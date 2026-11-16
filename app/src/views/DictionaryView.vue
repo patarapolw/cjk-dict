@@ -2,18 +2,36 @@
   <main class="container">
     <header>
       <div class="search-group">
-        <input
-          class="search-input"
-          inputmode="search"
-          name="term"
-          v-model="q"
-          :placeholder="searchReading ? 'Term' : ''"
-          autocapitalize="none"
-          autocorrect="off"
-          autocomplete="off"
-          spellcheck="false"
-          @input="onTermInput"
-        />
+        <div class="search-box">
+          <input
+            ref="searchInput"
+            class="search-input"
+            inputmode="search"
+            name="term"
+            v-model="q"
+            :placeholder="placeholder"
+            :lang="lang || undefined"
+            autocapitalize="none"
+            autocorrect="off"
+            autocomplete="off"
+            spellcheck="false"
+            @input="onTermInput"
+            @compositionstart="onCompositionStart"
+            @compositionupdate="onCompositionUpdate"
+            @compositionend="onCompositionEnd"
+            @keydown.esc="clearQuery"
+          />
+          <button
+            v-if="q"
+            type="button"
+            class="clear-button"
+            aria-label="Clear"
+            title="Clear (Esc)"
+            @click="clearQuery"
+          >
+            ×
+          </button>
+        </div>
         <div class="search-modes" role="group" aria-label="Search mode">
           <button
             type="button"
@@ -22,7 +40,7 @@
             :title="
               tokenizerPending
                 ? '~ (token search) is available once the tokenizer download finishes'
-                : undefined
+                : 'Token search: words containing it'
             "
             @click="toggleQueryState('fts')"
           >
@@ -31,34 +49,69 @@
           <button
             type="button"
             :aria-pressed="qState === 'exact'"
+            title="Exact match"
             @click="toggleQueryState('exact')"
           >
             =
           </button>
+          <button
+            v-if="hasReadings"
+            type="button"
+            :aria-pressed="readingMode"
+            title="Reading search: type only the reading, no {} needed"
+            @click="toggleReadingMode"
+          >
+            {}
+          </button>
         </div>
       </div>
-      <input
-        v-if="searchReading"
-        class="search-input"
-        inputmode="search"
-        name="reading"
-        v-model="reading"
-        placeholder="Reading"
-        autocapitalize="none"
-        autocorrect="off"
-        autocomplete="off"
-        spellcheck="false"
-        @input="onTermInput"
-      />
+      <p class="search-hint">
+        <!-- what the query is understood as, so the syntax and modes explain themselves -->
+        <template v-if="parsed.term || hintReading">
+          Searching
+          <code v-if="parsed.term">{{ parsed.term }}</code>
+          <template v-if="hintReading">
+            {{ parsed.term ? "read" : "by reading" }}
+            <code>{{ hintReading }}</code>
+          </template>
+          <template v-if="qState === 'exact'"> (exact)</template>
+          <template v-else-if="qState === 'fts'">
+            (words containing it)</template
+          >
+          <button
+            v-if="parsed.rest"
+            type="button"
+            class="link-button"
+            @click="searchNext"
+          >
+            Next: {{ parsed.rest }}
+          </button>
+        </template>
+        <template v-else-if="readingSearch">
+          Type only the reading<template v-if="examples.reading"
+            >, e.g. <code>{{ examples.reading }}</code></template
+          >
+        </template>
+        <template v-else-if="examples.furigana">
+          Add a reading: <code>{{ examples.furigana }}</code
+          >, or press <code>{}</code> to search by reading only
+        </template>
+      </p>
       <nav>
-        <label v-if="lang !== 'ko-KR'">
-          <input type="checkbox" name="reading" v-model="searchReading" />
-          <span>Search reading</span>
-        </label>
-
-        <label v-if="['', 'ja-JP'].includes(lang)">
+        <label
+          v-if="isJapanese"
+          title="Convert romaji to kana as you type: nihongo → にほんご"
+        >
           <input type="checkbox" name="autokana" v-model="autoKana" />
           <span>Auto-convert to Kana</span>
+        </label>
+
+        <label
+          v-if="isJapanese"
+          title="When a Japanese IME converts にほんご to 日本語, also match the reading you typed: <日本>{にほん}語"
+        >
+          <input type="checkbox" name="imefurigana" v-model="imeFurigana" />
+          <span>Get reading from IME</span>
         </label>
 
         <label>
@@ -68,24 +121,55 @@
       </nav>
     </header>
     <div class="scroller" ref="scroller" @scroll.passive="onScroll">
+      <p v-if="noResults" class="no-results">No results</p>
       <section v-for="it in items" :key="it.id" class="accordion-item">
         <button
           type="button"
           class="accordion-header"
           :aria-expanded="openedItems.includes(it.id)"
-          :aria-label="it.entries[0]?.term || it.term"
           @click="toggleItem(it.id)"
         >
-          <span v-if="!openedItems.includes(it.id)">
-            {{ it.entries[0]?.term || it.term }}
-          </span>
+          <ruby v-if="headReading(it)" class="headword"
+            >{{ headTerm(it) }}<rt>{{ headReading(it) }}</rt></ruby
+          >
+          <span v-else class="headword">{{ headTerm(it) }}</span>
         </button>
         <div v-if="openedItems.includes(it.id)" class="accordion-content">
+          <div class="item-actions">
+            <button
+              type="button"
+              class="link-button"
+              title="Search this word only"
+              @click="searchFor(furiganaOf(it), 'exact')"
+            >
+              = {{ headTerm(it) }}
+            </button>
+            <button
+              type="button"
+              class="link-button"
+              :disabled="tokenizerPending"
+              title="Words containing it"
+              @click="searchFor(headTerm(it), 'fts')"
+            >
+              ~ {{ headTerm(it) }}
+            </button>
+            <button
+              v-if="headReading(it)"
+              type="button"
+              class="link-button"
+              title="Words with this reading"
+              @click="searchFor(braced(headReading(it)), 'exact')"
+            >
+              {{ braced(headReading(it)) }}
+            </button>
+          </div>
           <Term
             v-for="(ent, j) in it.entries"
             :key="j"
             :row="ent"
-            :dictionary="ent.dict_path"
+            :show-term="
+              ent.term !== headTerm(it) || ent.reading !== it.entries[0].reading
+            "
             :get-asset-src="getAssetSrc"
             @anchor-clicked="onAnchorClicked"
           />
@@ -111,13 +195,41 @@ import { toKana } from "wanakana";
 import { useRoute, useRouter } from "vue-router";
 import Term from "../components/yomitan/Term.vue";
 import { ISearchTerm, ITerm, searchDB } from "../db/search";
+import {
+  isImeReading,
+  normalizeQuery,
+  parseQuery,
+  toFurigana,
+} from "../util/furigana";
 import { dictsVersion, toBeLoaded } from "../util/loading";
 import { lang } from "../util/settings";
 
+type Item = ISearchTerm & { entries: ITerm[] };
+
 const q = ref("");
-const reading = ref("");
-const items = ref<(ISearchTerm & { entries: ITerm[] })[]>([]);
+const items = ref<Item[]>([]);
 const openedItems = ref<number[]>([]);
+const noResults = ref(false);
+
+/** reading search: the whole query is a reading, as if typed as `{reading}` */
+const readingMode = ref(false);
+/** Korean dictionaries have no readings: a Hangul term is its own reading */
+const hasReadings = computed(() => lang.value !== "ko-KR");
+const readingSearch = computed(() => readingMode.value && hasReadings.value);
+
+function toggleReadingMode() {
+  readingMode.value = !readingMode.value;
+  elSearchInput.value?.focus();
+}
+
+const parsed = computed(() => {
+  const query = q.value.trim();
+  // furigana syntax typed by hand still wins
+  if (readingSearch.value && query && !/[<>{}＜＞｛｝]/u.test(query)) {
+    return parseQuery(`{${query}}`);
+  }
+  return parseQuery(q.value);
+});
 
 // "~" needs the lindera tokenizer, which downloads in the background on first launch
 const tokenizerPending = computed(() => toBeLoaded.value.some((d) => !d.dict));
@@ -133,8 +245,31 @@ function toggleItem(id: number) {
     : [...openedItems.value, id];
 }
 
-const searchReading = ref(false);
+const isJapanese = computed(() => ["", "ja-JP"].includes(lang.value));
 const autoKana = ref(lang.value === "ja-JP");
+const imeFurigana = ref(true);
+
+/** the parsed reading, e.g. `にほん*` (`*`: the rest of the reading is unknown) */
+const hintReading = computed(
+  () => parsed.value.reading || parsed.value.readingGlob,
+);
+
+/** per-language examples for the search hint and placeholder */
+const examples = computed(
+  () =>
+    ({
+      "ja-JP": { furigana: "<日本>{にほん}語", reading: "にほんご" },
+      "": { furigana: "<日本>{にほん}語", reading: "にほんご" },
+      "zh-CN": { furigana: "<中国>{zhong guo}", reading: "zhong1 guo2" },
+    })[lang.value] ?? { furigana: "", reading: "" },
+);
+
+const placeholder = computed(() =>
+  readingSearch.value
+    ? examples.value.reading || "Reading"
+    : ({ "ja-JP": "日本語", "zh-CN": "中文", "ko-KR": "한국어" }[lang.value] ??
+      "Search"),
+);
 
 const loading = ref(false);
 const nextOffset = ref<number | null>(0);
@@ -143,6 +278,7 @@ const clipboardInterval = ref(0);
 const clipboardText = ref("");
 
 const elScroller = useTemplateRef("scroller");
+const elSearchInput = useTemplateRef("searchInput");
 
 let activeRequest: Promise<void> | null = null;
 let requestId = 0;
@@ -153,13 +289,13 @@ const router = useRouter();
 async function setRouteQuery() {
   const query = {
     q: q.value,
-    reading: reading.value,
     qState: qState.value || "",
+    reading: readingMode.value ? "1" : "",
   };
 
   const oldQuery = (() => {
-    const { q = "", reading = "", qState = "" } = route.query;
-    return { q, reading, qState };
+    const { q = "", qState = "", reading = "" } = route.query;
+    return { q, qState, reading };
   })();
 
   if (JSON.stringify(query) === JSON.stringify(oldQuery)) return;
@@ -168,18 +304,38 @@ async function setRouteQuery() {
 }
 
 function loadFromRouteQuery() {
-  if (!route.query.q && !route.query.reading) return;
+  if (!route.query.q) return;
 
   q.value = String(route.query.q || "");
-  reading.value = String(route.query.reading || "");
   qState.value = String(route.query.qState || "") || null;
+  readingMode.value = route.query.reading === "1";
+}
+
+/** Search for something else, keeping the current search in the history (back button). */
+async function searchFor(query: string, state: string | null = qState.value) {
+  await setRouteQuery();
+  qState.value = state;
+  // a term, or a reading in {} syntax: never wrap it in {} again
+  readingMode.value = false;
+  q.value = query;
+  await setRouteQuery();
+}
+
+function searchNext() {
+  searchFor(parsed.value.rest, null);
+}
+
+async function clearQuery() {
+  if (q.value) await setRouteQuery();
+  q.value = "";
+  elSearchInput.value?.focus();
 }
 
 /** wait for typing to pause; also merges auto-kana's romaji -> kana double update */
 const SEARCH_DEBOUNCE_MS = 200;
 let searchTimer: ReturnType<typeof setTimeout> | undefined;
 
-watch([q, qState, reading, searchReading, lang, dictsVersion], () => {
+watch([q, qState, readingMode, lang, dictsVersion], () => {
   // bump now, so an in-flight search for the old query discards its results
   const id = ++requestId;
   clearTimeout(searchTimer);
@@ -192,25 +348,26 @@ watch([q, qState, reading, searchReading, lang, dictsVersion], () => {
   }, SEARCH_DEBOUNCE_MS);
 });
 
-watch(lang, (value) => {
-  if (value === "ko-KR") {
-    reading.value = "";
-    searchReading.value = false;
-  }
-});
-
 let isWanakanaFinished = true;
 
-async function onTermInput({ target }: InputEvent) {
+async function onTermInput(e: Event) {
+  const { target } = e;
   if (!(target instanceof HTMLInputElement)) return;
+  // the IME is still composing: leave its text alone
+  if ((e as InputEvent).isComposing) return;
   if (!isWanakanaFinished) return;
 
   isWanakanaFinished = false;
   try {
     await nextTick();
-    if (autoKana.value && ["", "ja-JP"].includes(lang.value)) {
+    if (autoKana.value && isJapanese.value) {
       const conv = (s: string) =>
-        toKana(s, { useObsoleteKana: true, IMEMode: true });
+        toKana(s, {
+          useObsoleteKana: true,
+          IMEMode: true,
+          // keep the furigana syntax as typed
+          customKanaMapping: { "<": "<", ">": ">", "{": "{", "}": "}" },
+        });
 
       let { selectionStart } = target;
       selectionStart = selectionStart || target.value.length;
@@ -233,6 +390,49 @@ async function onTermInput({ target }: InputEvent) {
   }
 }
 
+/*
+ * IME furigana: while a Japanese IME composes, it shows the reading (にほんご) before the
+ * user converts it to kanji (日本語). When the conversion is committed, the committed text is
+ * replaced with furigana syntax (<日本語>{にほんご}), so the search also matches the reading.
+ */
+let imeReading = "";
+
+function onCompositionStart() {
+  imeReading = "";
+}
+
+function onCompositionUpdate(e: CompositionEvent) {
+  if (e.data && isImeReading(e.data)) imeReading = e.data.replace(/ｎ/g, "ん");
+}
+
+async function onCompositionEnd(e: CompositionEvent) {
+  const reading = imeReading;
+  imeReading = "";
+  const committed = e.data;
+  const target = e.target;
+  if (!imeFurigana.value || !isJapanese.value) return;
+  if (!reading || !committed || !(target instanceof HTMLInputElement)) return;
+
+  const markup = toFurigana(committed, reading);
+  if (markup === committed) return;
+
+  // let v-model take the committed text first
+  await nextTick();
+  const end = target.selectionStart ?? target.value.length;
+  const start = end - committed.length;
+  if (start < 0 || target.value.slice(start, end) !== committed) return;
+
+  // don't nest inside furigana the user typed, e.g. <日本>{|}
+  const before = normalizeQuery(target.value.slice(0, start));
+  if (before.lastIndexOf("{") > before.lastIndexOf("}")) return;
+  if (before.lastIndexOf("<") > before.lastIndexOf(">")) return;
+
+  q.value = target.value.slice(0, start) + markup + target.value.slice(end);
+  await nextTick();
+  const caret = start + markup.length;
+  target.setSelectionRange(caret, caret);
+}
+
 function onScroll() {
   const el = elScroller.value;
   if (!el || loading.value || nextOffset.value === null) return;
@@ -241,17 +441,27 @@ function onScroll() {
   if (remaining < el.clientHeight / 2) loadMore();
 }
 
+/** language to segment `text` with: the setting, or a guess from its script */
+function segmentLang(text: string) {
+  if (lang.value) return lang.value;
+  if (/\p{sc=Hangul}/u.test(text)) return "ko-KR";
+  if (/[\p{scx=Hiragana}\p{scx=Katakana}]/u.test(text)) return "ja-JP";
+  return "zh-CN";
+}
+
 async function loadMore(isNew?: boolean) {
   if (loading.value || nextOffset.value === null) return;
 
-  let term = q.value.trimStart();
-  const termReading = searchReading.value ? reading.value.trim() : "";
+  const query = parsed.value;
+  const term = query.term.trim();
+  const { reading, readingGlob, rest } = query;
 
-  if (!(term.trimEnd() || termReading)) {
+  if (!(term || reading)) {
     // empty query: don't leave the previous query's results up
     if (isNew) {
       items.value = [];
       nextOffset.value = null;
+      noResults.value = false;
     }
     return;
   }
@@ -264,25 +474,42 @@ async function loadMore(isNew?: boolean) {
   const oldItems = items.value;
 
   let type = qState.value;
+  // a space marks a word boundary: look up the first word only
+  if (rest) type = type || "exact";
 
-  if (type !== "exact" && term.includes(" ")) {
-    term = term.split(" ", 2)[0];
-    type = type || "exact";
-  }
+  let segmented: string[] = [];
 
   const request = (async () => {
     try {
       const result = await searchDB.search({
         term,
-        reading: termReading,
+        reading,
+        readingGlob,
         limit: 5,
         offset,
         type,
       });
       if (id !== requestId) return; // the query changed meanwhile
 
+      // Nothing matches a longer text, e.g. a sentence from the clipboard: look up its
+      // first word instead (and offer the rest as "Next").
+      if (
+        isNew &&
+        !result.items.length &&
+        !rest &&
+        !reading &&
+        !readingGlob &&
+        type !== "fts" &&
+        [...term].length > 1
+      ) {
+        segmented = await searchDB.segment(term, segmentLang(term));
+        if (id !== requestId) return;
+        if (segmented.length > 1) return; // handled below, as a new query
+      }
+
       items.value = isNew ? result.items : [...oldItems, ...result.items];
       nextOffset.value = result.next;
+      if (isNew) noResults.value = !result.items.length;
 
       if (isNew && elScroller.value) {
         elScroller.value.scrollTop = 0;
@@ -306,11 +533,33 @@ async function loadMore(isNew?: boolean) {
 
   if (activeRequest === request) activeRequest = null;
 
+  if (segmented.length > 1 && id === requestId) {
+    q.value = `${segmented[0]} ${segmented.slice(1).join("")}`;
+    return;
+  }
+
   // Only check after this request updated the current query's items.
   if (id === requestId) {
     await nextTick();
     onScroll();
   }
+}
+
+function headTerm(it: Item) {
+  return it.entries[0]?.term || it.term;
+}
+
+function headReading(it: Item) {
+  const reading = it.entries[0]?.reading;
+  return reading && reading !== headTerm(it) ? reading : "";
+}
+
+/** reading-only query syntax */
+const braced = (reading: string) => `{${reading}}`;
+
+/** the result as a query in furigana syntax, e.g. <食>{た}べる */
+function furiganaOf(it: Item) {
+  return toFurigana(headTerm(it), headReading(it));
 }
 
 function getAssetSrc(dict: string, src: string) {
@@ -322,12 +571,7 @@ async function onAnchorClicked(href: string) {
   const query = params.get("query");
   if (!query) return;
 
-  await setRouteQuery();
-
-  qState.value = "exact";
-  q.value = query;
-
-  await setRouteQuery();
+  await searchFor(query, "exact");
 }
 
 // A checkbox click must not be preventDefault()ed: the browser then reverts the
@@ -365,6 +609,7 @@ function toggleClipboardMonitor() {
       if (clipboardText.value === newText) return;
 
       clipboardText.value = newText;
+      readingMode.value = false; // copied text is a term, not a reading
       q.value = newText;
     }, 1000);
   }
@@ -393,8 +638,11 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .container {
+  box-sizing: border-box;
   padding: 1em;
-  height: calc(100vh - 3em);
+  /* Fill the layout's 1fr row instead of guessing the app header's height */
+  min-height: 0;
+  height: 100%;
   display: grid;
   grid-template-rows: auto 1fr;
 
@@ -415,8 +663,34 @@ onBeforeUnmount(() => {
     font: inherit;
   }
 
+  .search-box {
+    position: relative;
+    flex-grow: 1;
+    min-width: 0;
+  }
+
   .search-group .search-input {
     border-radius: 0.25rem 0 0 0.25rem;
+    padding-inline-end: 2rem;
+  }
+
+  .clear-button {
+    position: absolute;
+    inset-block: 0;
+    inset-inline-end: 0;
+    width: 2rem;
+    border: 0;
+    background: transparent;
+    color: var(--app-text-muted);
+    font: inherit;
+    font-size: 1.25rem;
+    cursor: pointer;
+  }
+
+  .search-hint {
+    margin: 0.25rem 0;
+    font-size: 0.8125rem;
+    color: var(--app-text-muted);
   }
 
   .search-modes {
@@ -462,7 +736,44 @@ onBeforeUnmount(() => {
 }
 
 .scroller {
+  /* Let the 1fr row shrink below the content height so this element scrolls */
+  min-height: 0;
   overflow: auto;
+}
+
+.no-results {
+  padding: 0.5rem;
+  color: var(--app-text-muted);
+}
+
+.link-button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--app-link);
+  font: inherit;
+  cursor: pointer;
+}
+
+.link-button:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.link-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.headword {
+  font-size: 1.25rem;
+}
+
+.item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.875rem;
 }
 
 .accordion-item {
