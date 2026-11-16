@@ -360,6 +360,8 @@ mod incremental_tests {
             .unwrap();
         assert_eq!(dict_count, 0);
         assert_eq!(term_count, 0);
+        // Windows can't delete a file that is still open
+        drop(conn);
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
@@ -449,6 +451,8 @@ mod reading_tests {
         );
         // a pattern of wildcards only does not filter
         assert_eq!(found(&db, req(Some("exact"), "日本", "*")).len(), 2);
+        // Windows can't delete a file that is still open
+        drop(db);
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -469,6 +473,7 @@ mod reading_tests {
             found(&db, req(Some("exact"), "にっぽん")),
             pairs(&[("日本", "にっぽん")])
         );
+        drop(db);
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
@@ -854,11 +859,7 @@ impl SearchDb {
         if !self.names.values().any(|n| n == name) {
             return Ok(None);
         }
-        self.with_zip(name, |z| z.read_bytes(path).map(Some))
-            .or_else(|e| match e {
-                YomitanError::ZipError(zip::result::ZipError::FileNotFound) => Ok(None),
-                e => Err(e),
-            })
+        self.with_zip(name, |z| z.read_asset(path))
     }
 
     /// Dict info rows, e.g. for a settings/about view.

@@ -9,10 +9,19 @@ use yomitan_parser::parser::{BankKind, TERM_BANK_BYTES, YomitanZip, rebank};
 /// (bank number, rows) for every term bank
 fn term_rows(path: &PathBuf) -> Vec<(u32, Vec<Box<RawValue>>)> {
     let mut z = YomitanZip::open(path).unwrap();
-    let banks: Vec<_> = z.banks().into_iter().filter(|b| b.kind == BankKind::Term).collect();
+    let banks: Vec<_> = z
+        .banks()
+        .into_iter()
+        .filter(|b| b.kind == BankKind::Term)
+        .collect();
     banks
         .iter()
-        .map(|b| (b.index, serde_json::from_str(&z.read_to_string(&b.name).unwrap()).unwrap()))
+        .map(|b| {
+            (
+                b.index,
+                serde_json::from_str(&z.read_to_string(&b.name).unwrap()).unwrap(),
+            )
+        })
         .collect()
 }
 
@@ -28,7 +37,9 @@ fn main() {
     }
     let (a, b) = (term_rows(&src), term_rows(&dst));
     let flat = |v: &[(u32, Vec<Box<RawValue>>)]| -> Vec<String> {
-        v.iter().flat_map(|(_, r)| r.iter().map(|x| x.get().to_string())).collect()
+        v.iter()
+            .flat_map(|(_, r)| r.iter().map(|x| x.get().to_string()))
+            .collect()
     };
     let (fa, fb) = (flat(&a), flat(&b));
     assert_eq!(fa, fb, "rows differ");

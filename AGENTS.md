@@ -21,6 +21,19 @@
   old remote branch (`git push origin --delete <old-name>`) only when nothing else,
   such as an open pull request, uses it.
 
+## Formatting
+
+- Before every commit, format every code file in the repository, not only the files
+  you changed:
+
+  ```sh
+  pnpm format       # Prettier: TypeScript, Vue, JSON, Markdown, ... (see .prettierignore)
+  cargo fmt --all   # Rust
+  ```
+
+- Commit formatting changes to files you didn't otherwise touch too (leftovers from
+  earlier commits), in the same commit. Don't revert them.
+
 ## Commit messages
 
 Use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/):

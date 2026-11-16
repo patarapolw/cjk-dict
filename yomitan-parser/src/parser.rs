@@ -391,6 +391,26 @@ impl YomitanZip {
         f.read_to_end(&mut buf)?;
         Ok(buf)
     }
+
+    /// A media file referenced by structured content `path`, or `None` if the zip has none.
+    ///
+    /// Some dictionaries built on Windows write paths with `\`, e.g. the Wikipedia
+    /// dictionaries' `assets\wikipedia-icon.png`, while the zip stores
+    /// `assets/wikipedia-icon.png`, so try that too.
+    pub fn read_asset(&mut self, path: &str) -> Result<Option<Vec<u8>>, YomitanError> {
+        let slashed = path.replace('\\', "/");
+        for name in [path, slashed.as_str()] {
+            match self.read_bytes(name) {
+                Ok(bytes) => return Ok(Some(bytes)),
+                Err(YomitanError::ZipError(zip::result::ZipError::FileNotFound)) => {}
+                Err(e) => return Err(e),
+            }
+            if slashed == path {
+                break;
+            }
+        }
+        Ok(None)
+    }
 }
 
 /// Term banks are cut to about this much JSON by [`rebank`].
@@ -468,4 +488,39 @@ pub fn rebank(src: &Path, dst: &Path, max_bytes: usize) -> Result<bool, YomitanE
     flush(&mut w, &mut chunk)?;
     w.finish()?.flush()?;
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use zip::{ZipWriter, write::SimpleFileOptions};
+
+    #[test]
+    fn read_asset_accepts_backslash_paths() {
+        let path =
+            std::env::temp_dir().join(format!("yomitan-parser-asset-{}.zip", std::process::id()));
+        {
+            let mut w = ZipWriter::new(File::create(&path).unwrap());
+            w.start_file("assets/icon.png", SimpleFileOptions::default())
+                .unwrap();
+            w.write_all(b"png").unwrap();
+            w.finish().unwrap();
+        }
+        let mut z = YomitanZip::open(&path).unwrap();
+
+        assert_eq!(
+            z.read_asset("assets/icon.png").unwrap().as_deref(),
+            Some(&b"png"[..])
+        );
+        assert_eq!(
+            z.read_asset("assets\\icon.png").unwrap().as_deref(),
+            Some(&b"png"[..])
+        );
+        assert_eq!(z.read_asset("assets/missing.png").unwrap(), None);
+        assert_eq!(z.read_asset("assets\\missing.png").unwrap(), None);
+
+        drop(z);
+        let _ = std::fs::remove_file(&path);
+    }
 }
