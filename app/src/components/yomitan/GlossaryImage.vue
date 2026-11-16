@@ -66,7 +66,7 @@ const src = computed(() =>
 );
 
 const loadState = ref<"loading" | "loaded" | "error">("loading");
-// Unlike Yomitan, images the dictionary marks `collapsed` (e.g. sankoku8 illustrations)
+// Unlike Yomitan, images the dictionary marks `collapsed` (e.g. a dictionary's illustrations)
 // start expanded; tapping one collapses it to "[Image]", and tapping that shows it again.
 const expanded = ref(true);
 const collapsed = computed(() => !!props.image.collapsed && !expanded.value);
@@ -116,7 +116,7 @@ const near = (a: number, b: number) => Math.abs(a / b - 1) < 0.05;
 
 /**
  * The dictionary's width and height, swapped when the image is clearly the other way
- * round. Some smk8 images in vertical-text (縦中横) spans, e.g. fractions, give the size
+ * round. Some dictionaries' images in vertical-text (縦中横) spans, e.g. fractions, give the size
  * for vertical writing: 1em x 0.5em for a 1:2 image, which would leave a 0.25em sliver.
  */
 function preferredSize(
