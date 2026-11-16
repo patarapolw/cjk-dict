@@ -104,6 +104,6 @@ On start, the app compares the remote `manifest.json` with its own copy and down
 - The search language (header) is the only setting; it is remembered per device.
 - The app follows the device's light or dark color-scheme preference.
 - Optional: auto-convert romaji to kana, IME furigana (a Japanese IME's reading is kept as `<漢字>{かんじ}` when you convert), and a clipboard monitor that searches whatever CJK text you copy.
-- Definitions render as in Yomitan: structured content (only the schema's elements and styles, `data` as `data-sc-*` attributes), each dictionary's own `styles.css` scoped to its entries, and images sized from `width`/`height`/`preferredWidth`/`sizeUnits`, including collapsed and monochrome images.
+- Definitions render as in Yomitan: structured content (only the schema's elements and styles, `data` as `data-sc-*` attributes), each dictionary's own `styles.css` scoped to its entries, and images sized from `width`/`height`/`sizeUnits`, including monochrome images. Where the app differs from Yomitan, for example showing images that dictionaries mark collapsed, is listed in [docs/yomitan-differences.md](docs/yomitan-differences.md).
 - Images in definitions are served from the zips through a `dict://` protocol.
 - The CSP allows inline styles (`style-src 'unsafe-inline'`), used for the download progress indicator, structured content styles and dictionaries' `styles.css`.
