@@ -284,6 +284,21 @@ pub fn loosen(roman: &str) -> String {
     out
 }
 
+/// The keys a term is found by in `search.db`'s `term_roman`: its romanization as
+/// pronounced and letter by letter, [`loosen`]ed. None if it has no Hangul.
+pub fn keys(term: &str) -> Vec<String> {
+    if !term.chars().any(|c| decompose(c).is_some()) {
+        return vec![];
+    }
+    let pronounced = loosen(&romanize(term, true));
+    let spelled = loosen(&romanize(term, false));
+    if pronounced == spelled {
+        vec![pronounced]
+    } else {
+        vec![pronounced, spelled]
+    }
+}
+
 /// Typed text is romanization: Latin letters, with optional `-`, `'`, `.` or spaces.
 pub fn is_romanization(text: &str) -> bool {
     text.chars().any(|c| c.is_ascii_alphabetic())
@@ -321,6 +336,12 @@ impl RomanQuery {
     }
 
     /// For [`RomanQuery::decode`]: the patterns and mode in one string, as an SQL parameter.
+    /// [`loosen`]ed patterns: a key equal to one (or, for a prefix search, starting with one)
+    /// matches. See [`keys`].
+    pub fn patterns(&self) -> &[String] {
+        &self.patterns
+    }
+
     pub fn encode(&self) -> String {
         format!(
             "{}:{}",
@@ -341,8 +362,7 @@ impl RomanQuery {
     /// 0: no match.
     pub fn rank(&self, term: &str) -> u8 {
         let mut best = 0;
-        for sound_changes in [true, false] {
-            let key = loosen(&romanize(term, sound_changes));
+        for key in keys(term) {
             for p in &self.patterns {
                 if key == *p {
                     return 2;

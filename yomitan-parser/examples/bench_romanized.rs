@@ -4,7 +4,10 @@
 use std::time::Instant;
 
 use rusqlite::{Connection, params};
-use yomitan_parser::search::{SearchDb, SearchRequest};
+use yomitan_parser::{
+    korean,
+    search::{SearchDb, SearchRequest},
+};
 
 fn main() {
     let dir = std::path::PathBuf::from(std::env::args().nth(1).expect("dir"));
@@ -19,7 +22,11 @@ fn main() {
            term_ko TEXT NOT NULL DEFAULT '', reading TEXT NOT NULL DEFAULT '',
            def_tags TEXT, rules TEXT, score INTEGER, tags TEXT);
          CREATE INDEX idx_term ON term_search (term);
-         CREATE TABLE term_link (search_id INTEGER, dict_id INTEGER, bank INTEGER, idx INTEGER);",
+         CREATE INDEX idx_term_search_score ON term_search (score);
+         CREATE TABLE term_link (search_id INTEGER, dict_id INTEGER, bank INTEGER, idx INTEGER);
+         CREATE TABLE term_roman (key TEXT NOT NULL, search_id INTEGER NOT NULL, score INTEGER,
+           PRIMARY KEY (key, search_id)) WITHOUT ROWID;
+         CREATE INDEX idx_term_roman_score ON term_roman (score);",
     )
     .unwrap();
     let mut seed: u64 = 1;
@@ -35,19 +42,41 @@ fn main() {
         let term: String = (0..len)
             .map(|_| char::from_u32(0xAC00 + rnd(11172) as u32).unwrap())
             .collect();
-        tx.execute(
-            "INSERT INTO term_search (term, term_ko, score) VALUES (?1, ?1, ?2)",
-            params![term, i % 100],
-        )
-        .unwrap();
+        let id: i64 = tx
+            .query_row(
+                "INSERT INTO term_search (term, term_ko, score) VALUES (?1, ?1, ?2) RETURNING id",
+                params![term, i % 100],
+                |r| r.get(0),
+            )
+            .unwrap();
+        for key in korean::keys(&term) {
+            tx.execute(
+                "INSERT OR IGNORE INTO term_roman (key, search_id, score) VALUES (?1, ?2, ?3)",
+                params![key, id, i % 100],
+            )
+            .unwrap();
+        }
     }
     tx.commit().unwrap();
+    conn.execute_batch("ANALYZE").unwrap();
     drop(conn);
-    let db = SearchDb::open(&db_path, &dir).unwrap();
+
+    println!("with term_roman:");
+    run(&SearchDb::open(&db_path, &dir).unwrap());
+    let conn = Connection::open(&db_path).unwrap();
+    conn.execute_batch("DROP TABLE term_roman").unwrap();
+    drop(conn);
+    println!("without (search.db from before it):");
+    run(&SearchDb::open(&db_path, &dir).unwrap());
+}
+
+fn run(db: &SearchDb) {
     for (q, kind) in [
         ("g", None),
         ("a", None),
+        ("ha", None),
         ("han", None),
+        ("hangu", None),
         ("hangugeo", None),
         ("hangugeo", Some("exact")),
     ] {
