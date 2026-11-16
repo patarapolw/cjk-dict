@@ -12,7 +12,10 @@ import { lang as langSetting } from "../util/settings";
 
 interface SearchOpts {
   term: string;
+  /** reading-only (or pinyin) search */
   reading: string;
+  /** kana reading pattern for `term` (furigana syntax), e.g. `にほん*` */
+  readingGlob: string;
   limit: number;
   offset: number;
   type: string | null;
@@ -68,6 +71,7 @@ class SearchDatabase {
         lang,
         term: opts.term,
         reading: opts.reading,
+        reading_glob: opts.readingGlob,
         tokens,
         limit: opts.limit,
         offset: opts.offset,
@@ -87,6 +91,20 @@ class SearchDatabase {
   /** URL of a media file inside a dictionary zip, for a plain `<img src>` (dict:// protocol). */
   assetSrc(dict: string, path: string): string {
     return convertFileSrc(`${dict}/${path}`, "dict");
+  }
+
+  /** Surface forms of `text`'s words, or [] if the tokenizer isn't available (yet). */
+  async segment(text: string, lang: string): Promise<string[]> {
+    try {
+      const segs = await invoke<[string, string[]][]>("segment", {
+        lang,
+        text,
+      });
+      return segs.map(([surface]) => surface).filter((s) => s.trim());
+    } catch (e) {
+      console.warn(`segment ${lang} unavailable`, e);
+      return [];
+    }
   }
 
   private async tokens(term: string, lang: string) {

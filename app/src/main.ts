@@ -1,4 +1,5 @@
 import "./index.css";
+import "./components/yomitan/glossary.css";
 
 import { createApp } from "vue";
 

@@ -370,6 +370,23 @@ pub async fn search(
         .map_err(AppError::from)
 }
 
+/// A dictionary's `styles.css`, if its zip has one. The view scopes it to that
+/// dictionary's entries, as Yomitan does.
+#[tauri::command]
+pub async fn dict_styles(
+    state: State<'_, DictState>,
+    dict: String,
+) -> Result<Option<String>, AppError> {
+    let db = state.get()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        Ok(db
+            .asset(&dict, "styles.css")?
+            .map(|b| String::from_utf8_lossy(&b).into_owned()))
+    })
+    .await
+    .map_err(|e| AppError::Error(e.to_string()))?
+}
+
 /// `dict://localhost/<dict>/<path inside zip>` -> the file from the dict's zip.
 pub fn asset_protocol(
     app: &AppHandle,

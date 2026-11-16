@@ -43,6 +43,7 @@ pub fn run() {
             dicts::dict_plan,
             dicts::dict_commit,
             dicts::search,
+            dicts::dict_styles,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,0 +1,237 @@
+/*
+ * Glossary rendering, following Yomitan's display.css and structured-content.css, so that
+ * dictionaries look as their authors intended (and their own styles.css applies on top).
+ */
+
+.gloss-list {
+  margin: 0;
+  padding: 0 0 0 1.4em;
+  list-style-type: circle;
+}
+
+.gloss-list[data-count="0"],
+.gloss-list[data-count="1"] {
+  padding-left: 0;
+  list-style-type: none;
+}
+
+.gloss-item::marker {
+  color: var(--app-text-muted);
+}
+
+/* plain text glossaries keep their line breaks */
+.gloss-content {
+  display: block;
+  white-space: pre-line;
+}
+
+.gloss-deinflection {
+  color: var(--app-text-muted);
+}
+
+/* Tags */
+.tag {
+  display: inline-block;
+  margin: 0.125em 0.375em 0.125em 0;
+  padding: 0.125em 0.375em;
+  border-radius: 0.25em;
+  background: var(--app-tag-background);
+  color: #fff;
+  font-size: 0.75em;
+  font-weight: bold;
+  line-height: 1.4;
+  vertical-align: middle;
+}
+
+.tag[data-category="dictionary"] {
+  background: var(--app-tag-dictionary-background);
+}
+
+/* Images */
+.gloss-image-link {
+  display: inline-block;
+  position: relative;
+  max-width: 100%;
+  line-height: 1;
+  color: var(--app-link);
+  vertical-align: top;
+}
+
+.gloss-image-container {
+  display: inline-block;
+  position: relative;
+  max-width: 100%;
+  max-height: 100vh;
+  overflow: hidden;
+  vertical-align: top;
+  line-height: 0;
+}
+
+.gloss-image-link[data-background="true"] > .gloss-image-container {
+  background-color: var(--app-gloss-image-background);
+}
+
+.gloss-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border: none;
+}
+
+/* monochrome images are a mask, drawn in the text color */
+.gloss-image-background {
+  display: none;
+  position: absolute;
+  inset: 0;
+  background-color: currentColor;
+  -webkit-mask: var(--image) center / contain no-repeat;
+  mask: var(--image) center / contain no-repeat;
+}
+
+.gloss-image-link[data-appearance="monochrome"] {
+  color: var(--app-text);
+}
+
+.gloss-image-link[data-appearance="monochrome"] .gloss-image-background {
+  display: block;
+}
+
+.gloss-image-link[data-appearance="monochrome"] .gloss-image {
+  visibility: hidden;
+}
+
+.gloss-image-link[data-image-rendering="pixelated"] .gloss-image,
+.gloss-image-link[data-image-rendering="pixelated"] .gloss-image-background {
+  image-rendering: pixelated;
+}
+
+.gloss-image-link[data-image-rendering="crisp-edges"] .gloss-image,
+.gloss-image-link[data-image-rendering="crisp-edges"] .gloss-image-background {
+  image-rendering: crisp-edges;
+}
+
+.gloss-image-link[data-load-state="error"] .gloss-image-container::after {
+  content: "Image failed to load";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.25em;
+  font-size: 0.875rem;
+  line-height: 1.2;
+  text-align: center;
+  white-space: normal;
+  color: var(--app-text-muted);
+}
+
+.gloss-image-link-text {
+  display: none;
+  line-height: 1.5;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.gloss-image-link-text::before {
+  content: "[";
+}
+
+.gloss-image-link-text::after {
+  content: "]";
+}
+
+/* collapsed images show as "[Image]"; tapping it shows the image */
+.gloss-image-link[data-collapsed="true"] {
+  vertical-align: baseline;
+}
+
+.gloss-image-link[data-collapsed="true"] .gloss-image-container {
+  display: none;
+}
+
+.gloss-image-link[data-collapsed="true"] .gloss-image-link-text {
+  display: inline;
+}
+
+.gloss-image-description {
+  display: block;
+  white-space: pre-line;
+}
+
+.gloss-image-link[data-collapsed="true"] ~ .gloss-image-description {
+  display: inline;
+}
+
+.gloss-image-link[data-vertical-align="baseline"] {
+  vertical-align: baseline;
+}
+.gloss-image-link[data-vertical-align="sub"] {
+  vertical-align: sub;
+}
+.gloss-image-link[data-vertical-align="super"] {
+  vertical-align: super;
+}
+.gloss-image-link[data-vertical-align="text-top"],
+.gloss-image-link[data-vertical-align="top"] {
+  vertical-align: top;
+}
+.gloss-image-link[data-vertical-align="text-bottom"],
+.gloss-image-link[data-vertical-align="bottom"] {
+  vertical-align: bottom;
+}
+.gloss-image-link[data-vertical-align="middle"] {
+  vertical-align: middle;
+}
+
+/* Links */
+.gloss-link {
+  color: var(--app-link);
+  cursor: pointer;
+}
+
+.gloss-link-external-icon {
+  margin-inline-start: 0.125em;
+  font-size: 0.75em;
+}
+
+/* Structured content */
+.gloss-sc-table-container {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.gloss-sc-table {
+  table-layout: auto;
+  border-collapse: collapse;
+}
+
+.gloss-sc-thead,
+.gloss-sc-tfoot,
+.gloss-sc-th {
+  font-weight: bold;
+  background-color: var(--app-control-background);
+}
+
+.gloss-sc-th,
+.gloss-sc-td {
+  border: 1px solid var(--app-border);
+  padding: 0.25em;
+  vertical-align: top;
+}
+
+.gloss-sc-ol,
+.gloss-sc-ul {
+  padding-left: 1.4em;
+}
+
+.gloss-sc-details {
+  padding-left: 1.4em;
+}
+
+.gloss-sc-summary {
+  list-style-position: outside;
+  cursor: pointer;
+}
