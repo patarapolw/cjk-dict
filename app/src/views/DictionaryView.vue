@@ -98,14 +98,20 @@
         <template v-else>Press <code>{}</code> to search by reading</template>
       </p>
       <nav>
-        <label v-if="isJapanese">
+        <label
+          v-if="isJapanese"
+          title="Convert romaji to kana as you type: nihongo → にほんご"
+        >
           <input type="checkbox" name="autokana" v-model="autoKana" />
           <span>Auto-convert to Kana</span>
         </label>
 
-        <label v-if="isJapanese">
+        <label
+          v-if="isJapanese"
+          title="When a Japanese IME converts にほんご to 日本語, also match the reading you typed: <日本>{にほん}語"
+        >
           <input type="checkbox" name="imefurigana" v-model="imeFurigana" />
-          <span>IME furigana</span>
+          <span>Get reading from IME</span>
         </label>
 
         <label>
