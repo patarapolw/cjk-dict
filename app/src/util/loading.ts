@@ -20,7 +20,18 @@ export interface UnzipProgress {
   outDir: string;
 }
 
+/** `dict-verify-progress`: checksumming a downloaded dictionary file */
+export interface VerifyProgress {
+  file: string;
+  /** bytes hashed so far */
+  hashed: number;
+  size: number;
+}
+
 export const toBeLoaded = ref<DownloadingProps[]>([]);
+
+/** The file being verified, while `dict_plan` or `dict_commit` checksums the library. */
+export const verifying = ref<VerifyProgress | null>(null);
 
 /** Downloads that failed this session (retried on next launch). */
 export const loadErrors = ref<{ filename: string; error: string }[]>([]);

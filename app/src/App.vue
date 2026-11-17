@@ -16,7 +16,7 @@
   </div>
   <!-- Background downloads: non-modal, the app stays usable meanwhile -->
   <aside
-    v-if="toBeLoaded.length || loadErrors.length"
+    v-if="toBeLoaded.length || loadErrors.length || verifying"
     class="downloads"
     :class="{ collapsed: downloadsCollapsed }"
     aria-live="polite"
@@ -25,6 +25,7 @@
       <span v-if="toBeLoaded.length">
         Downloading ({{ toBeLoaded.length }} left)
       </span>
+      <span v-else-if="verifying">Verifying dictionaries</span>
       <span v-else>Download failed</span>
       <button
         type="button"
@@ -34,7 +35,7 @@
         {{ downloadsCollapsed ? "Show" : "Hide" }}
       </button>
       <button
-        v-if="!toBeLoaded.length"
+        v-if="!toBeLoaded.length && !verifying"
         type="button"
         class="text-button"
         @click="loadErrors = []"
@@ -43,6 +44,29 @@
       </button>
     </header>
     <div v-show="!downloadsCollapsed" class="downloads-body">
+      <div v-if="verifying">
+        <p>
+          Verifying {{ verifying.file }}
+          <span style="float: right">({{ verifyingPercent }}%)</span>
+        </p>
+        <div
+          class="progress"
+          role="progressbar"
+          :aria-label="`Verifying ${verifying.file}`"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          :aria-valuenow="verifyingPercent"
+        >
+          <div
+            class="progress-value"
+            :style="{ width: `${verifyingPercent}%` }"
+          />
+        </div>
+        <p class="downloads-note">
+          Keep the app open until this finishes: a phone pauses apps in the
+          background.
+        </p>
+      </div>
       <Downloading
         v-for="d in toBeLoaded"
         :key="d.filename"
@@ -59,20 +83,25 @@
 <script setup lang="ts">
 import {
   type ComponentPublicInstance,
+  computed,
   nextTick,
+  onBeforeUnmount,
   onMounted,
   ref,
   watch,
 } from "vue";
 
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import Downloading from "./components/Downloading.vue";
 import {
   DownloadingProps,
+  VerifyProgress,
   dictsVersion,
   loadErrors,
   toBeLoaded,
+  verifying,
 } from "./util/loading.ts";
 import { lang } from "./util/settings.ts";
 import { makeLinderaDownloadList } from "./util/tokenize";
@@ -97,7 +126,34 @@ const langSelectOptions = ref([
   { label: "ko-KR", value: "ko-KR" },
 ]);
 
-onMounted(() => {
+const verifyingPercent = computed(() => {
+  const v = verifying.value;
+  return v && v.size ? Math.floor((100 * v.hashed) / v.size) : 0;
+});
+
+// Checksumming the library takes minutes on a phone: show which file it's at.
+// `dict_plan` and `dict_commit` in flight; an event arriving after one returned is stale.
+let checksumming = 0;
+async function checksummed<T>(run: () => Promise<T>) {
+  checksumming++;
+  try {
+    return await run();
+  } finally {
+    checksumming--;
+    verifying.value = null;
+  }
+}
+
+let unlistenVerify: UnlistenFn | undefined;
+onBeforeUnmount(() => unlistenVerify?.());
+
+onMounted(async () => {
+  unlistenVerify = await listen<VerifyProgress>(
+    "dict-verify-progress",
+    ({ payload }) => {
+      if (checksumming) verifying.value = payload;
+    },
+  );
   loadAll();
 });
 
@@ -140,7 +196,7 @@ watch(toBeLoaded, () => {
 
 async function commitDicts() {
   try {
-    await invoke("dict_commit");
+    await checksummed(() => invoke("dict_commit"));
     dictsVersion.value++;
   } catch (e) {
     console.error(e);
@@ -154,7 +210,9 @@ async function commitDicts() {
 async function loadAll() {
   // Dictionaries: download what changed in the library (zips + search.db), then commit.
   try {
-    const plan = await invoke<{ filename: string; url: string }[]>("dict_plan");
+    const plan = await checksummed(() =>
+      invoke<{ filename: string; url: string }[]>("dict_plan"),
+    );
     toBeLoaded.value = [
       ...toBeLoaded.value,
       ...plan.map(
@@ -255,5 +313,24 @@ async function loadAll() {
 
 .downloads-error {
   color: var(--app-error);
+}
+
+.downloads-note {
+  opacity: 0.75;
+  font-size: 0.875em;
+}
+
+/* as in Downloading.vue */
+.progress {
+  height: 0.5rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--app-progress-track);
+}
+
+.progress-value {
+  height: 100%;
+  background: var(--app-focus);
+  transition: width 150ms ease;
 }
 </style>
