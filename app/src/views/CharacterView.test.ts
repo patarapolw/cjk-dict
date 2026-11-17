@@ -113,7 +113,7 @@ describe("CharacterView", () => {
     await flushPromises();
     expect(router.currentRoute.value.path).toBe("/dictionary");
     expect(router.currentRoute.value.query).toMatchObject({
-      q: "<林>{はやし}",
+      q: "*<林>{はやし}",
       qState: "",
     });
 
@@ -122,7 +122,7 @@ describe("CharacterView", () => {
     await loaded(wrapper);
     await reading("lín").trigger("click");
     await flushPromises();
-    expect(router.currentRoute.value.query.q).toBe("<林>{lín}");
+    expect(router.currentRoute.value.query.q).toBe("*<林>{lín}");
     expect(lang.value).toBe("zh-CN");
     wrapper.unmount();
   });

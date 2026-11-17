@@ -74,16 +74,16 @@ describe("sortByLang", () => {
 });
 
 describe("readingQuery", () => {
-  it("searches words starting with the character read so", () => {
-    expect(readingQuery("興", "キョウ")).toBe("<興>{キョウ}");
-    expect(readingQuery("興", "xīng")).toBe("<興>{xīng}");
-    expect(readingQuery("興", "흥")).toBe("<興>{흥}");
+  it("searches words with the character read so, anywhere", () => {
+    expect(readingQuery("興", "キョウ")).toBe("*<興>{キョウ}");
+    expect(readingQuery("興", "xīng")).toBe("*<興>{xīng}");
+    expect(readingQuery("興", "흥")).toBe("*<興>{흥}");
   });
 
   it("puts a kun reading's okurigana after the character", () => {
-    expect(readingQuery("興", "おこ.る")).toBe("<興>{おこ}る");
-    expect(readingQuery("日", "-び")).toBe("<日>{び}");
-    expect(readingQuery("大", "おお-")).toBe("<大>{おお}");
+    expect(readingQuery("興", "おこ.る")).toBe("*<興>{おこ}る");
+    expect(readingQuery("日", "-び")).toBe("*<日>{び}");
+    expect(readingQuery("大", "おお-")).toBe("*<大>{おお}");
   });
 
   it("tells a reading's language by its script", () => {

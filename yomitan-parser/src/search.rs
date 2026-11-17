@@ -2471,6 +2471,7 @@ mod kana_tests {
             ("コーヒー", ""),
             ("興味", "きょうみ"),
             ("興行", "こうぎょう"),
+            ("復興", "ふっこう"),
             ("ドア", ""),
         ] {
             let reading = if reading.is_empty() {
@@ -2524,6 +2525,18 @@ mod kana_tests {
                 }
             ),
             ["興味"]
+        );
+        // *<興>{コウ}: anywhere in the word
+        assert_eq!(
+            terms(
+                &db,
+                SearchRequest {
+                    term: "*興".into(),
+                    reading_glob: "*コウ".into(),
+                    ..Default::default()
+                }
+            ),
+            ["復興", "興行"]
         );
         // {キョウミ}
         assert_eq!(

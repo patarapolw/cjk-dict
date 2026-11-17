@@ -9,6 +9,7 @@ const KANA = /^[\p{scx=Hiragana}\p{scx=Katakana}ー]+$/u;
 /** spells its own reading outside `<>{}`: kana, and Hangul (`<光>{광}나다`) */
 const SELF_READING = /^[\p{scx=Hiragana}\p{scx=Katakana}ー\p{sc=Hangul}]+$/u;
 const KANA_OR_WILDCARD = /^[\p{scx=Hiragana}\p{scx=Katakana}ー*?]+$/u;
+const HANGUL_OR_WILDCARD = /^[\p{sc=Hangul}*?]+$/u;
 /** a run of characters whose reading the IME (or the dictionary) supplies */
 const KANJI_RUN = /([\p{sc=Han}\p{N}々〆ヵヶ]+)/u;
 
@@ -74,7 +75,13 @@ export function parseQuery(raw: string): ParsedQuery {
   if (!hasReading || !reading.replace(/[*?\s]/g, "")) {
     return { term, reading: "", readingGlob: "", rest };
   }
-  if (term && KANA_OR_WILDCARD.test(reading)) {
+  // a Hangul reading is matched as reading tokens (whole words), unless a wildcard puts it
+  // elsewhere in the word: `*<興>{흥}` finds 復興 (부흥)
+  if (
+    term &&
+    (KANA_OR_WILDCARD.test(reading) ||
+      (/[*?]/u.test(reading) && HANGUL_OR_WILDCARD.test(reading)))
+  ) {
     return { term, reading: "", readingGlob: reading, rest };
   }
   return {

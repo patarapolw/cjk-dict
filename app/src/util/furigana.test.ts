@@ -74,6 +74,30 @@ describe("parseQuery", () => {
       readingGlob: "",
     });
   });
+
+  it("matches a reading anywhere in the word after a *", () => {
+    expect(parseQuery("*<興>{キョウ}")).toMatchObject({
+      term: "*興",
+      reading: "",
+      readingGlob: "*キョウ",
+    });
+    expect(parseQuery("*<興>{おこ}る")).toMatchObject({
+      term: "*興る",
+      readingGlob: "*おこる",
+    });
+    // Hangul too, as a pattern over the reading, not a reading token
+    expect(parseQuery("*<興>{흥}")).toMatchObject({
+      term: "*興",
+      reading: "",
+      readingGlob: "*흥",
+    });
+    // pinyin: per-syllable reading tokens already match anywhere
+    expect(parseQuery("*<興>{xīng}")).toMatchObject({
+      term: "*興",
+      reading: "xīng",
+      readingGlob: "",
+    });
+  });
 });
 
 describe("toFurigana", () => {
