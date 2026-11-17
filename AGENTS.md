@@ -38,6 +38,9 @@
 
 ## Checking the app
 
+Run the frontend unit tests (Vitest, with Tauri's IPC mocked by `@tauri-apps/api/mocks`)
+with `pnpm test`; they live next to the code as `app/src/**/*.test.ts`.
+
 Check a UI change in the running app, not in a page made to look like it. On Windows the
 app's webview is WebView2, which can expose the Chrome DevTools Protocol, and
 [`scripts/webview.mjs`](scripts/webview.mjs) drives it with no dependencies:
