@@ -20,9 +20,12 @@ Local development needs no settings: `pnpm serve` serves `library/` over HTTP wi
 
 ## Security
 
+The app is currently set up for personal use. A public release would need changes first.
+
+- A build compiles in a **read-only** R2 token, and anyone who has the build can extract it and download the whole bucket. Sharing a build shares every dictionary in the library.
+- The library can include dictionaries you may not redistribute. Check their terms before sharing a build with anyone.
 - The library (`library/`, including `dicts.json`) is gitignored. Your dictionary list and custom zips live only on your machine and in R2.
-- R2 credentials are only read from `.env` or environment variables; `.env` is gitignored.
-- The app is built with a **read-only** R2 token compiled in, so anyone who has the built app can extract it and download the bucket. Keep that in mind before sharing builds.
+- R2 credentials are only read from `.env` or environment variables, and `.env` is gitignored.
 
 ## The library
 
@@ -111,3 +114,7 @@ On start, the app compares the remote `manifest.json` with its own copy and down
 - Definitions render as in Yomitan: structured content (only the schema's elements and styles, `data` as `data-sc-*` attributes), each dictionary's own `styles.css` scoped to its entries, and images sized from `width`/`height`/`sizeUnits`, including monochrome images. Where the app differs from Yomitan, for example showing images that dictionaries mark collapsed, is listed in [docs/yomitan-differences.md](docs/yomitan-differences.md).
 - Images in definitions are served from the zips through a `dict://` protocol.
 - The CSP allows inline styles (`style-src 'unsafe-inline'`), used for the download progress indicator, structured content styles and dictionaries' `styles.css`.
+
+## License
+
+The code is under the [MIT License](LICENSE). Dictionaries, and data built from them such as `search.db`, keep their own licenses. So do the downloaded tokenizer dictionaries and [hanja_hangul](https://crates.io/crates/hanja_hangul)'s word tables, which `dict-admin` includes.

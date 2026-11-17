@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "CJK dictionary search (client for the cjk-dict worker)"
 authors = ["patarapolw"]
 edition = "2024"
+license = "MIT"
 
 [lib]
 # The `_lib` suffix may seem redundant but it is necessary
