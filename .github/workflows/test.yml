@@ -46,6 +46,29 @@ jobs:
       - run: cargo check --manifest-path app/src-tauri/Cargo.toml --all-targets --locked
       - run: cargo test --manifest-path app/src-tauri/Cargo.toml --locked
 
+  app-android:
+    name: Tauri app Android check
+    # The code behind cfg(target_os = "android") and the Android-only dependencies (jni)
+    # don't build for the desktop, so the job above never compiles them.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+          key: android
+      # Build scripts (ring, SQLite, zstd) compile C for Android with the NDK that the
+      # runner image ships. `cargo check` doesn't link, so no other Android setup is needed.
+      - name: Use the NDK's compiler
+        run: |
+          bin="$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          echo "CC_aarch64_linux_android=$bin/aarch64-linux-android24-clang" >> "$GITHUB_ENV"
+          echo "AR_aarch64_linux_android=$bin/llvm-ar" >> "$GITHUB_ENV"
+      - run: cargo check --manifest-path app/src-tauri/Cargo.toml --target aarch64-linux-android --all-targets --locked
+
   check:
     name: Format, typecheck and frontend tests
     runs-on: ubuntu-latest
