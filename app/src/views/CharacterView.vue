@@ -540,6 +540,8 @@ onBeforeUnmount(() => {
   height: 100%;
   display: grid;
   grid-template-rows: auto 1fr;
+  /* not wider than the window (see App.vue) */
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .search-box {

@@ -297,20 +297,28 @@ async function loadAll() {
   height: 100dvh;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
+  /* Not wider than the window, whatever the content's minimum width: a narrow window,
+     such as an Android pop-up (floating) window, would otherwise cut off the right. */
+  grid-template-columns: minmax(0, 1fr);
+  /* and long words, e.g. in a search hint, wrap rather than stick out */
+  overflow-wrap: break-word;
   overflow: hidden;
 }
 
 .header {
   display: flex;
   flex-direction: row;
-  align-items: center;
-  height: 3rem;
+  /* in a narrow window, the language select goes on a line of its own */
+  flex-wrap: wrap;
+  box-sizing: border-box;
+  min-height: 4rem;
   padding: 0.5rem;
-  gap: 0.5rem;
+  gap: 0.5rem 0.75rem;
 }
 
 .header-title {
-  flex-grow: 1;
+  /* takes up what's left of the line, without pushing the rest onto the next one */
+  flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -333,8 +341,17 @@ async function loadAll() {
 }
 
 .header select {
+  min-width: 0;
+  max-width: 100%;
   font: inherit;
   padding: 0.25rem 0.5rem;
+}
+
+/* too narrow to be anything but cut off */
+@media (max-width: 24rem) {
+  .header-title {
+    display: none;
+  }
 }
 
 .text-button {
@@ -408,7 +425,7 @@ async function loadAll() {
   }
 
   .header {
-    height: 2.5rem;
+    min-height: 3rem;
     padding-block: 0.25rem;
   }
 }

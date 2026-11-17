@@ -733,6 +733,8 @@ onBeforeUnmount(() => {
   height: 100%;
   display: grid;
   grid-template-rows: auto 1fr;
+  /* not wider than the window (see App.vue) */
+  grid-template-columns: minmax(0, 1fr);
 
   .search-group {
     display: flex;
@@ -814,12 +816,18 @@ onBeforeUnmount(() => {
     outline-offset: 2px;
   }
 
-  nav * + * {
-    margin-inline-start: 0.5em;
+  /* options wrap onto more lines in a narrow window */
+  nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25em 1em;
   }
 
-  label {
-    white-space: nowrap;
+  nav label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5em;
+    min-width: 0;
   }
 }
 
