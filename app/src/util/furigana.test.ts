@@ -75,6 +75,14 @@ describe("parseQuery", () => {
     });
   });
 
+  it("reads full-width wildcards as typed with a Japanese IME", () => {
+    expect(parseQuery("＊＜興＞｛＊キョウ｝")).toMatchObject({
+      term: "*興",
+      readingGlob: "*キョウ",
+    });
+    expect(parseQuery("［日月］曜日")).toMatchObject({ term: "[日月]曜日" });
+  });
+
   it("matches a reading anywhere in the word after a *", () => {
     expect(parseQuery("*<興>{キョウ}")).toMatchObject({
       term: "*興",

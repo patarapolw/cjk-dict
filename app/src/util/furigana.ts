@@ -3,6 +3,11 @@ import { toHiragana } from "wanakana";
 /**
  * Furigana syntax in the search box: `<日本>{にほん}語` searches the term 日本語 whose reading
  * starts with にほん. `{reading}` alone searches by reading only, e.g. `{ni3 hao3}`.
+ *
+ * Wildcards (SQLite GLOB): `*` any characters, `?` one character, in the term and in a
+ * term's reading (`*<興>{キョウ}`: 興 read キョウ anywhere in the word); `[...]` / `[^...]`
+ * one of / none of these characters, in the term (`[日月]曜日`). Not in a reading alone, nor
+ * in an exact (`=`) or token (`~`) search.
  */
 
 const KANA = /^[\p{scx=Hiragana}\p{scx=Katakana}ー]+$/u;
@@ -26,9 +31,9 @@ export interface ParsedQuery {
   rest: string;
 }
 
-/** full-width brackets, as typed with a Japanese IME */
+/** full-width brackets and wildcards, as typed with a Japanese IME */
 export function normalizeQuery(q: string): string {
-  return q.replace(/[＜＞｛｝]/g, (c) =>
+  return q.replace(/[＜＞｛｝＊？［］＾]/g, (c) =>
     String.fromCharCode(c.charCodeAt(0) - 0xfee0),
   );
 }

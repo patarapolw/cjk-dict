@@ -906,6 +906,30 @@ mod reading_tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
+    /// `*`, `?` and `[...]` in a term are GLOB wildcards, except in an exact search
+    #[test]
+    fn wildcards_in_a_term() {
+        let (dir, db) = fixture();
+        let req = |kind: Option<&str>, term: &str| SearchRequest {
+            kind: kind.map(String::from),
+            term: term.into(),
+            ..Default::default()
+        };
+        let terms = |r| -> Vec<String> {
+            let mut v: Vec<String> = found(&db, r).into_iter().map(|(t, _)| t).collect();
+            v.sort();
+            v.dedup();
+            v
+        };
+        assert_eq!(terms(req(None, "?本")), ["日本", "日本橋", "日本語"]);
+        assert_eq!(terms(req(None, "*語")), ["日本語"]);
+        assert_eq!(terms(req(None, "日本[語橋]")), ["日本橋", "日本語"]);
+        assert_eq!(terms(req(None, "日本[^語]")), ["日本橋"]);
+        assert!(terms(req(Some("exact"), "日?")).is_empty());
+        drop(db);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn reading_alone_is_a_prefix_search_unless_exact() {
         let (dir, db) = fixture();
