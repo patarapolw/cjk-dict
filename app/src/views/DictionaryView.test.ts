@@ -135,6 +135,87 @@ describe("DictionaryView", () => {
     wrapper.unmount();
   });
 
+  it("loads more results when collapsing leaves nothing to scroll", async () => {
+    // a page of results, and more after it
+    mockIPC((cmd, args) => {
+      if (cmd !== "search") throw new Error(`unexpected command: ${cmd}`);
+      const req = (args as { req: Record<string, unknown> }).req;
+      searches.push(req);
+      const offset = req.offset as number;
+      const items = [0, 1, 2, 3, 4].map((i) => ({
+        id: offset + i + 1,
+        term: `語${offset + i}`,
+        reading: "",
+        entries: [],
+      }));
+      return { items, next: offset < 10 ? offset + 5 : null };
+    });
+    // jsdom has no layout: the list is as tall as its expanded results
+    const clientHeight = vi
+      .spyOn(HTMLElement.prototype, "clientHeight", "get")
+      .mockReturnValue(500);
+    const scrollHeight = vi
+      .spyOn(HTMLElement.prototype, "scrollHeight", "get")
+      .mockImplementation(function (this: HTMLElement) {
+        return this.querySelectorAll(".accordion-content").length * 1000;
+      });
+
+    const wrapper = await mountView();
+    await wrapper.get("input.search-input").setValue("語");
+    await lastSearch();
+    await flushPromises();
+    expect(searches).toHaveLength(1);
+    expect(wrapper.findAll(".accordion-item")).toHaveLength(5);
+
+    // collapse them all: nothing to scroll, so the next page loads
+    for (const header of wrapper.findAll(".accordion-header")) {
+      await header.trigger("click");
+    }
+    await vi.waitFor(() => expect(searches.length).toBeGreaterThan(1));
+    expect(searches[1]).toMatchObject({ offset: 5 });
+
+    clientHeight.mockRestore();
+    scrollHeight.mockRestore();
+    wrapper.unmount();
+  });
+
+  it("loads more results with the More button", async () => {
+    mockIPC((cmd, args) => {
+      if (cmd !== "search") throw new Error(`unexpected command: ${cmd}`);
+      const req = (args as { req: Record<string, unknown> }).req;
+      searches.push(req);
+      const offset = req.offset as number;
+      return {
+        items: [
+          { id: offset + 1, term: `語${offset}`, reading: "", entries: [] },
+        ],
+        next: offset < 5 ? offset + 5 : null,
+      };
+    });
+    // tall enough not to load more by itself
+    const clientHeight = vi
+      .spyOn(HTMLElement.prototype, "clientHeight", "get")
+      .mockReturnValue(500);
+    const scrollHeight = vi
+      .spyOn(HTMLElement.prototype, "scrollHeight", "get")
+      .mockReturnValue(100000);
+
+    const wrapper = await mountView();
+    await wrapper.get("input.search-input").setValue("語");
+    await lastSearch();
+    await flushPromises();
+    await wrapper.get(".more-button").trigger("click");
+    await vi.waitFor(() => expect(searches).toHaveLength(2));
+    expect(searches[1]).toMatchObject({ offset: 5 });
+    await flushPromises();
+    // no more after that
+    expect(wrapper.find(".more-button").exists()).toBe(false);
+
+    clientHeight.mockRestore();
+    scrollHeight.mockRestore();
+    wrapper.unmount();
+  });
+
   it("searches Korean by Hangul reading with the {} toggle", async () => {
     lang.value = "ko-KR";
     const wrapper = await mountView();
