@@ -1,4 +1,7 @@
 <resources>
     <string name="app_name">"cjk-dict"</string>
     <string name="main_activity_title">"cjk-dict"</string>
+    <string name="sync_channel_name">Dictionary downloads</string>
+    <string name="sync_title">Syncing dictionaries</string>
+    <string name="sync_preparing">Preparing…</string>
 </resources>

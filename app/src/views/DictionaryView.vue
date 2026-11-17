@@ -548,6 +548,10 @@ async function loadMore(isNew?: boolean) {
       // e.g. "no dictionaries downloaded yet" on first launch. Never reject: a rejected
       // activeRequest would make every later search bail out at `await activeRequest`.
       console.error(e);
+      // Stop paging: with no results the list never fills the screen, so onScroll()
+      // below would call loadMore() again and retry the failing search forever. The
+      // next query, or dictionaries being put in place, starts over at offset 0.
+      if (id === requestId) nextOffset.value = null;
     } finally {
       loading.value = false;
     }

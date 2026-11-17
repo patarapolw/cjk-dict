@@ -86,6 +86,42 @@ describe("DictionaryView", () => {
     wrapper.unmount();
   });
 
+  it("doesn't retry a failing search, but searches again on the next query", async () => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    // jsdom has no layout: give the result list a height, so an empty one leaves
+    // room to "scroll" for more, as on a device
+    const clientHeight = vi
+      .spyOn(HTMLElement.prototype, "clientHeight", "get")
+      .mockReturnValue(500);
+    mockIPC((cmd, args) => {
+      if (cmd === "search") {
+        searches.push((args as { req: Record<string, unknown> }).req);
+        // end a retry loop, so the assertion below fails instead of the worker
+        if (searches.length > 10) return { items: [], next: null };
+        throw new Error("no dictionaries downloaded yet");
+      }
+      throw new Error(`unexpected command: ${cmd}`);
+    });
+
+    const wrapper = await mountView();
+    await wrapper.get("input.search-input").setValue("日本");
+    await lastSearch();
+    // give a retry loop the time to show itself
+    await new Promise((r) => setTimeout(r, 100));
+    await flushPromises();
+    expect(searches).toHaveLength(1);
+
+    await wrapper.get("input.search-input").setValue("日本語");
+    await vi.waitFor(() => expect(searches).toHaveLength(2));
+    expect(searches[1]).toMatchObject({ term: "日本語" });
+
+    consoleError.mockRestore();
+    clientHeight.mockRestore();
+    wrapper.unmount();
+  });
+
   it("searches Korean by Hangul reading with the {} toggle", async () => {
     lang.value = "ko-KR";
     const wrapper = await mountView();

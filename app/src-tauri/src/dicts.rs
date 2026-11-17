@@ -11,13 +11,13 @@ use std::{
     io::Read,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 use tauri_plugin_http::reqwest;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use yomitan_parser::search::{SearchDb, SearchRequest, SearchResult};
 
 use crate::error::AppError;
@@ -124,9 +124,20 @@ impl Remote {
     }
 }
 
+/// A file's size and modification time: while both are unchanged, a checksum computed
+/// earlier in this run still holds.
+#[derive(Clone, PartialEq)]
+struct Stamp {
+    len: u64,
+    modified: Option<SystemTime>,
+}
+
 pub struct DictState {
     dir: PathBuf,
     db: Mutex<Option<Arc<SearchDb>>>,
+    /// path -> (stamp, sha256) of files hashed this run, so that `commit` right after
+    /// `dict_plan` doesn't hash the whole library (gigabytes) a second time
+    hashed: Mutex<HashMap<PathBuf, (Stamp, String)>>,
 }
 
 impl DictState {
@@ -134,6 +145,7 @@ impl DictState {
         let s = Self {
             dir: app_data_dir.join("dicts"),
             db: Mutex::new(None),
+            hashed: Mutex::new(HashMap::new()),
         };
         if let Err(e) = s.reopen() {
             eprintln!("dictionaries not opened: {e}");
@@ -198,27 +210,85 @@ impl DictState {
             })
             .unwrap_or_default()
     }
-}
 
-/// Whether `path` holds exactly `f`. Sizes are compared first, so most mismatches are cheap.
-fn has_file(path: &Path, f: &FileInfo) -> Result<bool, AppError> {
-    match std::fs::metadata(path) {
-        Ok(m) if m.is_file() && m.len() == f.size => Ok(sha256_file(path)? == f.sha256),
-        _ => Ok(false),
+    /// `path`'s SHA-256, reusing this run's checksum if the file is unchanged since.
+    /// Reports progress as `dict-verify-progress` events: hashing the library takes
+    /// minutes on a phone.
+    fn sha256(&self, app: &AppHandle, path: &Path) -> Result<String, AppError> {
+        let stamp = |m: &std::fs::Metadata| Stamp {
+            len: m.len(),
+            modified: m.modified().ok(),
+        };
+        let before = stamp(&std::fs::metadata(path)?);
+        if let Some((s, sum)) = self.hashed.lock()?.get(path) {
+            if *s == before {
+                return Ok(sum.clone());
+            }
+        }
+
+        let file = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let sum = sha256_file(path, |hashed| {
+            let _ = app.emit(
+                "dict-verify-progress",
+                VerifyProgress {
+                    file: &file,
+                    hashed,
+                    size: before.len,
+                },
+            );
+        })?;
+        // only trust the checksum if the file didn't change while it was read
+        if stamp(&std::fs::metadata(path)?) == before {
+            self.hashed
+                .lock()?
+                .insert(path.to_path_buf(), (before, sum.clone()));
+        }
+        Ok(sum)
+    }
+
+    /// Whether `path` holds exactly `f`. Sizes are compared first, so most mismatches
+    /// are cheap.
+    fn has_file(&self, app: &AppHandle, path: &Path, f: &FileInfo) -> Result<bool, AppError> {
+        match std::fs::metadata(path) {
+            Ok(m) if m.is_file() && m.len() == f.size => Ok(self.sha256(app, path)? == f.sha256),
+            _ => Ok(false),
+        }
     }
 }
 
-fn sha256_file(path: &Path) -> Result<String, AppError> {
+#[derive(Clone, Serialize)]
+struct VerifyProgress<'a> {
+    file: &'a str,
+    /// bytes hashed so far
+    hashed: u64,
+    size: u64,
+}
+
+/// SHA-256 of a file, calling `progress` with the bytes hashed so far every 16 MiB and
+/// at the end.
+fn sha256_file(path: &Path, mut progress: impl FnMut(u64)) -> Result<String, AppError> {
+    const CHUNK: usize = 1 << 20;
+    const REPORT_EVERY: u64 = 16 << 20;
     let mut f = File::open(path)?;
     let mut h = Sha256::new();
-    let mut buf = vec![0u8; 1 << 20];
+    let mut buf = vec![0u8; CHUNK];
+    let mut hashed = 0u64;
     loop {
         let n = f.read(&mut buf)?;
         if n == 0 {
             break;
         }
         h.update(&buf[..n]);
+        let before = hashed;
+        hashed += n as u64;
+        if before / REPORT_EVERY != hashed / REPORT_EVERY {
+            progress(hashed);
+        }
     }
+    progress(hashed);
     Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
@@ -261,13 +331,13 @@ pub async fn dict_plan(app: AppHandle) -> Result<Vec<PlannedFile>, AppError> {
             // whose commit failed): nothing is committed until every file is there.
             let new = incoming.join(&f.file);
             if new.exists() {
-                if has_file(&new, f)? {
+                if state.has_file(&app, &new, f)? {
                     continue;
                 }
                 let _ = std::fs::remove_file(&new);
             }
             // moved into place by a commit that failed partway, before the manifest
-            if has_file(&state.dir.join(&f.file), f)? {
+            if state.has_file(&app, &state.dir.join(&f.file), f)? {
                 continue;
             }
             out.push(PlannedFile {
@@ -286,7 +356,7 @@ pub async fn dict_plan(app: AppHandle) -> Result<Vec<PlannedFile>, AppError> {
         std::fs::write(state.dir.join(PENDING), &text)?;
         // nothing to download, but dicts may have been removed: commit right away
         if out.is_empty() {
-            commit(&state)?;
+            commit(&app, &state)?;
         }
         Ok(out)
     })
@@ -299,14 +369,14 @@ pub async fn dict_plan(app: AppHandle) -> Result<Vec<PlannedFile>, AppError> {
 pub async fn dict_commit(app: AppHandle) -> Result<Vec<String>, AppError> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<DictState>();
-        commit(&state)?;
+        commit(&app, &state)?;
         Ok(state.get().map(|db| db.dict_names()).unwrap_or_default())
     })
     .await
     .map_err(|e| AppError::Error(e.to_string()))?
 }
 
-fn commit(state: &DictState) -> Result<(), AppError> {
+fn commit(app: &AppHandle, state: &DictState) -> Result<(), AppError> {
     let pending = state.dir.join(PENDING);
     let Ok(text) = std::fs::read_to_string(&pending) else {
         return Ok(());
@@ -330,7 +400,7 @@ fn commit(state: &DictState) -> Result<(), AppError> {
         if !path.exists() {
             return Err(AppError::Error(format!("{} was not downloaded", f.file)));
         }
-        if sha256_file(&path)? != f.sha256 {
+        if state.sha256(app, &path)? != f.sha256 {
             let _ = std::fs::remove_file(&path);
             return Err(AppError::Error(format!(
                 "{} is corrupt (checksum mismatch); it will be downloaded again",
@@ -355,6 +425,8 @@ fn commit(state: &DictState) -> Result<(), AppError> {
         }
     }
     std::fs::rename(&pending, state.dir.join(MANIFEST))?;
+    // the files moved: `committed()` vouches for them from now on
+    state.hashed.lock()?.clear();
     state.reopen()
 }
 
@@ -435,5 +507,27 @@ pub fn asset_protocol(
                 .unwrap()
         }
         _ => not_found(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sha256_file_reports_progress() {
+        let path = std::env::temp_dir().join(format!("cjk-dict-sha-{}", std::process::id()));
+        // 40 MiB: reports at 16 and 32 MiB, then at the end
+        std::fs::write(&path, vec![0u8; 40 << 20]).unwrap();
+        let mut reports = vec![];
+        let sum = sha256_file(&path, |n| reports.push(n)).unwrap();
+        std::fs::remove_file(&path).unwrap();
+
+        assert_eq!(reports, [16 << 20, 32 << 20, 40 << 20]);
+        let expected: String = Sha256::digest(vec![0u8; 40 << 20])
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        assert_eq!(sum, expected);
     }
 }

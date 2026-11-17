@@ -5,6 +5,7 @@ mod clipboard;
 mod dicts;
 mod download;
 mod error;
+mod sync_service;
 mod tokenize;
 
 struct AppState {
@@ -44,6 +45,7 @@ pub fn run() {
             dicts::dict_commit,
             dicts::search,
             dicts::dict_styles,
+            sync_service::set_sync_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

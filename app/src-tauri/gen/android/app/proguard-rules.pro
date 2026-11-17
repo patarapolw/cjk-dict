@@ -19,3 +19,7 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+# Called from Rust through JNI only (src/sync_service.rs): keep it from being removed
+-keepclassmembers class cc.polv.cjk_dict.MainActivity {
+    public void setSyncStatus(java.lang.String, int);
+}
