@@ -501,7 +501,7 @@ async fn build(lib: &Library, lindera_dir: &Path, ids_dir: &Path, rebuild: bool)
         .map(|info| (info.name.clone(), info))
         .collect();
     // from search.db: dictionaries indexed in an earlier build count too
-    let kanji_counts = search::kanji_counts(&db)?;
+    let char_counts = search::char_counts(&db)?;
     let mut out = vec![];
     for d in &dicts {
         let file = zip_infos.remove(&d.name).expect("zip info was collected");
@@ -530,7 +530,7 @@ async fn build(lib: &Library, lindera_dir: &Path, ids_dir: &Path, rebuild: bool)
             revision,
             lang,
             term_count,
-            kanji_count: kanji_counts.get(&d.name).copied().unwrap_or(0),
+            char_count: char_counts.get(&d.name).copied().unwrap_or(0),
             file,
         });
     }
@@ -688,7 +688,7 @@ mod tests {
             revision: "1".into(),
             lang: lang.map(String::from),
             term_count: 0,
-            kanji_count: 0,
+            char_count: 0,
             file: FileInfo {
                 file: format!("{name}.zip"),
                 size,
@@ -702,17 +702,17 @@ mod tests {
         let mut d = dict("x", None, 0);
         d.term_count = 528000;
         assert_eq!(d.counts(), "528000 terms");
-        d.kanji_count = 10384;
-        assert_eq!(d.counts(), "528000 terms, 10384 kanji");
+        d.char_count = 10384;
+        assert_eq!(d.counts(), "528000 terms, 10384 characters");
         d.term_count = 0;
-        assert_eq!(d.counts(), "10384 kanji");
-        // manifests from before kanji_count
+        assert_eq!(d.counts(), "10384 characters");
+        // manifests from before char_count
         let old: ManifestDict = serde_json::from_str(
             r#"{"name":"x","title":"x","revision":"1","lang":null,"term_count":5,"file":"x.zip","size":1,"sha256":""}"#,
         )
         .unwrap();
-        assert_eq!(old.kanji_count, 0);
-        assert!(!serde_json::to_string(&old).unwrap().contains("kanji_count"));
+        assert_eq!(old.char_count, 0);
+        assert!(!serde_json::to_string(&old).unwrap().contains("char_count"));
     }
 
     #[test]

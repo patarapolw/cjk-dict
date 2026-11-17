@@ -165,8 +165,8 @@ fn meta(conn: &Connection, key: &str) -> rusqlite::Result<Option<String>> {
         .optional()
 }
 
-/// Kanji entries (single characters) indexed per dictionary name, from `kanji_link`
-pub fn kanji_counts(db: &Path) -> Result<HashMap<String, usize>, YomitanError> {
+/// Kanji bank entries (single characters) indexed per dictionary name, from `kanji_link`
+pub fn char_counts(db: &Path) -> Result<HashMap<String, usize>, YomitanError> {
     let conn = Connection::open_with_flags(db, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     if !has_table(&conn, "kanji_link")? {
         return Ok(HashMap::new());
@@ -505,9 +505,9 @@ async fn build_inner(
             "UPDATE dict SET term_count = ?1 WHERE id = ?2",
             params![count as i64, dict_id],
         )?;
-        let kanji_count = index_kanji(&tx, &mut zip, dict_id)?;
-        if kanji_count > 0 {
-            progress(&format!("{}: {kanji_count} kanji", d.name), 0, 0);
+        let char_count = index_kanji(&tx, &mut zip, dict_id)?;
+        if char_count > 0 {
+            progress(&format!("{}: {char_count} characters", d.name), 0, 0);
         }
         tx.commit()?;
 
@@ -2676,7 +2676,7 @@ mod han_tests {
 
         assert!(!missing_kanji_readings(&db_path).unwrap());
         // 林 and 森; the multi-character 林檎 is left out
-        assert_eq!(kanji_counts(&db_path).unwrap()["kanji"], 2);
+        assert_eq!(char_counts(&db_path).unwrap()["kanji"], 2);
         let db = SearchDb::open(&db_path, &dir).unwrap();
         assert!(db.has_term_char);
         assert_eq!(
