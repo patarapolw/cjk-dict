@@ -371,6 +371,14 @@ fn rebank(zip: &Path, name: &str) -> Result<()> {
 async fn build(lib: &Library, lindera_dir: &Path, ids_dir: &Path, rebuild: bool) -> Result<()> {
     let dicts = lib.dicts()?;
     let db = lib.dir.join(SEARCH_DB);
+    // built before katakana and hiragana were matched alike: its terms can't be updated
+    let rebuild = rebuild || {
+        let old = search::needs_rebuild(&db)?;
+        if old {
+            eprintln!("{SEARCH_DB} predates kana folding: rebuilding it from scratch");
+        }
+        old
+    };
     let previous = if !rebuild && db.is_file() {
         lib.manifest()?
     } else {

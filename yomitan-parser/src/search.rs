@@ -27,7 +27,7 @@ use crate::{
     parser::{BankKind, YomitanZip},
     pinyin::{expand_pinyin, normalize_pinyin},
     tokenize::{Lang, TokenizerMapper},
-    util::{NonEmpty, OptionNonEmpty, normalize_text},
+    util::{NonEmpty, OptionNonEmpty, fold_kana, normalize_term, normalize_text},
 };
 
 const SCHEMA: &str = r#"
@@ -131,11 +131,34 @@ CREATE TABLE IF NOT EXISTS han_component (
   ch          TEXT NOT NULL,
   PRIMARY KEY (component, ch)
 ) WITHOUT ROWID;
+"#;
+
+/// Facts about how search.db was built, e.g. `kana` = 1: terms and readings have katakana
+/// as hiragana ([`normalize_term`]).
+const META_SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS meta (
   key         TEXT PRIMARY KEY,
   value       TEXT
 ) WITHOUT ROWID;
 "#;
+
+fn meta(conn: &Connection, key: &str) -> rusqlite::Result<Option<String>> {
+    if !has_table(conn, "meta")? {
+        return Ok(None);
+    }
+    conn.query_row("SELECT value FROM meta WHERE key = ?1", [key], |r| r.get(0))
+        .optional()
+}
+
+/// Whether `db` must be rebuilt from scratch ([`build`]) before dictionaries can be added to
+/// it: it was built before kana folding, and its terms still have katakana.
+pub fn needs_rebuild(db: &Path) -> Result<bool, YomitanError> {
+    if !db.is_file() {
+        return Ok(false);
+    }
+    let conn = Connection::open_with_flags(db, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    Ok(meta(&conn, "kana")?.is_none())
+}
 
 fn has_table(conn: &Connection, name: &str) -> rusqlite::Result<bool> {
     Ok(conn
@@ -238,6 +261,22 @@ async fn build_inner(
     conn.execute_batch(ROMAN_SCHEMA)?;
     let backfill_kanji = has_existing && !has_table(&conn, "kanji_link")?;
     conn.execute_batch(KANJI_SCHEMA)?;
+    let kana_folded = !has_existing || meta(&conn, "kana")?.is_some();
+    conn.execute_batch(META_SCHEMA)?;
+    if !kana_folded && !dicts.is_empty() {
+        drop(conn);
+        let _ = std::fs::remove_file(&tmp);
+        return Err(YomitanError::Error(
+            "search.db was built before katakana and hiragana were matched alike: rebuild it"
+                .into(),
+        ));
+    }
+    if !has_existing {
+        conn.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES ('kana', '1')",
+            [],
+        )?;
+    }
     conn.execute_batch(FTS_TRIGGERS)?;
 
     if backfill_roman {
@@ -367,7 +406,7 @@ async fn build_inner(
                     let score = row.get(4).and_then(Value::as_f64);
                     let tags = row.get(7).and_then(Value::as_str).map(String::from);
 
-                    let p1 = normalize_text(term);
+                    let p1 = normalize_term(term);
                     let ja = tok
                         .join_tokens(term, Lang::Ja, &lang)
                         .await?
@@ -380,12 +419,13 @@ async fn build_inner(
                         .join_tokens(term, Lang::Ko, &lang)
                         .await?
                         .unwrap_or_default();
+                    let ja = fold_kana(&ja).into_owned();
                     let reading = if lang == Some(Lang::Zh) {
                         normalize_pinyin(reading).unwrap_or_else(|| reading.to_string())
                     } else {
                         reading.to_string()
                     };
-                    let p5 = normalize_text(&reading)
+                    let p5 = normalize_term(&reading)
                         .non_empty_trimmed()
                         .map(|s| format!(" {s} "))
                         .unwrap_or_default();
@@ -506,6 +546,7 @@ pub fn build_chars(db: &Path, ids_txt: &Path, recount: bool) -> Result<bool, Yom
 
     let mut conn = Connection::open(db)?;
     conn.execute_batch(HAN_SCHEMA)?;
+    conn.execute_batch(META_SCHEMA)?;
     let stored: Option<String> = conn
         .query_row("SELECT value FROM meta WHERE key = 'ids'", [], |r| r.get(0))
         .optional()?;
@@ -1221,6 +1262,8 @@ pub struct SearchDb {
     tag_meta: Mutex<HashMap<i64, Arc<HashMap<String, TagMeta>>>>,
     /// search.db has `term_roman`; built before it, romanized searches romanize each row
     has_roman: bool,
+    /// search.db has katakana as hiragana ([`normalize_term`]); queries are folded alike
+    kana_folded: bool,
     zips: Mutex<HashMap<String, YomitanZip>>,
     /// most recently used first; (key, rows, JSON bytes)
     banks: Mutex<VecDeque<(BankKey, Bank, usize)>>,
@@ -1387,10 +1430,12 @@ impl SearchDb {
                 .collect::<Result<HashMap<i64, String>, _>>()?
         };
         let has_roman = has_table(&conn, "term_roman")?;
+        let kana_folded = meta(&conn, "kana")?.is_some();
         let has_kanji = has_table(&conn, "kanji_link")?;
         let has_han = has_table(&conn, "han_char")?;
         Ok(Self {
             has_roman,
+            kana_folded,
             has_kanji,
             has_han,
             langs,
@@ -1405,6 +1450,24 @@ impl SearchDb {
 
     pub fn dict_names(&self) -> Vec<String> {
         self.names.values().cloned().collect()
+    }
+
+    /// Query text as search.db stores terms: [`normalize_term`], or [`normalize_text`] for a
+    /// search.db from before kana folding
+    fn norm(&self, text: &str) -> String {
+        if self.kana_folded {
+            normalize_term(text)
+        } else {
+            normalize_text(text)
+        }
+    }
+
+    fn fold<'a>(&self, text: &'a str) -> std::borrow::Cow<'a, str> {
+        if self.kana_folded {
+            fold_kana(text)
+        } else {
+            std::borrow::Cow::Borrowed(text)
+        }
     }
 
     pub fn search(&self, req: &SearchRequest) -> Result<SearchResult, YomitanError> {
@@ -1429,7 +1492,7 @@ impl SearchDb {
             if !expanded.is_empty() && expanded.len() <= MAX_READINGS {
                 expanded
             } else {
-                vec![reading.to_string()]
+                vec![self.fold(reading).into_owned()]
             }
         };
 
@@ -1473,7 +1536,7 @@ impl SearchDb {
                 None
             }
             .filter(|w| korean::is_hangul(w))
-            .map(normalize_text);
+            .map(|w| self.norm(w));
 
             if let Some(word) = hangul_word {
                 let (op, term) = if is_exact {
@@ -1535,8 +1598,8 @@ impl SearchDb {
                 let mut q = langs
                     .iter()
                     .filter_map(|l| {
-                        let v = req.tokens.get(*l)?.trim();
-                        (!v.is_empty()).then(|| format!("term_{l}:{}", fts_phrase(v)))
+                        let v = self.fold(req.tokens.get(*l)?.trim());
+                        (!v.is_empty()).then(|| format!("term_{l}:{}", fts_phrase(&v)))
                     })
                     .collect::<Vec<_>>()
                     .join(" OR ");
@@ -1559,7 +1622,7 @@ impl SearchDb {
                         .collect::<Result<_, _>>()?
                 }
             } else {
-                let mut q_term = normalize_text(&req.term);
+                let mut q_term = self.norm(&req.term);
                 if !is_exact && !q_term.is_empty() && !q_term.ends_with(' ') {
                     q_term.push('*');
                 }
@@ -1578,7 +1641,7 @@ impl SearchDb {
                     ));
                 }
                 // only alongside a term: the term's index narrows the rows to scan
-                let reading_glob = normalize_text(req.reading_glob.trim());
+                let reading_glob = self.norm(req.reading_glob.trim());
                 if !ps.is_empty() && reading_glob.chars().any(|c| !"*?".contains(c)) {
                     ps.push(format!(
                         " {reading_glob}{}",
@@ -2366,6 +2429,168 @@ mod han_tests {
             .unwrap();
         assert_eq!(n, 0);
         drop(conn);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod kana_tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir() -> PathBuf {
+        let id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("cjk-dict-kana-{}-{id}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// terms as a build since kana folding stores them: コーヒー as こーひー
+    fn fixture(folded: bool) -> (PathBuf, PathBuf) {
+        let dir = temp_dir();
+        let db_path = dir.join("search.db");
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        conn.execute_batch(FTS_TRIGGERS).unwrap();
+        if folded {
+            conn.execute_batch(META_SCHEMA).unwrap();
+            conn.execute("INSERT INTO meta (key, value) VALUES ('kana', '1')", [])
+                .unwrap();
+        }
+        let f = |s: &str| {
+            if folded {
+                normalize_term(s)
+            } else {
+                normalize_text(s)
+            }
+        };
+        for (term, reading) in [
+            ("コーヒー", ""),
+            ("興味", "きょうみ"),
+            ("興行", "こうぎょう"),
+            ("ドア", ""),
+        ] {
+            let reading = if reading.is_empty() {
+                String::new()
+            } else {
+                format!(" {} ", f(reading))
+            };
+            conn.execute(
+                "INSERT INTO term_search (term, term_ja, reading) VALUES (?1, ?2, ?3)",
+                params![f(term), fold_kana(term), reading],
+            )
+            .unwrap();
+        }
+        (dir, db_path)
+    }
+
+    fn terms(db: &SearchDb, req: SearchRequest) -> Vec<String> {
+        let mut out: Vec<String> = db
+            .search(&SearchRequest {
+                lang: "ja-JP".into(),
+                ..req
+            })
+            .unwrap()
+            .items
+            .into_iter()
+            .map(|i| i.term)
+            .collect();
+        out.sort();
+        out
+    }
+
+    #[test]
+    fn katakana_and_hiragana_find_each_other() {
+        let (dir, db_path) = fixture(true);
+        let db = SearchDb::open(&db_path, &dir).unwrap();
+        let term = |t: &str| SearchRequest {
+            term: t.into(),
+            ..Default::default()
+        };
+        assert_eq!(terms(&db, term("こーひー")), ["こーひー"]);
+        assert_eq!(terms(&db, term("コーヒー")), ["こーひー"]);
+        assert_eq!(terms(&db, term("ｺｰ")), ["こーひー"]);
+        // <興>{キョウ}
+        assert_eq!(
+            terms(
+                &db,
+                SearchRequest {
+                    term: "興".into(),
+                    reading_glob: "キョウ".into(),
+                    ..Default::default()
+                }
+            ),
+            ["興味"]
+        );
+        // {キョウミ}
+        assert_eq!(
+            terms(
+                &db,
+                SearchRequest {
+                    reading: "キョウミ".into(),
+                    kind: Some("exact".into()),
+                    ..Default::default()
+                }
+            ),
+            ["興味"]
+        );
+        // ~ tokens
+        let mut tokens = HashMap::new();
+        tokens.insert("ja".to_string(), "どあ".to_string());
+        assert_eq!(
+            terms(
+                &db,
+                SearchRequest {
+                    kind: Some("fts".into()),
+                    term: "どあ".into(),
+                    tokens,
+                    ..Default::default()
+                }
+            ),
+            ["どあ"]
+        );
+        drop(db);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A search.db from before kana folding is searched as before, and must be rebuilt
+    /// before dictionaries are added to it.
+    #[tokio::test]
+    async fn an_older_search_db_is_searched_as_before_and_rebuilt() {
+        let (dir, db_path) = fixture(false);
+        assert!(needs_rebuild(&db_path).unwrap());
+        let db = SearchDb::open(&db_path, &dir).unwrap();
+        let term = |t: &str| SearchRequest {
+            term: t.into(),
+            ..Default::default()
+        };
+        assert_eq!(terms(&db, term("コーヒー")), ["コーヒー"]);
+        assert!(terms(&db, term("こーひー")).is_empty());
+        drop(db);
+
+        let tok = TokenizerMapper::new(dir.clone());
+        let source = DictSource {
+            name: "x".into(),
+            zip: dir.join("x.zip"),
+            lang: None,
+        };
+        let err = build_incremental(&db_path, &[source], &[], &tok, |_, _, _| {})
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("rebuild"), "{err}");
+        // removing dictionaries still works
+        build_incremental(&db_path, &[], &[], &tok, |_, _, _| {})
+            .await
+            .unwrap();
+        assert!(needs_rebuild(&db_path).unwrap());
+
+        // a fresh build is folded
+        let fresh = dir.join("fresh.db");
+        build(&fresh, &[], &tok, |_, _, _| {}).await.unwrap();
+        assert!(!needs_rebuild(&fresh).unwrap());
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
