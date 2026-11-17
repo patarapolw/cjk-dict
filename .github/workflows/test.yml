@@ -30,6 +30,22 @@ jobs:
       # The Tauri app (app/src-tauri) is its own workspace and isn't built here.
       - run: cargo test --workspace --all-features --locked
 
+  app-rust:
+    name: Tauri app Rust tests
+    # WebView2 is preinstalled on Windows; Linux would need Tauri's WebKitGTK packages
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+      # app/src-tauri is its own workspace, which the root one (and the job above) excludes.
+      # A debug build without the custom-protocol feature loads the devUrl, so it doesn't
+      # need the frontend built to app/dist.
+      - run: cargo check --manifest-path app/src-tauri/Cargo.toml --all-targets --locked
+      - run: cargo test --manifest-path app/src-tauri/Cargo.toml --locked
+
   check:
     name: Format and typecheck
     runs-on: ubuntu-latest
