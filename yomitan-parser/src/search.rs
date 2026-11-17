@@ -165,6 +165,19 @@ fn meta(conn: &Connection, key: &str) -> rusqlite::Result<Option<String>> {
         .optional()
 }
 
+/// Kanji entries (single characters) indexed per dictionary name, from `kanji_link`
+pub fn kanji_counts(db: &Path) -> Result<HashMap<String, usize>, YomitanError> {
+    let conn = Connection::open_with_flags(db, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    if !has_table(&conn, "kanji_link")? {
+        return Ok(HashMap::new());
+    }
+    let mut st = conn.prepare(
+        "SELECT d.name, count(*) FROM kanji_link k JOIN dict d ON d.id = k.dict_id GROUP BY d.name",
+    )?;
+    let rows = st.query_map([], |r| Ok((r.get(0)?, r.get::<_, i64>(1)? as usize)))?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
 /// Whether `db` has Japanese terms with readings but no kanji dictionary with kana readings
 /// (e.g. KANJIDIC), so that [`build_chars`] could not index the readings of their kanji:
 /// `*<興>{キョウ}` finds no Japanese words then.
@@ -2662,6 +2675,8 @@ mod han_tests {
         assert_eq!(std::fs::read(&db_path).unwrap(), before);
 
         assert!(!missing_kanji_readings(&db_path).unwrap());
+        // 林 and 森; the multi-character 林檎 is left out
+        assert_eq!(kanji_counts(&db_path).unwrap()["kanji"], 2);
         let db = SearchDb::open(&db_path, &dir).unwrap();
         assert!(db.has_term_char);
         assert_eq!(

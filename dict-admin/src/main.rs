@@ -151,7 +151,7 @@ async fn main() -> Result<()> {
                 let terms = built
                     .as_ref()
                     .and_then(|m| m.dicts.iter().find(|x| x.name == d.name))
-                    .map(|x| format!("{} terms", x.term_count))
+                    .map(|x| x.counts())
                     .unwrap_or_else(|| "not built".into());
                 println!(
                     "{}\t{}\t{}\t{}\t{}",
@@ -500,6 +500,8 @@ async fn build(lib: &Library, lindera_dir: &Path, ids_dir: &Path, rebuild: bool)
         .into_iter()
         .map(|info| (info.name.clone(), info))
         .collect();
+    // from search.db: dictionaries indexed in an earlier build count too
+    let kanji_counts = search::kanji_counts(&db)?;
     let mut out = vec![];
     for d in &dicts {
         let file = zip_infos.remove(&d.name).expect("zip info was collected");
@@ -528,6 +530,7 @@ async fn build(lib: &Library, lindera_dir: &Path, ids_dir: &Path, rebuild: bool)
             revision,
             lang,
             term_count,
+            kanji_count: kanji_counts.get(&d.name).copied().unwrap_or(0),
             file,
         });
     }
@@ -542,9 +545,9 @@ async fn build(lib: &Library, lindera_dir: &Path, ids_dir: &Path, rebuild: bool)
 
     for d in &manifest.dicts {
         eprintln!(
-            "  {}: {} terms, {:.1} MB",
+            "  {}: {}, {:.1} MB",
             d.name,
-            d.term_count,
+            d.counts(),
             d.file.size as f64 / 1e6
         );
     }
@@ -685,12 +688,31 @@ mod tests {
             revision: "1".into(),
             lang: lang.map(String::from),
             term_count: 0,
+            kanji_count: 0,
             file: FileInfo {
                 file: format!("{name}.zip"),
                 size,
                 sha256: String::new(),
             },
         }
+    }
+
+    #[test]
+    fn counts_say_what_a_dictionary_has() {
+        let mut d = dict("x", None, 0);
+        d.term_count = 528000;
+        assert_eq!(d.counts(), "528000 terms");
+        d.kanji_count = 10384;
+        assert_eq!(d.counts(), "528000 terms, 10384 kanji");
+        d.term_count = 0;
+        assert_eq!(d.counts(), "10384 kanji");
+        // manifests from before kanji_count
+        let old: ManifestDict = serde_json::from_str(
+            r#"{"name":"x","title":"x","revision":"1","lang":null,"term_count":5,"file":"x.zip","size":1,"sha256":""}"#,
+        )
+        .unwrap();
+        assert_eq!(old.kanji_count, 0);
+        assert!(!serde_json::to_string(&old).unwrap().contains("kanji_count"));
     }
 
     #[test]

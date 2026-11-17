@@ -48,8 +48,27 @@ pub struct ManifestDict {
     pub revision: String,
     pub lang: Option<String>,
     pub term_count: usize,
+    /// single-character kanji bank entries indexed (e.g. KANJIDIC's); absent in manifests
+    /// from before, and for dictionaries without
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub kanji_count: usize,
     #[serde(flatten)]
     pub file: FileInfo,
+}
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
+}
+
+impl ManifestDict {
+    /// `528000 terms`, `10384 kanji`, or both
+    pub fn counts(&self) -> String {
+        match (self.term_count, self.kanji_count) {
+            (t, 0) => format!("{t} terms"),
+            (0, k) => format!("{k} kanji"),
+            (t, k) => format!("{t} terms, {k} kanji"),
+        }
+    }
 }
 
 pub struct Library {
