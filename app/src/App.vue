@@ -62,10 +62,6 @@
             :style="{ width: `${verifyingPercent}%` }"
           />
         </div>
-        <p class="downloads-note">
-          Keep the app open until this finishes: a phone pauses apps in the
-          background.
-        </p>
       </div>
       <Downloading
         v-for="d in toBeLoaded"
@@ -96,10 +92,13 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import Downloading from "./components/Downloading.vue";
 import {
+  DownloadUrlProgress,
   DownloadingProps,
+  SyncStatus,
   VerifyProgress,
   dictsVersion,
   loadErrors,
+  syncStatus,
   toBeLoaded,
   verifying,
 } from "./util/loading.ts";
@@ -133,26 +132,74 @@ const verifyingPercent = computed(() => {
 
 // Checksumming the library takes minutes on a phone: show which file it's at.
 // `dict_plan` and `dict_commit` in flight; an event arriving after one returned is stale.
-let checksumming = 0;
+const checksumming = ref(0);
 async function checksummed<T>(run: () => Promise<T>) {
-  checksumming++;
+  checksumming.value++;
   try {
     return await run();
   } finally {
-    checksumming--;
+    checksumming.value--;
     verifying.value = null;
   }
 }
 
-let unlistenVerify: UnlistenFn | undefined;
-onBeforeUnmount(() => unlistenVerify?.());
+// The whole sync (gigabytes) takes a while: on Android, report it to SyncService, whose
+// notification keeps the app running in the background and with the screen off.
+const download = ref<DownloadUrlProgress | null>(null);
+const status = computed(() =>
+  syncStatus({
+    checking: checksumming.value > 0,
+    verifying: verifying.value,
+    download: download.value,
+    queue: toBeLoaded.value,
+  }),
+);
+watch(status, (s) => sendSyncStatus(s), { deep: true });
+
+/**
+ * At most one progress update a second: Android drops faster notification updates.
+ * Updates in between are dropped rather than sent later: timers in a page that's in the
+ * background are throttled to as little as once a minute.
+ */
+const SYNC_STATUS_INTERVAL_MS = 1000;
+let lastSent: SyncStatus | null = null;
+let lastSentAt = 0;
+function sendSyncStatus(s: SyncStatus | null) {
+  if (!s && !lastSent) return;
+  // a new step or the end at once (MainActivity delays stopping, see setSyncStatus)
+  const now = Date.now();
+  if (
+    s &&
+    lastSent &&
+    s.text === lastSent.text &&
+    now - lastSentAt < SYNC_STATUS_INTERVAL_MS
+  ) {
+    return;
+  }
+  lastSent = s && { ...s };
+  lastSentAt = now;
+  invoke("set_sync_status", {
+    text: s?.text ?? null,
+    percent: s?.percent ?? null,
+  }).catch((e) => console.error(e));
+}
+
+const unlisteners: UnlistenFn[] = [];
+onBeforeUnmount(() => {
+  unlisteners.forEach((u) => u());
+});
 
 onMounted(async () => {
-  unlistenVerify = await listen<VerifyProgress>(
-    "dict-verify-progress",
-    ({ payload }) => {
-      if (checksumming) verifying.value = payload;
-    },
+  unlisteners.push(
+    await listen<VerifyProgress>("dict-verify-progress", ({ payload }) => {
+      if (checksumming.value) verifying.value = payload;
+    }),
+    await listen<DownloadUrlProgress>(
+      "download-url-progress",
+      ({ payload }) => {
+        download.value = payload;
+      },
+    ),
   );
   loadAll();
 });
@@ -313,11 +360,6 @@ async function loadAll() {
 
 .downloads-error {
   color: var(--app-error);
-}
-
-.downloads-note {
-  opacity: 0.75;
-  font-size: 0.875em;
 }
 
 /* as in Downloading.vue */
