@@ -66,7 +66,11 @@
       </div>
       <p class="search-hint">
         <!-- what the query is understood as, so the syntax and modes explain themselves -->
-        <template v-if="parsed.term || hintReading">
+        <template v-if="charReading">
+          Searching words with <code>{{ charReading.ch }}</code> read
+          <code>{{ charReading.reading }}</code>
+        </template>
+        <template v-else-if="parsed.term || hintReading">
           Searching
           <code v-if="parsed.term">{{ parsed.term }}</code>
           <template v-if="hintReading">
@@ -281,6 +285,13 @@ const romanizedQuery = computed(
 );
 
 /** the parsed reading, e.g. `にほん*` (`*`: the rest of the reading is unknown) */
+/** `*<興>{キョウ}`: words with 興 read キョウ, by the index of characters' readings */
+const charReading = computed(() =>
+  parsed.value.ch && parsed.value.chReading && !qState.value
+    ? { ch: parsed.value.ch, reading: parsed.value.chReading }
+    : null,
+);
+
 const hintReading = computed(
   () => parsed.value.reading || parsed.value.readingGlob,
 );
@@ -525,6 +536,8 @@ async function loadMore(isNew?: boolean) {
         reading,
         readingGlob,
         romanized,
+        ch: charReading.value?.ch,
+        chReading: charReading.value?.reading,
         limit: 5,
         offset,
         type,

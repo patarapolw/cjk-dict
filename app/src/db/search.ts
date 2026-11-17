@@ -18,6 +18,9 @@ interface SearchOpts {
   readingGlob: string;
   /** `term` may be Korean romanization: `hangugeo` finds 한국어 */
   romanized?: boolean;
+  /** with `chReading`: the words with this character read so anywhere (`*<興>{キョウ}`) */
+  ch?: string;
+  chReading?: string;
   limit: number;
   offset: number;
   type: string | null;
@@ -131,6 +134,8 @@ class SearchDatabase {
         reading: opts.reading,
         reading_glob: opts.readingGlob,
         romanized: opts.romanized ?? false,
+        ch: opts.ch ?? "",
+        ch_reading: opts.chReading ?? "",
         tokens,
         limit: opts.limit,
         offset: opts.offset,

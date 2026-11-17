@@ -122,6 +122,19 @@ describe("DictionaryView", () => {
     wrapper.unmount();
   });
 
+  it("searches the words with a character read so", async () => {
+    const wrapper = await mountView();
+    await wrapper.get("input.search-input").setValue("*<興>{キョウ}");
+    expect(await lastSearch()).toMatchObject({
+      ch: "興",
+      ch_reading: "キョウ",
+    });
+    expect(wrapper.get(".search-hint").text()).toContain(
+      "Searching words with 興 read キョウ",
+    );
+    wrapper.unmount();
+  });
+
   it("searches Korean by Hangul reading with the {} toggle", async () => {
     lang.value = "ko-KR";
     const wrapper = await mountView();

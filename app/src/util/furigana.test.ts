@@ -83,6 +83,23 @@ describe("parseQuery", () => {
     expect(parseQuery("［日月］曜日")).toMatchObject({ term: "[日月]曜日" });
   });
 
+  it("reads *<興>{キョウ} as a character's reading", () => {
+    expect(parseQuery("*<興>{キョウ}")).toMatchObject({
+      ch: "興",
+      chReading: "キョウ",
+    });
+    expect(parseQuery("*<興>{キョウ}*")).toMatchObject({ ch: "興" });
+    expect(parseQuery("*<興>{xīng}")).toMatchObject({
+      ch: "興",
+      chReading: "xīng",
+    });
+    // not one character, or a pattern: wildcards
+    expect(parseQuery("*<興味>{きょうみ}").ch).toBeUndefined();
+    expect(parseQuery("*<興>{キョ*}").ch).toBeUndefined();
+    expect(parseQuery("<興>{キョウ}").ch).toBeUndefined();
+    expect(parseQuery("*<興>{おこ}る").ch).toBeUndefined();
+  });
+
   it("matches a reading anywhere in the word after a *", () => {
     expect(parseQuery("*<興>{キョウ}")).toMatchObject({
       term: "*興",

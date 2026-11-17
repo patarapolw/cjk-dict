@@ -80,8 +80,8 @@ describe("readingQuery", () => {
     expect(readingQuery("興", "흥")).toBe("*<興>{흥}");
   });
 
-  it("puts a kun reading's okurigana after the character", () => {
-    expect(readingQuery("興", "おこ.る")).toBe("*<興>{おこ}る");
+  it("searches a kun reading up to its okurigana", () => {
+    expect(readingQuery("興", "おこ.る")).toBe("*<興>{おこ}");
     expect(readingQuery("日", "-び")).toBe("*<日>{び}");
     expect(readingQuery("大", "おお-")).toBe("*<大>{おお}");
   });

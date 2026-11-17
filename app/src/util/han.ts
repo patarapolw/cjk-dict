@@ -128,14 +128,12 @@ export function readingLang(reading: string): string {
 }
 
 /**
- * A character's reading as a search for the words with it read so, anywhere in the word, in
- * furigana syntax: `*<興>{キョウ}` (興味, 余興 read よきょう, ...), `*<興>{xīng}`,
- * `*<興>{흥}`. A kun reading's dot marks where the okurigana starts (`おこ.る`:
- * `*<興>{おこ}る`), and its dash where other kana go (`-び`).
+ * A character's reading as a search for the words with it read so, anywhere in the word:
+ * `*<興>{キョウ}` (興味, 余興, ...), `*<興>{xīng}`, `*<興>{흥}`. A kun reading counts up to
+ * its okurigana, which its dot marks (`おこ.る`: `*<興>{おこ}`, finding 興る and 興す), and
+ * its dash marks where other kana go (`-び`).
  */
 export function readingQuery(ch: string, reading: string): string {
   const r = reading.replace(/^[-‐]+|[-‐]+$/gu, "").trim();
-  const dot = r.indexOf(".");
-  if (dot > 0) return `*<${ch}>{${r.slice(0, dot)}}${r.slice(dot + 1)}`;
-  return `*<${ch}>{${r.replace(/\./g, "")}}`;
+  return `*<${ch}>{${r.split(".")[0]}}`;
 }

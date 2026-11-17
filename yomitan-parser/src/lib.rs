@@ -1,3 +1,4 @@
+pub mod char_reading;
 pub mod error;
 #[cfg(feature = "hangul-readings")]
 pub mod hanja;
