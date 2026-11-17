@@ -2,6 +2,7 @@
 name = "yomitan-parser"
 version = "0.2.0"
 edition = "2024"
+license = "MIT"
 description = "Yomitan dictionary reader, CJK tokenizer and pinyin helpers"
 
 [features]
