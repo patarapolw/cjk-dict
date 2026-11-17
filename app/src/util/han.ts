@@ -112,3 +112,29 @@ export function sortByLang<T extends { lang: string | null }>(
   const rank = (e: T) => (e.lang?.split("-")[0] === short ? 0 : 1);
   return [...entries].sort((a, b) => rank(a) - rank(b));
 }
+
+/** KANJIDIC stats that are readings to search by, and their language */
+export const READING_STAT_LANGS: Record<string, string> = {
+  pinyin: "zh-CN",
+  korean_h: "ko-KR",
+  nanori: "ja-JP",
+};
+
+/** the search language a reading is written for, from its script */
+export function readingLang(reading: string): string {
+  if (/\p{sc=Hangul}/u.test(reading)) return "ko-KR";
+  if (/[\p{scx=Hiragana}\p{scx=Katakana}]/u.test(reading)) return "ja-JP";
+  return "zh-CN";
+}
+
+/**
+ * A character's reading as a search for the words starting with it read so, in furigana
+ * syntax: `<興>{キョウ}`, `<興>{xīng}`, `<興>{흥}`. A kun reading's dot marks where the
+ * okurigana starts (`おこ.る`: `<興>{おこ}る`), and its dash where other kana go (`-び`).
+ */
+export function readingQuery(ch: string, reading: string): string {
+  const r = reading.replace(/^[-‐]+|[-‐]+$/gu, "").trim();
+  const dot = r.indexOf(".");
+  if (dot > 0) return `<${ch}>{${r.slice(0, dot)}}${r.slice(dot + 1)}`;
+  return `<${ch}>{${r.replace(/\./g, "")}}`;
+}

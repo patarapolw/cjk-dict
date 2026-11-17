@@ -54,7 +54,17 @@
           <span class="glyph" :lang="lang || undefined">{{ c.ch }}</span>
           <div class="char-summary">
             <p v-if="c.hangul.length" class="hangul" lang="ko">
-              {{ c.hangul.join(" · ") }}
+              <template v-for="(r, k) in c.hangul" :key="r">
+                <template v-if="k"> · </template>
+                <button
+                  type="button"
+                  class="link-button reading"
+                  :title="readingTitle(c.ch, r)"
+                  @click="toReading(c.ch, r, 'ko-KR')"
+                >
+                  {{ r }}
+                </button>
+              </template>
             </p>
             <p class="uses">
               {{ c.uses ? `in ${c.uses.toLocaleString()} words` : "" }}
@@ -159,16 +169,55 @@
           <dl class="readings">
             <template v-if="e.onyomi">
               <dt>{{ isJa(e) ? "On" : "Reading" }}</dt>
-              <dd :lang="e.lang || undefined">{{ readings(e.onyomi) }}</dd>
+              <dd :lang="e.lang || undefined">
+                <template v-for="(r, k) in splitReadings(e.onyomi)" :key="k">
+                  <template v-if="k">、</template>
+                  <button
+                    type="button"
+                    class="link-button reading"
+                    :title="readingTitle(c.ch, r)"
+                    @click="toReading(c.ch, r)"
+                  >
+                    {{ r }}
+                  </button>
+                </template>
+              </dd>
             </template>
             <template v-if="e.kunyomi">
               <dt>{{ isJa(e) ? "Kun" : "Reading" }}</dt>
-              <dd :lang="e.lang || undefined">{{ readings(e.kunyomi) }}</dd>
+              <dd :lang="e.lang || undefined">
+                <template v-for="(r, k) in splitReadings(e.kunyomi)" :key="k">
+                  <template v-if="k">、</template>
+                  <button
+                    type="button"
+                    class="link-button reading"
+                    :title="readingTitle(c.ch, r)"
+                    @click="toReading(c.ch, r)"
+                  >
+                    {{ r }}
+                  </button>
+                </template>
+              </dd>
             </template>
             <!-- other languages' readings, e.g. KANJIDIC's pinyin and Korean -->
             <template v-for="[name, value] in readingStats(e)" :key="name">
               <dt :title="name">{{ e.tag_meta[name].notes || name }}</dt>
-              <dd :lang="STAT_LANGS[name]">{{ value }}</dd>
+              <dd :lang="STAT_LANGS[name]">
+                <template v-if="READING_STAT_LANGS[name]">
+                  <template v-for="(r, k) in value.split(/,\s*/)" :key="k">
+                    <template v-if="k">, </template>
+                    <button
+                      type="button"
+                      class="link-button reading"
+                      :title="readingTitle(c.ch, r)"
+                      @click="toReading(c.ch, r, READING_STAT_LANGS[name])"
+                    >
+                      {{ r }}
+                    </button>
+                  </template>
+                </template>
+                <template v-else>{{ value }}</template>
+              </dd>
             </template>
           </dl>
           <ol v-if="e.meanings.length" class="meanings">
@@ -248,9 +297,12 @@ import { useRoute, useRouter } from "vue-router";
 import Term from "../components/yomitan/Term.vue";
 import { IHanChar, IKanjiEntry, ITerm, searchDB } from "../db/search";
 import {
+  READING_STAT_LANGS,
   REGION_NAMES,
   hanChars,
   idsTokens,
+  readingLang,
+  readingQuery,
   sortByLang,
   sortIds,
 } from "../util/han";
@@ -379,6 +431,22 @@ async function go(text: string) {
   await setRouteQuery();
 }
 
+/**
+ * Words starting with `ch` read `reading`, e.g. `<興>{キョウ}`. A Chinese or Korean reading
+ * only matches its language's entries: switch the search language to it, unless it is "all".
+ */
+async function toReading(
+  ch: string,
+  reading: string,
+  readingIn = readingLang(reading),
+) {
+  if (lang.value && lang.value !== readingIn) lang.value = readingIn;
+  await toWords(readingQuery(ch, reading), "");
+}
+
+const readingTitle = (ch: string, reading: string) =>
+  `Words with ${ch} read ${reading}: ${readingQuery(ch, reading)}`;
+
 async function toWords(term: string, qState: string) {
   await setRouteQuery();
   await router.push({ path: "/dictionary", query: { q: term, qState } });
@@ -400,7 +468,7 @@ function getAssetSrc(dict: string, src: string) {
 }
 
 const splitTags = (tags: string) => tags.split(/\s+/).filter(Boolean);
-const readings = (s: string) => s.split(/\s+/).filter(Boolean).join("、");
+const splitReadings = (s: string) => s.split(/\s+/).filter(Boolean);
 const isJa = (e: IKanjiEntry) => (e.lang ?? "").startsWith("ja");
 
 function regionTitle(regions: string) {

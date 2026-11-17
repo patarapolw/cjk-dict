@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { hanChars, idsTokens, sortByLang, sortIds } from "./han";
+import {
+  hanChars,
+  idsTokens,
+  readingLang,
+  readingQuery,
+  sortByLang,
+  sortIds,
+} from "./han";
 
 describe("hanChars", () => {
   it("keeps distinct Han characters in order", () => {
@@ -63,5 +70,26 @@ describe("sortByLang", () => {
       null,
     ]);
     expect(sortByLang(es, "")).toBe(es);
+  });
+});
+
+describe("readingQuery", () => {
+  it("searches words starting with the character read so", () => {
+    expect(readingQuery("興", "キョウ")).toBe("<興>{キョウ}");
+    expect(readingQuery("興", "xīng")).toBe("<興>{xīng}");
+    expect(readingQuery("興", "흥")).toBe("<興>{흥}");
+  });
+
+  it("puts a kun reading's okurigana after the character", () => {
+    expect(readingQuery("興", "おこ.る")).toBe("<興>{おこ}る");
+    expect(readingQuery("日", "-び")).toBe("<日>{び}");
+    expect(readingQuery("大", "おお-")).toBe("<大>{おお}");
+  });
+
+  it("tells a reading's language by its script", () => {
+    expect(readingLang("キョウ")).toBe("ja-JP");
+    expect(readingLang("おこ.る")).toBe("ja-JP");
+    expect(readingLang("흥")).toBe("ko-KR");
+    expect(readingLang("xīng")).toBe("zh-CN");
   });
 });

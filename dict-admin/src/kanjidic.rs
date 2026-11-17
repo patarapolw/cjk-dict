@@ -4,9 +4,9 @@
 //!
 //! The library is a folder of Yomitan zips, so `add` converts the JSON into one: a kanji bank
 //! entry per character, with its on and kun readings and its meanings, and everything else
-//! KANJIDIC has as stats, which a tag bank names. Readings in other languages (pinyin,
-//! Korean, Vietnamese) and name readings (nanori) are stats of the `reading` category, which
-//! the app shows with the readings.
+//! KANJIDIC has as stats, which a tag bank names. Chinese and Korean readings and name
+//! readings (nanori) are stats of the `reading` category, which the app shows with the
+//! readings; romanized Korean and Vietnamese readings are with the details.
 //!
 //! @see https://www.edrdg.org/wiki/index.php/KANJIDIC_Project (CC BY-SA 4.0)
 //! @see https://github.com/scriptin/jmdict-simplified/blob/master/node/packages/jmdict-simplified-types/index.ts
@@ -108,9 +108,7 @@ struct Meaning {
 const TAGS: &[(&str, &str, i32, &str)] = &[
     ("pinyin", "reading", 0, "Pinyin"),
     ("korean_h", "reading", 1, "Korean"),
-    ("korean_r", "reading", 2, "Korean (romanized)"),
-    ("vietnam", "reading", 3, "Vietnamese"),
-    ("nanori", "reading", 4, "Name readings (nanori)"),
+    ("nanori", "reading", 2, "Name readings (nanori)"),
     (
         "kyouiku",
         "frequent",
@@ -131,6 +129,9 @@ const TAGS: &[(&str, &str, i32, &str)] = &[
     ("radical", "misc", 14, "Radical (Kangxi)"),
     ("radical_name", "misc", 15, "Radical name"),
     ("nelson_rad", "misc", 16, "Radical (Nelson)"),
+    // shown with the details, not the readings
+    ("korean_r", "misc", 17, "Korean reading (romanized)"),
+    ("vietnam", "misc", 18, "Vietnamese reading"),
     ("skip", "code", 20, "SKIP code"),
     ("sh_desc", "code", 21, "Spahn & Hadamitzky descriptor"),
     ("four_corner", "code", 22, "Four-corner code"),
@@ -568,6 +569,10 @@ mod tests {
         let stats: Map<String, Value> = serde_json::from_str(&go.stats).unwrap();
         assert_eq!(stats["pinyin"], "yǔ, yù");
         assert_eq!(stats["korean_h"], "어");
+        let category = |k: &str| TAGS.iter().find(|t| t.0 == k).unwrap().1;
+        assert_eq!(category("pinyin"), "reading");
+        assert_eq!(category("vietnam"), "misc");
+        assert_eq!(category("korean_r"), "misc");
         assert_eq!(stats["strokes"], "14");
         assert_eq!(stats["radical"], "149 ⾔");
         assert_eq!(stats["moro"], "35533 (10.474)");

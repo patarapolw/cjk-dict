@@ -1,9 +1,10 @@
 import { mockIPC } from "@tauri-apps/api/mocks";
 import { flushPromises, mount } from "@vue/test-utils";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryHistory, createRouter } from "vue-router";
 
 import type { IHanChar } from "../db/search";
+import { lang } from "../util/settings";
 import CharacterView from "./CharacterView.vue";
 
 const HAN: Record<string, IHanChar> = {
@@ -69,6 +70,10 @@ beforeEach(() => {
   });
 });
 
+afterEach(() => {
+  lang.value = "";
+});
+
 async function mountView(path: string) {
   const router = createRouter({
     history: createMemoryHistory(),
@@ -97,6 +102,31 @@ async function loaded(
 }
 
 describe("CharacterView", () => {
+  it("searches the words with a reading when it is clicked", async () => {
+    lang.value = "ja-JP";
+    const { wrapper, router } = await mountView("/kanji?q=林");
+    await loaded(wrapper);
+
+    const reading = (text: string) =>
+      wrapper.findAll("button.reading").find((b) => b.text() === text)!;
+    await reading("はやし").trigger("click");
+    await flushPromises();
+    expect(router.currentRoute.value.path).toBe("/dictionary");
+    expect(router.currentRoute.value.query).toMatchObject({
+      q: "<林>{はやし}",
+      qState: "",
+    });
+
+    // pinyin is Chinese: the search language follows
+    await router.push("/kanji?q=林");
+    await loaded(wrapper);
+    await reading("lín").trigger("click");
+    await flushPromises();
+    expect(router.currentRoute.value.query.q).toBe("<林>{lín}");
+    expect(lang.value).toBe("zh-CN");
+    wrapper.unmount();
+  });
+
   it("shows a character's breakdown and kanji entry", async () => {
     const { wrapper } = await mountView("/kanji?q=林");
     await loaded(wrapper);
