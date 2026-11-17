@@ -1669,8 +1669,10 @@ impl SearchDb {
             return self.search(&SearchRequest {
                 lang: req.lang.clone(),
                 term: format!("*{ch}"),
+                // in hiragana, as words' readings are, even in a search.db that doesn't fold
+                // katakana: KANJIDIC's on readings are katakana (コウ)
                 reading_glob: if pattern {
-                    format!("*{}", ch_reading.split('.').next().unwrap_or(""))
+                    format!("*{}", fold_kana(ch_reading.split('.').next().unwrap_or("")))
                 } else {
                     String::new()
                 },
@@ -2905,6 +2907,15 @@ mod kana_tests {
         };
         assert_eq!(terms(&db, term("コーヒー")), ["コーヒー"]);
         assert!(terms(&db, term("こーひー")).is_empty());
+        // *<興>{コウ} without term_char: KANJIDIC's on reading is katakana, the readings of
+        // the words with it hiragana
+        let ch = |r: &str| SearchRequest {
+            ch: "興".into(),
+            ch_reading: r.into(),
+            ..Default::default()
+        };
+        assert_eq!(terms(&db, ch("コウ")), ["復興", "興行"]);
+        assert_eq!(terms(&db, ch("キョウ")), ["興味"]);
         drop(db);
 
         let tok = TokenizerMapper::new(dir.clone());
