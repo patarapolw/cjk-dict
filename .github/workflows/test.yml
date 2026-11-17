@@ -47,7 +47,7 @@ jobs:
       - run: cargo test --manifest-path app/src-tauri/Cargo.toml --locked
 
   check:
-    name: Format and typecheck
+    name: Format, typecheck and frontend tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -61,6 +61,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm format:check
       - run: pnpm typecheck
+      # app frontend unit tests (Vitest, with Tauri's IPC mocked)
+      - run: pnpm test
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
