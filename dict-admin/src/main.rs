@@ -489,6 +489,12 @@ async fn build(lib: &Library, lindera_dir: &Path, ids_dir: &Path, rebuild: bool)
     if search::build_chars(&db, &ids_txt, dicts_changed)? {
         eprintln!("character tables in {:.1}s", t.elapsed().as_secs_f64());
     }
+    if search::missing_kanji_readings(&db)? {
+        eprintln!(
+            "warning: no kanji dictionary with Japanese readings, so `*<興>{{キョウ}}` finds no \
+             Japanese words: pnpm admin defaults --only KANJIDIC"
+        );
+    }
 
     let indexed: std::collections::HashMap<_, _> = infos
         .into_iter()

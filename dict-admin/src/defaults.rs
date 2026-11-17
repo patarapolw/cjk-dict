@@ -23,7 +23,8 @@ const GITHUB: &[(&str, &[GhSource])] = &[
         &[GhSource {
             name: "KANJIDIC",
             pattern: r"^kanjidic2-en-.+\.json\.zip$",
-            lang: Some("ja-JP"),
+            // Japanese, Chinese and Korean readings alike
+            lang: None,
         }],
     ),
     (

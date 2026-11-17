@@ -275,7 +275,6 @@ pub fn convert(src: &Path, dst: &Path) -> Result<usize> {
             dict.dict_date, dict.version
         ),
         "attribution": "This publication has included material from the KANJIDIC2 dictionary file, the property of the Electronic Dictionary Research and Development Group, used in conformance with the Group's licence (CC BY-SA 4.0): https://www.edrdg.org/edrdg/licence.html",
-        "sourceLanguage": "ja",
         "targetLanguage": lang,
     });
     let tags: Vec<Value> = TAGS
@@ -551,7 +550,8 @@ mod tests {
         let index = z.index().unwrap();
         assert_eq!(index.title, "KANJIDIC");
         assert_eq!(index.revision, "2026-11-16 (2026-320)");
-        assert_eq!(index.source_language.as_deref(), Some("ja"));
+        // Japanese, Chinese and Korean readings: no one language
+        assert_eq!(index.source_language, None);
         let bank = z
             .banks()
             .into_iter()

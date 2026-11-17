@@ -165,6 +165,27 @@ fn meta(conn: &Connection, key: &str) -> rusqlite::Result<Option<String>> {
         .optional()
 }
 
+/// Whether `db` has Japanese terms with readings but no kanji dictionary with kana readings
+/// (e.g. KANJIDIC), so that [`build_chars`] could not index the readings of their kanji:
+/// `*<興>{キョウ}` finds no Japanese words then.
+pub fn missing_kanji_readings(db: &Path) -> Result<bool, YomitanError> {
+    if !db.is_file() {
+        return Ok(false);
+    }
+    let conn = Connection::open_with_flags(db, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    if meta(&conn, "kana_kanji")?.as_deref() != Some("0") {
+        return Ok(false);
+    }
+    Ok(conn
+        .query_row(
+            "SELECT 1 FROM term_search WHERE term_ja != '' AND reading != '' LIMIT 1",
+            [],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
+}
+
 /// Whether `db` must be rebuilt from scratch ([`build`]) before dictionaries can be added to
 /// it: it was built before kana folding, and its terms still have katakana.
 pub fn needs_rebuild(db: &Path) -> Result<bool, YomitanError> {
@@ -728,6 +749,10 @@ fn fill_term_char(conn: &mut Connection, dir: &Path) -> Result<(), YomitanError>
     tx.execute(
         "INSERT OR REPLACE INTO meta (key, value) VALUES ('term_char', ?1)",
         [TERM_CHAR_VERSION],
+    )?;
+    tx.execute(
+        "INSERT OR REPLACE INTO meta (key, value) VALUES ('kana_kanji', ?1)",
+        [kana.len().to_string()],
     )?;
     tx.commit()?;
     Ok(())
@@ -2636,6 +2661,7 @@ mod han_tests {
         assert!(!build_chars(&db_path, &ids_txt, false).unwrap());
         assert_eq!(std::fs::read(&db_path).unwrap(), before);
 
+        assert!(!missing_kanji_readings(&db_path).unwrap());
         let db = SearchDb::open(&db_path, &dir).unwrap();
         assert!(db.has_term_char);
         assert_eq!(
@@ -2886,6 +2912,46 @@ mod kana_tests {
         let fresh = dir.join("fresh.db");
         build(&fresh, &[], &tok, |_, _, _| {}).await.unwrap();
         assert!(!needs_rebuild(&fresh).unwrap());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod kanji_reading_warning_tests {
+    use super::*;
+
+    /// Japanese terms with readings and no kanji dictionary: build_chars can't index their
+    /// kanji's readings, which dict-admin warns about
+    #[tokio::test]
+    async fn missing_kanji_readings_are_told() {
+        let dir = std::env::temp_dir().join(format!(
+            "cjk-dict-kana-kanji-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("search.db");
+        let tok = TokenizerMapper::new(dir.clone());
+        build(&db_path, &[], &tok, |_, _, _| {}).await.unwrap();
+        let ids_txt = dir.join("ids.txt");
+        std::fs::write(&ids_txt, "U+6797\t林\t⿰木木\n").unwrap();
+
+        // no Japanese terms: nothing to warn about
+        build_chars(&db_path, &ids_txt, true).unwrap();
+        assert!(!missing_kanji_readings(&db_path).unwrap());
+
+        Connection::open(&db_path)
+            .unwrap()
+            .execute(
+                "INSERT INTO term_search (term, term_ja, reading) VALUES ('林', '林', ' はやし ')",
+                [],
+            )
+            .unwrap();
+        build_chars(&db_path, &ids_txt, true).unwrap();
+        assert!(missing_kanji_readings(&db_path).unwrap());
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

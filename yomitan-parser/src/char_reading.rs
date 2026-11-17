@@ -55,6 +55,11 @@ impl KanaReadings {
     pub fn is_empty(&self) -> bool {
         self.forms.is_empty()
     }
+
+    /// kanji with readings
+    pub fn len(&self) -> usize {
+        self.forms.len()
+    }
 }
 
 fn is_hangul_syllable(c: char) -> bool {

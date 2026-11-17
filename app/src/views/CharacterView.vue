@@ -168,7 +168,7 @@
           </header>
           <dl class="readings">
             <template v-if="e.onyomi">
-              <dt>{{ isJa(e) ? "On" : "Reading" }}</dt>
+              <dt>{{ readingLabel(e.onyomi) }}</dt>
               <dd :lang="e.lang || undefined">
                 <template v-for="(r, k) in splitReadings(e.onyomi)" :key="k">
                   <template v-if="k">、</template>
@@ -184,7 +184,7 @@
               </dd>
             </template>
             <template v-if="e.kunyomi">
-              <dt>{{ isJa(e) ? "Kun" : "Reading" }}</dt>
+              <dt>{{ readingLabel(e.kunyomi) }}</dt>
               <dd :lang="e.lang || undefined">
                 <template v-for="(r, k) in splitReadings(e.kunyomi)" :key="k">
                   <template v-if="k">、</template>
@@ -469,7 +469,15 @@ function getAssetSrc(dict: string, src: string) {
 
 const splitTags = (tags: string) => tags.split(/\s+/).filter(Boolean);
 const splitReadings = (s: string) => s.split(/\s+/).filter(Boolean);
-const isJa = (e: IKanjiEntry) => (e.lang ?? "").startsWith("ja");
+/**
+ * On and kun readings tell themselves apart by script (コウ, おこ.る); other kanji
+ * dictionaries put other readings in those fields, e.g. CC-CEDICT's Hanzi edition its pinyin.
+ */
+function readingLabel(readings: string) {
+  if (/^[\p{scx=Katakana}ー\s.\-]+$/u.test(readings)) return "On";
+  if (/^[\p{scx=Hiragana}ー\s.\-]+$/u.test(readings)) return "Kun";
+  return "Reading";
+}
 
 function regionTitle(regions: string) {
   return [...regions].map((r) => REGION_NAMES[r] ?? r).join(", ");

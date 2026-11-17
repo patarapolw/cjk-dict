@@ -19,7 +19,7 @@ const HAN: Record<string, IHanChar> = {
       {
         dict_id: 1,
         dict_path: "KANJIDIC",
-        lang: "ja-JP",
+        lang: null,
         character: "林",
         onyomi: "リン",
         kunyomi: "はやし",
@@ -136,6 +136,12 @@ describe("CharacterView", () => {
     expect(card.get(".hangul").text()).toBe("림");
     expect(card.get(".ids").text().replace(/\s/g, "")).toBe("⿰木木");
     expect(card.get(".readings").text()).toContain("リン");
+    // on and kun by their script, KANJIDIC having no one language
+    expect(card.findAll(".readings dt").map((dt) => dt.text())).toEqual([
+      "On",
+      "Kun",
+      "Pinyin",
+    ]);
     expect(card.findAll(".meanings li").map((li) => li.text())).toEqual([
       "grove",
       "forest",
