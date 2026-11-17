@@ -310,6 +310,7 @@ async function loadAll() {
   flex-direction: row;
   /* in a narrow window, the language select goes on a line of its own */
   flex-wrap: wrap;
+  align-items: center;
   box-sizing: border-box;
   min-height: 4rem;
   padding: 0.5rem;
