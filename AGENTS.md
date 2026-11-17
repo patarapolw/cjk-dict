@@ -67,6 +67,28 @@ node scripts/webview.mjs screenshot shot.png [css-selector]
   devtools open with `Ctrl+Shift+I`; see also
   [Tauri's debugging guide](https://tauri.app/develop/debug/).
 
+### On Linux
+
+The Tauri app (`app/src-tauri`) links against WebKitGTK, so building or testing it on
+Linux needs
+[Tauri's system packages](https://tauri.app/start/prerequisites/#linux) first. On
+Debian or Ubuntu:
+
+```sh
+sudo apt-get update
+sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+  libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+cargo check --manifest-path app/src-tauri/Cargo.toml --all-targets --locked
+cargo test --manifest-path app/src-tauri/Cargo.toml --locked
+```
+
+The root Rust workspace and `pnpm test` need none of these.
+
+WebKitGTK doesn't speak the Chrome DevTools Protocol, so `scripts/webview.mjs` works only
+on Windows. On Linux, run the tests above and say that the UI change wasn't checked in
+the running app, rather than checking it in a page made to look like it.
+
 ## Commit messages
 
 Use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/):
