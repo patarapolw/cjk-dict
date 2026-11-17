@@ -132,7 +132,7 @@
         </label>
       </nav>
     </header>
-    <div class="scroller" ref="scroller" @scroll.passive="onScroll">
+    <div class="scroller" ref="scroller">
       <p v-if="noResults" class="no-results">No results</p>
       <section v-for="it in items" :key="it.id" class="accordion-item">
         <button
@@ -236,6 +236,7 @@ import {
 } from "../util/furigana";
 import { hanChars } from "../util/han";
 import { dictsVersion, toBeLoaded } from "../util/loading";
+import { remainingScroll, scrollToStart } from "../util/scroll";
 import { lang } from "../util/settings";
 
 type Item = ISearchTerm & { entries: ITerm[] };
@@ -500,8 +501,8 @@ function onScroll() {
   const el = elScroller.value;
   if (!el || loading.value || nextOffset.value === null) return;
 
-  const remaining = el.scrollHeight - el.scrollTop - el.clientHeight;
-  if (remaining < el.clientHeight / 2) loadMore();
+  const { remaining, clientHeight } = remainingScroll(el);
+  if (remaining < clientHeight / 2) loadMore();
 }
 
 /** language to segment `text` with: the setting, or a guess from its script */
@@ -579,9 +580,7 @@ async function loadMore(isNew?: boolean) {
       nextOffset.value = result.next;
       if (isNew) noResults.value = !result.items.length;
 
-      if (isNew && elScroller.value) {
-        elScroller.value.scrollTop = 0;
-      }
+      if (isNew && elScroller.value) scrollToStart(elScroller.value);
 
       openedItems.value = [
         ...openedItems.value,
@@ -700,6 +699,10 @@ onMounted(() => {
     resizeObserver = new ResizeObserver(() => onScroll());
     resizeObserver.observe(elScroller.value);
   }
+  // Either the results list scrolls, or in a short window the whole page does (see
+  // scrollContainer). Scroll events don't bubble, but they can be captured.
+  window.addEventListener("scroll", onScroll, { capture: true, passive: true });
+  window.addEventListener("resize", onScroll, { passive: true });
 
   routerListener.value = router.afterEach((to) => {
     // not the query of another view being navigated to
@@ -710,6 +713,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   clearTimeout(searchTimer);
   resizeObserver?.disconnect();
+  window.removeEventListener("scroll", onScroll, { capture: true });
+  window.removeEventListener("resize", onScroll);
   if (clipboardInterval.value) {
     clearInterval(clipboardInterval.value);
     clipboardInterval.value = 0;
@@ -918,5 +923,19 @@ onBeforeUnmount(() => {
 
 .row + .row {
   margin-top: 1em;
+}
+/* A short window, such as an Android pop-up (floating) window: the search box and
+   options would leave little room for results, so the whole page scrolls instead
+   (App.vue). Keep in step with the media query there. */
+@media (max-height: 28rem) {
+  .container {
+    height: auto;
+    display: block;
+    padding: 0.5em;
+  }
+
+  .scroller {
+    overflow: visible;
+  }
 }
 </style>

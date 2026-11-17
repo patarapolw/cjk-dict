@@ -398,4 +398,18 @@ async function loadAll() {
   background: var(--app-focus);
   transition: width 150ms ease;
 }
+/* A short window, such as an Android pop-up (floating) window: the headers would leave
+   little room for results, so scroll the whole page rather than only the results.
+   Keep in step with the media queries in the views. */
+@media (max-height: 28rem) {
+  .layout {
+    display: block;
+    overflow-y: auto;
+  }
+
+  .header {
+    height: 2.5rem;
+    padding-block: 0.25rem;
+  }
+}
 </style>
