@@ -170,6 +170,15 @@
             >
               {{ braced(headReading(it)) }}
             </button>
+            <button
+              v-if="hanChars(headTerm(it)).length"
+              type="button"
+              class="link-button"
+              title="Its characters: components, readings and meanings"
+              @click="toCharacters(headTerm(it))"
+            >
+              字 {{ hanChars(headTerm(it)).join("") }}
+            </button>
           </div>
           <Term
             v-for="(ent, j) in it.entries"
@@ -210,6 +219,7 @@ import {
   parseQuery,
   toFurigana,
 } from "../util/furigana";
+import { hanChars } from "../util/han";
 import { dictsVersion, toBeLoaded } from "../util/loading";
 import { lang } from "../util/settings";
 
@@ -341,6 +351,12 @@ async function searchFor(query: string, state: string | null = qState.value) {
   readingMode.value = false;
   q.value = query;
   await setRouteQuery();
+}
+
+/** The characters view, keeping the current search in the history (back button). */
+async function toCharacters(term: string) {
+  await setRouteQuery();
+  await router.push({ path: "/kanji", query: { q: hanChars(term).join("") } });
 }
 
 function searchNext() {
@@ -650,8 +666,9 @@ const routerListener = ref<() => void>();
 onMounted(() => {
   loadFromRouteQuery();
 
-  routerListener.value = router.afterEach(() => {
-    loadFromRouteQuery();
+  routerListener.value = router.afterEach((to) => {
+    // not the query of another view being navigated to
+    if (to.path === "/dictionary") loadFromRouteQuery();
   });
 });
 

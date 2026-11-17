@@ -16,6 +16,15 @@ struct GhSource {
 
 const GITHUB: &[(&str, &[GhSource])] = &[
     (
+        // kanji: readings, meanings, stroke counts, grades, ...
+        "yomidevs/jmdict-yomitan",
+        &[GhSource {
+            name: "KANJIDIC",
+            pattern: r"^KANJIDIC_english\.zip$",
+            lang: Some("ja-JP"),
+        }],
+    ),
+    (
         "MarvNC/pixiv-yomitan",
         &[GhSource {
             name: "Pixiv",
@@ -206,6 +215,7 @@ mod tests {
                 "ko.Wikipedia.2026-11-01.json",
             ),
             ("CC-CEDICT", "CC-CEDICT.zip", "CC-CEDICT.Hanzi.zip"),
+            ("KANJIDIC", "KANJIDIC_english.zip", "KANJIDIC_french.zip"),
             ("KO-EN.KRDICT", "KO-EN.KRDICT.zip", "KO-KO.KRDICT.zip"),
         ];
         for (name, yes, no) in examples {
@@ -227,6 +237,6 @@ mod tests {
         assert_eq!(r[0].lang, Some("zh-CN"));
         assert!(r[0].url.ends_with("/dict/zh/en/wty-zh-en.zip"));
         assert!(resolve(&["Nope".to_string()]).is_err());
-        assert_eq!(names().len(), 9);
+        assert_eq!(names().len(), 10);
     }
 }

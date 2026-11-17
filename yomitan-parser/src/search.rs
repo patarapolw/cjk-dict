@@ -5,6 +5,7 @@
 //! stay in the zips, which are read on demand.
 //!
 //! - [`build`] (dict-admin): zips -> `search.db`
+//! - [`build_chars`] (dict-admin): character decomposition ([`crate::ids`]) -> `search.db`
 //! - [`SearchDb`] (app): query `search.db`, then read entries / media from the zips
 
 use std::{
@@ -21,6 +22,7 @@ use serde_json::{Value, value::RawValue};
 
 use crate::{
     error::YomitanError,
+    ids::{self, Ids},
     korean::{self, RomanQuery},
     parser::{BankKind, YomitanZip},
     pinyin::{expand_pinyin, normalize_pinyin},
@@ -100,6 +102,40 @@ fn roman_keys(term: &str, reading: &str) -> Vec<String> {
         keys
     }
 }
+
+/// Where each single-character entry of a dictionary's kanji banks is, e.g. KANJIDIC's.
+/// Created on an existing search.db too, which an update then backfills.
+const KANJI_SCHEMA: &str = r#"
+CREATE TABLE IF NOT EXISTS kanji_link (
+  kanji       TEXT NOT NULL,            -- the character, as the dictionary has it
+  dict_id     INTEGER NOT NULL,
+  bank        INTEGER NOT NULL,         -- kanji_bank_<bank>.json
+  idx         INTEGER NOT NULL,
+  PRIMARY KEY (kanji, dict_id, bank, idx)
+) WITHOUT ROWID;
+"#;
+
+/// Han characters: how they break down ([`crate::ids`]), their Korean readings, and how
+/// many terms use them. Filled by [`build_chars`].
+const HAN_SCHEMA: &str = r#"
+CREATE TABLE IF NOT EXISTS han_char (
+  ch          TEXT PRIMARY KEY,
+  ids         TEXT NOT NULL DEFAULT '', -- ids.txt's IDS columns, tab-separated: ⿹②一[GTKV]\t⿻②一[J]
+  hangul      TEXT NOT NULL DEFAULT '', -- space-separated Hangul readings (eum), e.g. 락 악 요 for 樂
+  uses        INTEGER NOT NULL DEFAULT 0 -- terms in term_search with the character
+) WITHOUT ROWID;
+-- the components each IDS names directly; characters made of a component are found by
+-- following it up recursively
+CREATE TABLE IF NOT EXISTS han_component (
+  component   TEXT NOT NULL,
+  ch          TEXT NOT NULL,
+  PRIMARY KEY (component, ch)
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS meta (
+  key         TEXT PRIMARY KEY,
+  value       TEXT
+) WITHOUT ROWID;
+"#;
 
 fn has_table(conn: &Connection, name: &str) -> rusqlite::Result<bool> {
     Ok(conn
@@ -200,6 +236,8 @@ async fn build_inner(
     }
     let backfill_roman = has_existing && !has_table(&conn, "term_roman")?;
     conn.execute_batch(ROMAN_SCHEMA)?;
+    let backfill_kanji = has_existing && !has_table(&conn, "kanji_link")?;
+    conn.execute_batch(KANJI_SCHEMA)?;
     conn.execute_batch(FTS_TRIGGERS)?;
 
     if backfill_roman {
@@ -233,6 +271,10 @@ async fn build_inner(
                 "DELETE FROM term_link WHERE dict_id IN (SELECT id FROM dict WHERE name = ?1)",
                 [name],
             )?;
+            tx.execute(
+                "DELETE FROM kanji_link WHERE dict_id IN (SELECT id FROM dict WHERE name = ?1)",
+                [name],
+            )?;
             tx.execute("DELETE FROM dict WHERE name = ?1", [name])?;
         }
         tx.execute(
@@ -243,6 +285,26 @@ async fn build_inner(
             "DELETE FROM term_roman WHERE search_id NOT IN (SELECT id FROM term_search)",
             [],
         )?;
+        tx.commit()?;
+    }
+
+    // a search.db from before kanji_link: index the kanji banks of the dictionaries it has,
+    // from the zips next to it
+    if backfill_kanji {
+        progress("kanji entries", 0, 0);
+        let dir = out.parent().unwrap_or(Path::new("."));
+        let rows: Vec<(i64, String)> = {
+            let mut st = conn.prepare("SELECT id, name FROM dict")?;
+            st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<Result<_, _>>()?
+        };
+        let tx = conn.transaction()?;
+        for (dict_id, name) in rows {
+            let zip = dir.join(format!("{name}.zip"));
+            if zip.is_file() {
+                index_kanji(&tx, &mut YomitanZip::open(&zip)?, dict_id)?;
+            }
+        }
         tx.commit()?;
     }
 
@@ -354,6 +416,10 @@ async fn build_inner(
             "UPDATE dict SET term_count = ?1 WHERE id = ?2",
             params![count as i64, dict_id],
         )?;
+        let kanji_count = index_kanji(&tx, &mut zip, dict_id)?;
+        if kanji_count > 0 {
+            progress(&format!("{}: {kanji_count} kanji", d.name), 0, 0);
+        }
         tx.commit()?;
 
         infos.push(DictInfo {
@@ -383,6 +449,163 @@ async fn build_inner(
     drop(conn);
     std::fs::rename(&tmp, out)?;
     Ok(infos)
+}
+
+/// Index a dictionary's kanji banks into `kanji_link`: entries for a single character only
+/// (some dictionaries, e.g. CC-CEDICT's Hanzi edition, put whole words in kanji banks).
+fn index_kanji(
+    tx: &rusqlite::Transaction,
+    zip: &mut YomitanZip,
+    dict_id: i64,
+) -> Result<usize, YomitanError> {
+    let banks: Vec<_> = zip
+        .banks()
+        .into_iter()
+        .filter(|b| b.kind == BankKind::Kanji)
+        .collect();
+    let mut link = tx.prepare(
+        "INSERT OR IGNORE INTO kanji_link (kanji, dict_id, bank, idx) VALUES (?1, ?2, ?3, ?4)",
+    )?;
+    let mut count = 0;
+    for bank in banks {
+        let rows = zip.read_json_array(&bank.name)?;
+        for (idx, row) in rows.iter().enumerate() {
+            let kanji = row.get(0).and_then(Value::as_str).unwrap_or("").trim();
+            if !ids::is_han_char(kanji) {
+                continue;
+            }
+            link.execute(params![kanji, dict_id, bank.index, idx as i64])?;
+            count += 1;
+        }
+    }
+    Ok(count)
+}
+
+/// FNV-1a, to tell whether `ids.txt` changed since the last [`build_chars`]
+fn fingerprint(bytes: &[u8]) -> String {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in bytes {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    format!("{}:{h:016x}", bytes.len())
+}
+
+/// Fill the character tables of `db` (built by [`build`]) from `ids_txt`, the CJKVI IDS
+/// database's `ids.txt` ([`crate::ids`]): each character's decomposition, its components,
+/// its Hangul readings (with the `hangul-readings` feature), and how many terms use it, to
+/// list the common characters made of a component first.
+///
+/// Does nothing, and returns `false`, when `ids.txt` is unchanged since it last filled them
+/// and `recount` is false; pass `recount` when dictionaries changed, since the counts follow
+/// the terms. Leaving search.db as it was keeps its checksum, so the app does not download
+/// it again.
+pub fn build_chars(db: &Path, ids_txt: &Path, recount: bool) -> Result<bool, YomitanError> {
+    let text = std::fs::read_to_string(ids_txt)?;
+    let fp = fingerprint(text.as_bytes());
+
+    let mut conn = Connection::open(db)?;
+    conn.execute_batch(HAN_SCHEMA)?;
+    let stored: Option<String> = conn
+        .query_row("SELECT value FROM meta WHERE key = 'ids'", [], |r| r.get(0))
+        .optional()?;
+    let empty = conn
+        .query_row("SELECT 1 FROM han_char LIMIT 1", [], |_| Ok(()))
+        .optional()?
+        .is_none();
+    if !recount && !empty && stored.as_deref() == Some(fp.as_str()) {
+        return Ok(false);
+    }
+
+    // terms with each character
+    let mut uses: HashMap<String, i64> = HashMap::new();
+    {
+        let mut st = conn.prepare("SELECT term FROM term_search")?;
+        let mut rows = st.query([])?;
+        while let Some(r) = rows.next()? {
+            let term = r.get_ref(0)?.as_str().unwrap_or("");
+            for ch in ids::han_chars(term) {
+                *uses.entry(ch).or_insert(0) += 1;
+            }
+        }
+    }
+
+    let tx = conn.transaction()?;
+    tx.execute_batch("DELETE FROM han_char; DELETE FROM han_component;")?;
+    {
+        let mut ins_char = tx.prepare(
+            "INSERT OR REPLACE INTO han_char (ch, ids, hangul, uses) VALUES (?1, ?2, ?3, ?4)",
+        )?;
+        let mut ins_comp =
+            tx.prepare("INSERT OR IGNORE INTO han_component (component, ch) VALUES (?1, ?2)")?;
+        let mut add = |ch: &str, ids: &str, comps: &[String]| -> Result<(), YomitanError> {
+            ins_char.execute(params![
+                ch,
+                ids,
+                hangul_of(ch),
+                uses.get(ch).copied().unwrap_or(0)
+            ])?;
+            for c in comps {
+                ins_comp.execute(params![c, ch])?;
+            }
+            Ok(())
+        };
+        let mut seen = std::collections::HashSet::new();
+        for line in text.lines() {
+            let Some(l) = ids::parse_line(line) else {
+                continue;
+            };
+            let cols = l
+                .ids
+                .iter()
+                .map(|i| {
+                    if i.regions.is_empty() {
+                        i.ids.clone()
+                    } else {
+                        format!("{}[{}]", i.ids, i.regions)
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\t");
+            add(&l.ch, &cols, &ids::line_components(&l))?;
+            seen.insert(l.ch);
+        }
+        // characters of the kanji dictionaries that ids.txt does not have
+        let extra: Vec<String> = {
+            let mut st = tx.prepare("SELECT DISTINCT kanji FROM kanji_link")?;
+            st.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?
+        };
+        for ch in extra {
+            if !seen.contains(&ch) {
+                add(&ch, "", &[])?;
+            }
+        }
+    }
+    tx.execute(
+        "INSERT OR REPLACE INTO meta (key, value) VALUES ('ids', ?1)",
+        [fp],
+    )?;
+    tx.commit()?;
+    conn.execute_batch("ANALYZE;")?;
+    Ok(true)
+}
+
+/// Hangul readings (eum) of a Hanja, as a dictionary lists them: without the initial-sound
+/// rule, so 李 is 리.
+#[cfg(feature = "hangul-readings")]
+fn hangul_of(ch: &str) -> String {
+    let mut cs = ch.chars();
+    match (cs.next(), cs.next()) {
+        (Some(c), None) if hanja_hangul::is_hanja(c) => hanja_hangul::Converter::global()
+            .readings(ch, false, 8)
+            .join(" "),
+        _ => String::new(),
+    }
+}
+
+#[cfg(not(feature = "hangul-readings"))]
+fn hangul_of(_ch: &str) -> String {
+    String::new()
 }
 
 /// Korean dictionaries give no readings: give Korean headwords written in Hanja one in
@@ -909,6 +1132,68 @@ pub struct SearchResult {
     pub next: Option<u32>,
 }
 
+/// A Han character: how it breaks down ([`crate::ids`]) and its kanji dictionary entries.
+#[derive(Debug, Default, Serialize)]
+pub struct HanChar {
+    pub ch: String,
+    /// the ways to write it, from ids.txt; empty if search.db has no decomposition for it
+    pub ids: Vec<Ids>,
+    /// the components the IDS name, from all of them
+    pub components: Vec<String>,
+    /// every component, broken down all the way
+    pub all_components: Vec<String>,
+    /// Hangul readings (eum)
+    pub hangul: Vec<String>,
+    /// terms with the character
+    pub uses: i64,
+    pub entries: Vec<KanjiEntryOut>,
+}
+
+/// One kanji dictionary entry, read from the zip.
+#[derive(Debug, Serialize)]
+pub struct KanjiEntryOut {
+    pub dict_id: i64,
+    /// dictionary name
+    pub dict_path: String,
+    /// the dictionary's source language
+    pub lang: Option<String>,
+    pub character: String,
+    /// space-separated
+    pub onyomi: String,
+    /// space-separated
+    pub kunyomi: String,
+    /// space-separated
+    pub tags: String,
+    pub meanings: Vec<String>,
+    /// (name, value) by name, e.g. ("strokes", "4"); `tag_meta` has their sort order
+    pub stats: Vec<(String, String)>,
+    /// what the dictionary's tag banks say about `tags` and the stats' names
+    pub tag_meta: HashMap<String, TagMeta>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TagMeta {
+    pub category: String,
+    pub order: f64,
+    pub notes: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct HanBrief {
+    pub ch: String,
+    pub uses: i64,
+}
+
+#[derive(Debug, Default, Serialize)]
+pub struct HanList {
+    pub items: Vec<HanBrief>,
+    pub next: Option<u32>,
+}
+
+/// characters [`SearchDb::han_chars`] looks up at once
+pub const MAX_HAN_CHARS: usize = 20;
+const MAX_HAN_LIST: u32 = 200;
+
 const MAX_LIMIT: u32 = 50;
 /// 5^4: up to four toneless syllables are expanded; beyond that, match the raw reading
 const MAX_READINGS: usize = 625;
@@ -916,7 +1201,8 @@ const MAX_READINGS: usize = 625;
 /// ([`crate::parser::rebank`]), but zips from before that have 3-30 MB banks.
 const BANK_CACHE_BYTES: usize = 64 << 20;
 
-type BankKey = (i64, i64);
+/// (dict_id, kanji bank?, N of `term_bank_N.json` / `kanji_bank_N.json`)
+type BankKey = (i64, bool, i64);
 /// A term bank split into rows, each still raw JSON: splitting is far cheaper than parsing
 /// the whole bank into `Value`s, and a search only needs a handful of rows from it.
 type Bank = Arc<Vec<Box<RawValue>>>;
@@ -926,6 +1212,13 @@ pub struct SearchDb {
     dicts_dir: PathBuf,
     /// dict_id -> name
     names: HashMap<i64, String>,
+    /// dict_id -> source language, e.g. ja-JP
+    langs: HashMap<i64, String>,
+    /// search.db has `kanji_link` / `han_char`
+    has_kanji: bool,
+    has_han: bool,
+    /// dict_id -> its tag banks, for kanji entries' tags and stats
+    tag_meta: Mutex<HashMap<i64, Arc<HashMap<String, TagMeta>>>>,
     /// search.db has `term_roman`; built before it, romanized searches romanize each row
     has_roman: bool,
     zips: Mutex<HashMap<String, YomitanZip>>,
@@ -1088,9 +1381,20 @@ impl SearchDb {
             st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
                 .collect::<Result<HashMap<i64, String>, _>>()?
         };
+        let langs = {
+            let mut st = conn.prepare("SELECT id, L1 FROM dict WHERE L1 IS NOT NULL")?;
+            st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<Result<HashMap<i64, String>, _>>()?
+        };
         let has_roman = has_table(&conn, "term_roman")?;
+        let has_kanji = has_table(&conn, "kanji_link")?;
+        let has_han = has_table(&conn, "han_char")?;
         Ok(Self {
             has_roman,
+            has_kanji,
+            has_han,
+            langs,
+            tag_meta: Mutex::new(HashMap::new()),
             conn: Mutex::new(conn),
             dicts_dir: dicts_dir.to_path_buf(),
             names,
@@ -1337,7 +1641,7 @@ impl SearchDb {
             let Some(name) = self.names.get(&dict_id) else {
                 continue;
             };
-            let rows = match self.bank(dict_id, name, bank) {
+            let rows = match self.bank(dict_id, name, false, bank) {
                 Ok(r) => r,
                 Err(e) => {
                     eprintln!("{name} term_bank_{bank}: {e}");
@@ -1394,8 +1698,8 @@ impl SearchDb {
         f(zips.get_mut(name).unwrap())
     }
 
-    fn bank(&self, dict_id: i64, name: &str, bank: i64) -> Result<Bank, YomitanError> {
-        let key = (dict_id, bank);
+    fn bank(&self, dict_id: i64, name: &str, kanji: bool, bank: i64) -> Result<Bank, YomitanError> {
+        let key = (dict_id, kanji, bank);
         {
             let mut cache = self.banks.lock()?;
             if let Some(pos) = cache.iter().position(|(k, ..)| *k == key) {
@@ -1405,8 +1709,9 @@ impl SearchDb {
                 return Ok(rows);
             }
         }
+        let kind = if kanji { "kanji" } else { "term" };
         let text = self.with_zip(name, |z| {
-            z.read_to_string(&format!("term_bank_{bank}.json"))
+            z.read_to_string(&format!("{kind}_bank_{bank}.json"))
         })?;
         let size = text.len();
         let rows: Bank = Arc::new(serde_json::from_str(&text)?);
@@ -1426,6 +1731,233 @@ impl SearchDb {
             .max(1);
         cache.truncate(keep);
         Ok(rows)
+    }
+
+    /// The Han characters of `text` (up to [`MAX_HAN_CHARS`]): how each breaks down, and
+    /// its entries in the kanji dictionaries.
+    pub fn han_chars(&self, text: &str) -> Result<Vec<HanChar>, YomitanError> {
+        let mut out = vec![];
+        for ch in ids::han_chars(text).into_iter().take(MAX_HAN_CHARS) {
+            let mut c = HanChar {
+                ch: ch.clone(),
+                ..Default::default()
+            };
+            let mut links: Vec<(i64, i64, i64)> = vec![];
+            {
+                let conn = self.conn.lock()?;
+                if self.has_han {
+                    let row: Option<(String, String, i64)> = conn
+                        .prepare_cached("SELECT ids, hangul, uses FROM han_char WHERE ch = ?1")?
+                        .query_row([&ch], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                        .optional()?;
+                    if let Some((ids_cols, hangul, uses)) = row {
+                        c.ids = ids::parse_columns(&ids_cols);
+                        c.hangul = hangul.split_whitespace().map(String::from).collect();
+                        c.uses = uses;
+                    }
+                    for i in &c.ids {
+                        for comp in ids::components(&i.ids, &ch) {
+                            if !c.components.contains(&comp) {
+                                c.components.push(comp);
+                            }
+                        }
+                    }
+                    // breadth first, through each component's own IDS
+                    let mut st = conn.prepare_cached("SELECT ids FROM han_char WHERE ch = ?1")?;
+                    let mut queue: VecDeque<String> = c.components.iter().cloned().collect();
+                    while let Some(comp) = queue.pop_front() {
+                        if comp == ch || c.all_components.contains(&comp) {
+                            continue;
+                        }
+                        let cols: Option<String> =
+                            st.query_row([&comp], |r| r.get(0)).optional()?;
+                        for i in ids::parse_columns(cols.as_deref().unwrap_or("")) {
+                            queue.extend(ids::components(&i.ids, &comp));
+                        }
+                        c.all_components.push(comp);
+                    }
+                }
+                if self.has_kanji {
+                    links = conn
+                        .prepare_cached(
+                            "SELECT dict_id, bank, idx FROM kanji_link WHERE kanji = ?1
+                             ORDER BY dict_id, bank, idx",
+                        )?
+                        .query_map([&ch], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+                        .collect::<Result<_, _>>()?;
+                }
+            }
+            for (dict_id, bank, idx) in links {
+                match self.kanji_entry(dict_id, bank, idx) {
+                    Ok(Some(e)) => c.entries.push(e),
+                    Ok(None) => {}
+                    Err(e) => eprintln!("kanji_bank_{bank}[{idx}] of dict {dict_id}: {e}"),
+                }
+            }
+            out.push(c);
+        }
+        Ok(out)
+    }
+
+    fn kanji_entry(
+        &self,
+        dict_id: i64,
+        bank: i64,
+        idx: i64,
+    ) -> Result<Option<KanjiEntryOut>, YomitanError> {
+        let Some(name) = self.names.get(&dict_id) else {
+            return Ok(None);
+        };
+        let rows = self.bank(dict_id, name, true, bank)?;
+        let Some(row) = rows.get(idx as usize) else {
+            return Ok(None);
+        };
+        let row: Vec<Value> = serde_json::from_str(row.get())?;
+        let s = |i: usize| row.get(i).and_then(Value::as_str).unwrap_or("").to_string();
+        let meanings = match row.get(4) {
+            Some(Value::Array(a)) => a
+                .iter()
+                .map(|v| match v {
+                    Value::String(s) => s.clone(),
+                    v => v.to_string(),
+                })
+                .collect(),
+            _ => vec![],
+        };
+        let stats: Vec<(String, String)> = match row.get(5) {
+            Some(Value::Object(o)) => o
+                .iter()
+                .map(|(k, v)| {
+                    let v = match v {
+                        Value::String(s) => s.clone(),
+                        v => v.to_string(),
+                    };
+                    (k.clone(), v)
+                })
+                .collect(),
+            _ => vec![],
+        };
+        let tags = s(3);
+        // what the dictionary says about the tags and stats it uses
+        let all = self.tag_meta(dict_id, name)?;
+        let tag_meta: HashMap<String, TagMeta> = tags
+            .split_whitespace()
+            .chain(stats.iter().map(|(k, _)| k.as_str()))
+            .filter_map(|t| Some((t.to_string(), all.get(t)?.clone())))
+            .collect();
+        Ok(Some(KanjiEntryOut {
+            dict_id,
+            dict_path: name.clone(),
+            lang: self.langs.get(&dict_id).cloned(),
+            character: s(0),
+            onyomi: s(1),
+            kunyomi: s(2),
+            tags,
+            meanings,
+            stats,
+            tag_meta,
+        }))
+    }
+
+    /// A dictionary's tag banks, read once
+    fn tag_meta(
+        &self,
+        dict_id: i64,
+        name: &str,
+    ) -> Result<Arc<HashMap<String, TagMeta>>, YomitanError> {
+        if let Some(m) = self.tag_meta.lock()?.get(&dict_id) {
+            return Ok(m.clone());
+        }
+        let mut out = HashMap::new();
+        self.with_zip(name, |z| {
+            for b in z.banks().into_iter().filter(|b| b.kind == BankKind::Tag) {
+                // a malformed tag bank only costs the tags' notes
+                let Ok(rows) = z.read_json_array(&b.name) else {
+                    continue;
+                };
+                for r in rows {
+                    let Some(tag) = r.get(0).and_then(Value::as_str) else {
+                        continue;
+                    };
+                    out.insert(
+                        tag.to_string(),
+                        TagMeta {
+                            category: r.get(1).and_then(Value::as_str).unwrap_or("").into(),
+                            order: r.get(2).and_then(Value::as_f64).unwrap_or(0.0),
+                            notes: r.get(3).and_then(Value::as_str).unwrap_or("").into(),
+                        },
+                    );
+                }
+            }
+            Ok(())
+        })?;
+        let out = Arc::new(out);
+        self.tag_meta.lock()?.insert(dict_id, out.clone());
+        Ok(out)
+    }
+
+    /// Characters made of all of `components` (Han characters, e.g. `木口` for 呆, 杏, ...),
+    /// following each component up through the characters built from it. A radical also
+    /// matches its forms as a component (水: 氵), see [`ids::component_forms`]. The
+    /// characters the dictionaries use most come first.
+    pub fn han_containing(
+        &self,
+        components: &str,
+        limit: Option<u32>,
+        offset: Option<u32>,
+    ) -> Result<HanList, YomitanError> {
+        let limit = limit.unwrap_or(60).clamp(1, MAX_HAN_LIST);
+        let offset = offset.unwrap_or(0);
+        let comps: Vec<String> = ids::han_chars(components)
+            .into_iter()
+            .map(|c| ids::normalize_component(&c))
+            .collect();
+        if !self.has_han || comps.is_empty() {
+            return Ok(HanList::default());
+        }
+        let mut ps: Vec<String> = vec![];
+        let mut ctes = vec![];
+        let mut sets = vec![];
+        for (i, c) in comps.iter().enumerate() {
+            let forms = ids::component_forms(c);
+            let start = ps.len();
+            ps.extend(forms);
+            let seeds = (start + 1..=ps.len())
+                .map(|n| format!("?{n}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            ctes.push(format!(
+                "up{i}(ch) AS (
+                   SELECT ch FROM han_component WHERE component IN ({seeds})
+                   UNION SELECT h.ch FROM han_component h JOIN up{i} ON h.component = up{i}.ch
+                 )"
+            ));
+            sets.push(format!("SELECT ch FROM up{i}"));
+        }
+        let sql = format!(
+            "WITH RECURSIVE {} SELECT h.ch, h.uses FROM han_char h
+             WHERE h.ch IN ({}) ORDER BY h.uses DESC, h.ch LIMIT {} OFFSET {offset}",
+            ctes.join(", "),
+            sets.join(" INTERSECT "),
+            limit + 1,
+        );
+        let conn = self.conn.lock()?;
+        let mut items: Vec<HanBrief> = conn
+            .prepare(&sql)?
+            .query_map(params_from_iter(ps.iter()), |r| {
+                Ok(HanBrief {
+                    ch: r.get(0)?,
+                    uses: r.get(1)?,
+                })
+            })?
+            .collect::<Result<_, _>>()?;
+        let next = if items.len() > limit as usize {
+            items.pop();
+            Some(offset + limit)
+        } else {
+            None
+        };
+        Ok(HanList { items, next })
     }
 
     /// A media file from a dict's zip (structured-content `path`).
@@ -1615,6 +2147,225 @@ mod hangul_reading_tests {
             .unwrap();
         assert_eq!(ja.items.len(), 1);
         drop(db);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod han_tests {
+    use super::*;
+    use std::io::Write;
+    use std::time::{SystemTime, UNIX_EPOCH};
+    use zip::{ZipWriter, write::SimpleFileOptions};
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("cjk-dict-{name}-{}-{id}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// a KANJIDIC-like dictionary: kanji banks and a tag bank, no terms
+    fn write_kanji_zip(path: &Path) {
+        let mut w = ZipWriter::new(std::fs::File::create(path).unwrap());
+        let opts = SimpleFileOptions::default();
+        for (name, json) in [
+            (
+                "index.json",
+                r#"{"title":"Kanji","revision":"1","format":3,"sourceLanguage":"ja"}"#,
+            ),
+            (
+                "kanji_bank_1.json",
+                r#"[["林","リン","はやし","jouyou",["grove","forest"],{"strokes":"8","freq":"1000"}],
+                    ["林檎","","","",["apple"],{}],
+                    ["森","シン","もり","jouyou",["forest"],{"strokes":"12"}]]"#,
+            ),
+            (
+                "tag_bank_1.json",
+                r#"[["jouyou","frequent",0,"included in list of regular-use characters",0],
+                    ["strokes","misc",0,"Stroke count",0]]"#,
+            ),
+        ] {
+            w.start_file(name, opts).unwrap();
+            w.write_all(json.as_bytes()).unwrap();
+        }
+        w.finish().unwrap();
+    }
+
+    const IDS: &str = "# test\n\
+        U+6728\t木\t木\n\
+        U+6797\t林\t⿰木木\n\
+        U+68EE\t森\t⿱木林\n\
+        U+5446\t呆\t⿱口木\n\
+        U+674F\t杏\t⿱木口\n\
+        U+674E\t李\t⿱木子\n\
+        U+53EF\t可\t⿹丁口[GTKV]\t⿹⿱一口亅[J]\n\
+        U+6CB3\t河\t⿰氵可\n";
+
+    fn chars(list: HanList) -> Vec<String> {
+        list.items.into_iter().map(|i| i.ch).collect()
+    }
+
+    #[tokio::test]
+    async fn characters_break_down_and_are_found_by_component() {
+        let dir = temp_dir("han");
+        let db_path = dir.join("search.db");
+        write_kanji_zip(&dir.join("kanji.zip"));
+        let tok = TokenizerMapper::new(dir.clone());
+        build(
+            &db_path,
+            &[DictSource {
+                name: "kanji".into(),
+                zip: dir.join("kanji.zip"),
+                lang: None,
+            }],
+            &tok,
+            |_, _, _| {},
+        )
+        .await
+        .unwrap();
+        {
+            // terms, for how often characters are used: 林 twice, 森 once
+            let conn = Connection::open(&db_path).unwrap();
+            for t in ["林", "森林", "河"] {
+                conn.execute(
+                    "INSERT INTO term_search (term, term_ja) VALUES (?1, ?1)",
+                    [t],
+                )
+                .unwrap();
+            }
+        }
+        let ids_txt = dir.join("ids.txt");
+        std::fs::write(&ids_txt, IDS).unwrap();
+        assert!(build_chars(&db_path, &ids_txt, false).unwrap());
+        // unchanged: search.db is left alone
+        let before = std::fs::read(&db_path).unwrap();
+        assert!(!build_chars(&db_path, &ids_txt, false).unwrap());
+        assert_eq!(std::fs::read(&db_path).unwrap(), before);
+
+        let db = SearchDb::open(&db_path, &dir).unwrap();
+        let found = db.han_chars("森の林檎").unwrap();
+        assert_eq!(
+            found.iter().map(|c| c.ch.as_str()).collect::<Vec<_>>(),
+            ["森", "林", "檎"]
+        );
+        let mori = &found[0];
+        assert_eq!(mori.ids[0].ids, "⿱木林");
+        assert_eq!(mori.components, ["木", "林"]);
+        let mut all = mori.all_components.clone();
+        all.sort();
+        assert_eq!(all, ["木", "林"]);
+        assert_eq!(mori.uses, 1);
+        assert_eq!(mori.entries.len(), 1);
+        assert_eq!(mori.entries[0].kunyomi, "もり");
+        assert_eq!(mori.entries[0].lang.as_deref(), Some("ja-JP"));
+        let hayashi = &found[1];
+        assert_eq!(hayashi.uses, 2);
+        assert_eq!(hayashi.entries[0].meanings, ["grove", "forest"]);
+        assert_eq!(
+            hayashi.entries[0].stats,
+            [
+                ("freq".to_string(), "1000".to_string()),
+                ("strokes".to_string(), "8".to_string())
+            ]
+        );
+        assert_eq!(hayashi.entries[0].tag_meta["strokes"].notes, "Stroke count");
+        assert_eq!(hayashi.entries[0].tag_meta["jouyou"].category, "frequent");
+        // neither in ids.txt nor in a kanji dictionary
+        assert!(found[2].ids.is_empty() && found[2].entries.is_empty());
+
+        let regions = &db.han_chars("可").unwrap()[0].ids;
+        assert_eq!(regions[1].regions, "J");
+
+        // the most used first, then by code point
+        assert_eq!(
+            chars(db.han_containing("木", None, None).unwrap()),
+            ["林", "森", "呆", "李", "杏"]
+        );
+        assert_eq!(
+            chars(db.han_containing("木口", None, None).unwrap()),
+            ["呆", "杏"]
+        );
+        // through 可; ⼝ is the Kangxi radical
+        assert_eq!(
+            chars(db.han_containing("⼝", None, None).unwrap()),
+            ["河", "可", "呆", "杏"]
+        );
+        // 河 is written with 氵
+        assert_eq!(chars(db.han_containing("水", None, None).unwrap()), ["河"]);
+        let page = db.han_containing("木", Some(2), Some(2)).unwrap();
+        assert_eq!(chars(page), ["呆", "李"]);
+        assert_eq!(
+            db.han_containing("木", Some(2), Some(2)).unwrap().next,
+            Some(4)
+        );
+        assert!(
+            db.han_containing("か", None, None)
+                .unwrap()
+                .items
+                .is_empty()
+        );
+
+        #[cfg(feature = "hangul-readings")]
+        assert!(
+            db.han_chars("李").unwrap()[0]
+                .hangul
+                .contains(&"리".to_string())
+        );
+
+        drop(db);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A search.db from before kanji_link gets the kanji entries of the dictionaries it has
+    /// on its next update; one without the character tables still searches.
+    #[tokio::test]
+    async fn an_older_search_db_gets_kanji_entries() {
+        let dir = temp_dir("han-backfill");
+        let db_path = dir.join("search.db");
+        write_kanji_zip(&dir.join("kanji.zip"));
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute_batch(SCHEMA).unwrap();
+            conn.execute(
+                "INSERT INTO dict (name, title, L1) VALUES ('kanji', 'Kanji', 'ja-JP')",
+                [],
+            )
+            .unwrap();
+        }
+        let db = SearchDb::open(&db_path, &dir).unwrap();
+        assert!(db.han_chars("林").unwrap()[0].entries.is_empty());
+        assert!(
+            db.han_containing("木", None, None)
+                .unwrap()
+                .items
+                .is_empty()
+        );
+        drop(db);
+
+        let tok = TokenizerMapper::new(dir.clone());
+        build_incremental(&db_path, &[], &[], &tok, |_, _, _| {})
+            .await
+            .unwrap();
+        let db = SearchDb::open(&db_path, &dir).unwrap();
+        let found = db.han_chars("林森").unwrap();
+        assert_eq!(found[0].entries[0].onyomi, "リン");
+        assert_eq!(found[1].entries[0].onyomi, "シン");
+        drop(db);
+
+        // removing the dictionary removes its entries
+        build_incremental(&db_path, &[], &["kanji".to_string()], &tok, |_, _, _| {})
+            .await
+            .unwrap();
+        let conn = Connection::open(&db_path).unwrap();
+        let n: i64 = conn
+            .query_row("SELECT count(*) FROM kanji_link", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0);
+        drop(conn);
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

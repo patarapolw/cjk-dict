@@ -7,6 +7,11 @@ const routes = [
     component: () => import("./views/DictionaryView.vue"),
     name: "Dictionary",
   },
+  {
+    path: "/kanji",
+    component: () => import("./views/CharacterView.vue"),
+    name: "Characters",
+  },
 ];
 
 export const router = createRouter({

@@ -413,42 +413,51 @@ impl YomitanZip {
     }
 }
 
-/// Term banks are cut to about this much JSON by [`rebank`].
+/// Term and kanji banks are cut to about this much JSON by [`rebank`].
 pub const TERM_BANK_BYTES: usize = 256 << 10;
 
-/// Rewrite `src` into `dst` with its term banks re-split into `term_bank_N.json` files of
-/// about `max_bytes` each. Deflate has no random access, so reading one entry inflates its
-/// whole bank; published dictionaries often use 3-30 MB banks.
+/// Rewrite `src` into `dst` with its term banks, and kanji banks, re-split into
+/// `term_bank_N.json` / `kanji_bank_N.json` files of about `max_bytes` each. Deflate has no
+/// random access, so reading one entry inflates its whole bank; published dictionaries often
+/// use 3-30 MB banks.
 ///
 /// Rows keep their order and their exact JSON; every other file is copied as is (still
 /// compressed). The output is deterministic, so rebuilding does not change its checksum.
 ///
-/// Returns `false`, writing nothing, when the term banks are already small on average.
+/// Returns `false`, writing nothing, when the banks are already small on average.
 pub fn rebank(src: &Path, dst: &Path, max_bytes: usize) -> Result<bool, YomitanError> {
     use std::io::Write;
     use zip::{CompressionMethod, DateTime, ZipWriter, write::SimpleFileOptions};
 
+    const KINDS: [(BankKind, &str); 2] = [(BankKind::Term, "term"), (BankKind::Kanji, "kanji")];
+
     let mut z = YomitanZip::open(src)?;
-    let terms: Vec<BankFile> = z
-        .banks()
-        .into_iter()
-        .filter(|b| b.kind == BankKind::Term)
-        .collect();
-    if terms.is_empty() {
-        return Ok(false);
+    let all = z.banks();
+    let mut split: Vec<(&str, Vec<BankFile>)> = vec![];
+    for (kind, prefix) in KINDS {
+        let banks: Vec<BankFile> = all.iter().filter(|b| b.kind == kind).cloned().collect();
+        if banks.is_empty() {
+            continue;
+        }
+        let mut total = 0u64;
+        for b in &banks {
+            total += z.archive.by_name(&b.name)?.size();
+        }
+        if total / banks.len() as u64 > max_bytes as u64 {
+            split.push((prefix, banks));
+        }
     }
-    let mut total = 0u64;
-    for b in &terms {
-        total += z.archive.by_name(&b.name)?.size();
-    }
-    if total / terms.len() as u64 <= max_bytes as u64 {
+    if split.is_empty() {
         return Ok(false);
     }
 
     let mut w = ZipWriter::new(std::io::BufWriter::new(File::create(dst)?));
     for i in 0..z.archive.len() {
         let f = z.archive.by_index_raw(i)?;
-        if terms.iter().any(|b| b.name == f.name()) {
+        if split
+            .iter()
+            .any(|(_, banks)| banks.iter().any(|b| b.name == f.name()))
+        {
             continue;
         }
         w.raw_copy_file(f)?;
@@ -457,35 +466,37 @@ pub fn rebank(src: &Path, dst: &Path, max_bytes: usize) -> Result<bool, YomitanE
     let opts = SimpleFileOptions::default()
         .compression_method(CompressionMethod::Deflated)
         .last_modified_time(DateTime::DEFAULT);
-    let mut n = 0;
-    let mut chunk: Vec<u8> = Vec::with_capacity(max_bytes + 1024);
-    let mut flush = |w: &mut ZipWriter<_>, chunk: &mut Vec<u8>| -> Result<(), YomitanError> {
-        if chunk.is_empty() {
-            return Ok(());
-        }
-        n += 1;
-        w.start_file(format!("term_bank_{n}.json"), opts)?;
-        w.write_all(b"[")?;
-        w.write_all(chunk)?;
-        w.write_all(b"]")?;
-        chunk.clear();
-        Ok(())
-    };
-    for b in &terms {
-        let text = z.read_to_string(&b.name)?;
-        let rows: Vec<&serde_json::value::RawValue> = serde_json::from_str(&text)?;
-        for row in rows {
-            let row = row.get().as_bytes();
-            if !chunk.is_empty() && chunk.len() + 1 + row.len() > max_bytes {
-                flush(&mut w, &mut chunk)?;
+    for (prefix, banks) in &split {
+        let mut n = 0;
+        let mut chunk: Vec<u8> = Vec::with_capacity(max_bytes + 1024);
+        let mut flush = |w: &mut ZipWriter<_>, chunk: &mut Vec<u8>| -> Result<(), YomitanError> {
+            if chunk.is_empty() {
+                return Ok(());
             }
-            if !chunk.is_empty() {
-                chunk.push(b',');
+            n += 1;
+            w.start_file(format!("{prefix}_bank_{n}.json"), opts)?;
+            w.write_all(b"[")?;
+            w.write_all(chunk)?;
+            w.write_all(b"]")?;
+            chunk.clear();
+            Ok(())
+        };
+        for b in banks {
+            let text = z.read_to_string(&b.name)?;
+            let rows: Vec<&serde_json::value::RawValue> = serde_json::from_str(&text)?;
+            for row in rows {
+                let row = row.get().as_bytes();
+                if !chunk.is_empty() && chunk.len() + 1 + row.len() > max_bytes {
+                    flush(&mut w, &mut chunk)?;
+                }
+                if !chunk.is_empty() {
+                    chunk.push(b',');
+                }
+                chunk.extend_from_slice(row);
             }
-            chunk.extend_from_slice(row);
         }
+        flush(&mut w, &mut chunk)?;
     }
-    flush(&mut w, &mut chunk)?;
     w.finish()?.flush()?;
     Ok(true)
 }
@@ -522,5 +533,49 @@ mod tests {
 
         drop(z);
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn rebank_splits_kanji_banks_too() {
+        let dir = std::env::temp_dir();
+        let src = dir.join(format!("yomitan-parser-rebank-{}.zip", std::process::id()));
+        let dst = dir.join(format!(
+            "yomitan-parser-rebank-{}.out.zip",
+            std::process::id()
+        ));
+        let rows: Vec<String> = (0..40)
+            .map(|i| {
+                format!(
+                    r#"["{}","オン","くん","",["meaning {i}"],{{}}]"#,
+                    char::from_u32(0x4E00 + i).unwrap()
+                )
+            })
+            .collect();
+        {
+            let mut w = ZipWriter::new(File::create(&src).unwrap());
+            w.start_file("index.json", SimpleFileOptions::default())
+                .unwrap();
+            w.write_all(br#"{"title":"K","revision":"1"}"#).unwrap();
+            w.start_file("kanji_bank_1.json", SimpleFileOptions::default())
+                .unwrap();
+            w.write_all(format!("[{}]", rows.join(",")).as_bytes())
+                .unwrap();
+            w.finish().unwrap();
+        }
+        assert!(rebank(&src, &dst, 400).unwrap());
+        let mut z = YomitanZip::open(&dst).unwrap();
+        let banks = z.banks();
+        assert!(banks.len() > 1);
+        assert!(banks.iter().all(|b| b.kind == BankKind::Kanji));
+        let mut n = 0;
+        for b in &banks {
+            n += z.read_bank(b).unwrap().len();
+        }
+        assert_eq!(n, 40);
+        // already small
+        assert!(!rebank(&dst, &src.with_extension("again.zip"), 400).unwrap());
+        drop(z);
+        let _ = std::fs::remove_file(&src);
+        let _ = std::fs::remove_file(&dst);
     }
 }

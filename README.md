@@ -33,7 +33,8 @@ The app is currently set up for personal use. A public release would need change
 library/
   <name>.zip      Yomitan zips, rebanked (default + custom dictionaries)
   dicts.json      [{ name, lang?, source? }]: build order and language overrides
-  search.db       written by `build`: terms, tokens, readings, tags, and where each entry is in its zip
+  search.db       written by `build`: terms, tokens, readings, tags, and where each entry is in its zip;
+                  character decomposition, and where each kanji entry is
   manifest.json   written by `build`: file sizes and sha256; the app compares these to download only what changed
 ```
 
@@ -59,8 +60,9 @@ pnpm admin upload --remote r2:cjk-dict     # rclone; or set CJK_DICT_REMOTE
 ```
 
 - **`add`** copies or downloads the zip into the library as `<name>.zip`, after checking that it is a Yomitan dictionary. `--lang` overrides the zip's `sourceLanguage`.
-- **Default dictionaries** (the list the app used to download itself): Pixiv, `ja`/`zh`/`ko.Wikipedia` (MarvNC), CC-CEDICT, KO-EN.KRDICT, and `wty-ja-en`/`wty-ko-en`/`wty-zh-en` (Wiktionary). GitHub-hosted ones resolve to the asset of the repo's latest release. Set `GITHUB_TOKEN` if you hit the API's unauthenticated rate limit.
-- **`build`** updates `search.db` incrementally: it indexes new or changed dictionaries and removes deleted ones. It hashes the zips against the previous manifest to detect replacements. **`rebuild`** discards the current index and rebuilds it from scratch. Only terms are indexed; definitions, term/kanji meta and media stay in the zips. The lindera tokenizer dictionaries are downloaded to `tmp/lindera` when indexing is needed (`--lindera-dir`, `CJK_DICT_LINDERA_DIR`).
+- **Default dictionaries** (the list the app used to download itself): KANJIDIC (kanji), Pixiv, `ja`/`zh`/`ko.Wikipedia` (MarvNC), CC-CEDICT, KO-EN.KRDICT, and `wty-ja-en`/`wty-ko-en`/`wty-zh-en` (Wiktionary). GitHub-hosted ones resolve to the asset of the repo's latest release. Set `GITHUB_TOKEN` if you hit the API's unauthenticated rate limit.
+- **`build`** updates `search.db` incrementally: it indexes new or changed dictionaries and removes deleted ones. It hashes the zips against the previous manifest to detect replacements. **`rebuild`** discards the current index and rebuilds it from scratch. Only terms, and where kanji entries are, are indexed; definitions, term/kanji meta and media stay in the zips. The lindera tokenizer dictionaries are downloaded to `tmp/lindera` when indexing is needed (`--lindera-dir`, `CJK_DICT_LINDERA_DIR`).
+- **Characters**: `build` also indexes dictionaries' kanji banks (single characters only; e.g. KANJIDIC, or the Hanzi edition of CC-CEDICT, which also has whole words there) and fills `search.db`'s character tables from the [CJKVI IDS database](https://github.com/cjkvi/cjkvi-ids)'s `ids.txt`: how each character breaks down into components, which characters each component is in, its Hangul readings (from hanja_hangul), and how many terms use it. `ids.txt` is downloaded to `tmp/cjkvi-ids` (`--ids-dir`, `CJK_DICT_IDS_DIR`); delete it to get the latest. The tables are refilled only when `ids.txt` or the dictionaries change, so an unchanged library keeps the same `search.db`. `add` rejects a zip with neither term nor kanji entries, e.g. a broken release.
 - **`size`** estimates the whole library's R2 mirror size, grouping dictionary ZIPs by language and counting shared files once. `--lang` filters the ZIP breakdown only; it does not change what `upload` sends. Run it after `build`; removing dictionaries and rebuilding lets you compare the updated storage estimate.
 - **`upload`** refuses a stale build. It copies the zips first, then `search.db`, then `manifest.json`, so the app never sees a manifest pointing at missing files. Then it deletes from R2 what was removed from the library. Behind a TLS-intercepting proxy, set `SSL_CERT_FILE`.
 
@@ -105,7 +107,8 @@ On start, the app compares the remote `manifest.json` with its own copy and down
 - Search modes: prefix (default), `=` exact, and `~` token search. `~` needs the tokenizer; until it has downloaded, `~` is disabled and falls back to prefix search.
 - One search box. Readings use furigana syntax: `<日本>{にほん}語` matches 日本語 read にほん…, and `{reading}` alone searches by reading (`{zhong1 guo2}`; pinyin is expanded to all tones).
 - A space marks a word boundary: only the first word is looked up, and "Next" moves on to the rest. When nothing matches a longer text (e.g. a copied sentence), it is split into words with the tokenizer.
-- Each result links to an exact search for itself, `~` words containing it, and words with the same reading. In-dictionary links and the back button keep a search history.
+- Each result links to an exact search for itself, `~` words containing it, words with the same reading, and its characters. In-dictionary links and the back button keep a search history.
+- **Characters** (`#/kanji?q=<characters>`): for each Han character, how it breaks down (each IDS, by region: the one for the search language first), every component all the way down, its kanji dictionary entries (readings, meanings, and stats with the dictionary's own notes), Hangul readings, and its single-character word entries. Components link to their own page. Below, the characters made of all the typed characters, the most used first: `木口` lists 呆, 杏, ... A radical also matches the forms it takes as a component (水 finds 河, written with 氵), and Kangxi radicals (`⼝`) are read as the ideograph.
 - The search language (header) is the only setting; it is remembered per device.
 - The app follows the device's light or dark color-scheme preference.
 - Korean: with Korean selected, typing Revised Romanization finds Hangul (`hangugeo`, `hangukeo` or `hangug-eo` → 한국어). Terms are romanized at search time, both as pronounced (국물 → gungmul, 신라 → silla) and letter by letter (gukmul), and loose spellings match: `eo`/`o`, `eu`/`u`, `ae`/`e`, `k`/`g`, `t`/`d`, `p`/`b`, `r`/`l`. `search.db` keeps these romanization keys in `term_roman`, so each keystroke is an index lookup; `dict-admin build` adds the table to an existing `search.db`. A `search.db` built before that still works, more slowly, by romanizing the terms as it searches.
@@ -117,4 +120,4 @@ On start, the app compares the remote `manifest.json` with its own copy and down
 
 ## License
 
-The code is under the [MIT License](LICENSE). Dictionaries, and data built from them such as `search.db`, keep their own licenses. So do the downloaded tokenizer dictionaries and [hanja_hangul](https://crates.io/crates/hanja_hangul)'s word tables, which `dict-admin` includes.
+The code is under the [MIT License](LICENSE). Dictionaries, and data built from them such as `search.db`, keep their own licenses. So do the downloaded tokenizer dictionaries, [hanja_hangul](https://crates.io/crates/hanja_hangul)'s word tables, which `dict-admin` includes, and the [CJKVI IDS database](https://github.com/cjkvi/cjkvi-ids)'s `ids.txt` (derived from the CHISE project, GPLv2), which `search.db` includes.

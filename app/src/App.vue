@@ -2,6 +2,10 @@
   <div class="layout">
     <header class="header">
       <span class="header-title">CJK Dictionary</span>
+      <nav class="header-nav" aria-label="Views">
+        <RouterLink to="/dictionary">Words</RouterLink>
+        <RouterLink to="/kanji">Characters</RouterLink>
+      </nav>
       <select v-model="lang" aria-label="Search language">
         <option
           v-for="option in langSelectOptions"
@@ -307,6 +311,25 @@ async function loadAll() {
 
 .header-title {
   flex-grow: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.header-nav {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.header-nav a {
+  color: var(--app-link);
+  text-decoration: none;
+}
+
+.header-nav a.router-link-active {
+  color: var(--app-text);
+  font-weight: 600;
 }
 
 .header select {
