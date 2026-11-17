@@ -26,9 +26,11 @@ const HAN: Record<string, IHanChar> = {
         meanings: ["grove", "forest"],
         stats: [
           ["freq", "1000"],
+          ["pinyin", "lín"],
           ["strokes", "8"],
         ],
         tag_meta: {
+          pinyin: { category: "reading", order: 0, notes: "Pinyin" },
           jouyou: { category: "frequent", order: 0, notes: "regular-use" },
           strokes: { category: "misc", order: -1, notes: "Stroke count" },
           freq: { category: "misc", order: 0, notes: "Frequency" },
@@ -108,7 +110,10 @@ describe("CharacterView", () => {
       "grove",
       "forest",
     ]);
-    // by the tag bank's order
+    // other languages' readings go with the readings
+    expect(card.get(".readings").text()).toContain("Pinyin");
+    expect(card.get(".readings").text()).toContain("lín");
+    // the rest by the tag bank's order
     expect(card.findAll(".stats th").map((th) => th.text())).toEqual([
       "Stroke count",
       "Frequency",

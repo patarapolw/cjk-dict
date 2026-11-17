@@ -9,6 +9,7 @@
 mod defaults;
 mod download;
 mod ids;
+mod kanjidic;
 mod library;
 mod lindera;
 
@@ -60,7 +61,8 @@ enum Cmd {
         lang: Option<String>,
     },
 
-    /// Add a Yomitan dictionary zip (local path or http(s) URL) to the library
+    /// Add a Yomitan dictionary zip (local path or http(s) URL) to the library. KANJIDIC2
+    /// JSON from jmdict-simplified (or a zip of it) is converted to one.
     Add {
         source: String,
 
@@ -282,6 +284,20 @@ fn add(
         download::to_file(source, &tmp)?;
     } else {
         std::fs::copy(source, &tmp).with_context(|| format!("copying {source}"))?;
+    }
+    // KANJIDIC2 (jmdict-simplified JSON): converted to a Yomitan kanji dictionary
+    if kanjidic::is_kanjidic(&tmp) {
+        let converted = lib.dir.join(format!(".{name}.zip.converted"));
+        let done = kanjidic::convert(&tmp, &converted)
+            .and_then(|n| Ok(std::fs::rename(&converted, &tmp).map(|_| n)?));
+        match done {
+            Ok(n) => eprintln!("converted KANJIDIC2 JSON: {n} characters"),
+            Err(e) => {
+                let _ = std::fs::remove_file(&converted);
+                let _ = std::fs::remove_file(&tmp);
+                return Err(e);
+            }
+        }
     }
     let index = YomitanZip::open(&tmp)
         .and_then(|mut z| Ok((z.index()?, z.banks())))

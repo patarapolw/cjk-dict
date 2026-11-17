@@ -165,11 +165,16 @@
               <dt>{{ isJa(e) ? "Kun" : "Reading" }}</dt>
               <dd :lang="e.lang || undefined">{{ readings(e.kunyomi) }}</dd>
             </template>
+            <!-- other languages' readings, e.g. KANJIDIC's pinyin and Korean -->
+            <template v-for="[name, value] in readingStats(e)" :key="name">
+              <dt :title="name">{{ e.tag_meta[name].notes || name }}</dt>
+              <dd :lang="STAT_LANGS[name]">{{ value }}</dd>
+            </template>
           </dl>
           <ol v-if="e.meanings.length" class="meanings">
             <li v-for="(m, j) in e.meanings" :key="j">{{ m }}</li>
           </ol>
-          <details v-if="e.stats.length" class="stats">
+          <details v-if="sortedStats(e).length" class="stats">
             <summary>Details</summary>
             <table>
               <tr v-for="[name, value] in sortedStats(e)" :key="name">
@@ -402,13 +407,38 @@ function regionTitle(regions: string) {
   return [...regions].map((r) => REGION_NAMES[r] ?? r).join(", ");
 }
 
+/** stats of the "reading" category of the dictionary's tags */
+const isReading = (e: IKanjiEntry, name: string) =>
+  e.tag_meta[name]?.category === "reading";
+
+/** languages of KANJIDIC's reading stats */
+const STAT_LANGS: Record<string, string> = {
+  pinyin: "zh",
+  korean_h: "ko",
+  korean_r: "ko-Latn",
+  vietnam: "vi",
+  nanori: "ja",
+};
+
 /** by the tag bank's sort order, then name */
-function sortedStats(e: IKanjiEntry) {
+function byOrder(e: IKanjiEntry, stats: [string, string][]) {
   const order = (name: string) => e.tag_meta[name]?.order ?? 0;
-  return [...e.stats].sort(
+  return [...stats].sort(
     ([a], [b]) => order(a) - order(b) || a.localeCompare(b),
   );
 }
+
+const readingStats = (e: IKanjiEntry) =>
+  byOrder(
+    e,
+    e.stats.filter(([name]) => isReading(e, name)),
+  );
+
+const sortedStats = (e: IKanjiEntry) =>
+  byOrder(
+    e,
+    e.stats.filter(([name]) => !isReading(e, name)),
+  );
 
 let removeRouterListener: (() => void) | undefined;
 
