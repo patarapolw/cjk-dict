@@ -18,7 +18,7 @@ use tauri_plugin_http::reqwest;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager, State};
-use yomitan_parser::search::{SearchDb, SearchRequest, SearchResult};
+use yomitan_parser::search::{HanChar, HanList, SearchDb, SearchRequest, SearchResult};
 
 use crate::error::AppError;
 
@@ -437,6 +437,34 @@ pub async fn search(
 ) -> Result<SearchResult, AppError> {
     let db = state.get()?;
     tauri::async_runtime::spawn_blocking(move || db.search(&req))
+        .await
+        .map_err(|e| AppError::Error(e.to_string()))?
+        .map_err(AppError::from)
+}
+
+/// The Han characters of `text`: how each breaks down, and its kanji dictionary entries.
+#[tauri::command]
+pub async fn han_chars(
+    state: State<'_, DictState>,
+    text: String,
+) -> Result<Vec<HanChar>, AppError> {
+    let db = state.get()?;
+    tauri::async_runtime::spawn_blocking(move || db.han_chars(&text))
+        .await
+        .map_err(|e| AppError::Error(e.to_string()))?
+        .map_err(AppError::from)
+}
+
+/// Characters made of all the characters of `components`, the most used first.
+#[tauri::command]
+pub async fn han_containing(
+    state: State<'_, DictState>,
+    components: String,
+    limit: Option<u32>,
+    offset: Option<u32>,
+) -> Result<HanList, AppError> {
+    let db = state.get()?;
+    tauri::async_runtime::spawn_blocking(move || db.han_containing(&components, limit, offset))
         .await
         .map_err(|e| AppError::Error(e.to_string()))?
         .map_err(AppError::from)

@@ -175,8 +175,8 @@ where
         if total == Some(existing_size) {
             tokio::fs::rename(&temp_pf, &file_pf).await?;
             println!(
-                "File downloaded {} MB to {:?}",
-                existing_size >> 20,
+                "File downloaded {} to {:?}",
+                megabytes(existing_size),
                 &file_pf
             );
             return Ok(true);
@@ -233,7 +233,26 @@ where
 
     tokio::fs::rename(&temp_pf, &file_pf).await?;
 
-    println!("File downloaded {} MB to {:?}", downloaded >> 20, &file_pf);
+    println!(
+        "File downloaded {} to {:?}",
+        megabytes(downloaded),
+        &file_pf
+    );
 
     Ok(true)
+}
+
+/// `0.9 MB`: as dict-admin reports sizes. Whole MiB (`bytes >> 20`) show a small dictionary,
+/// e.g. KANJIDIC, as 0 MB.
+fn megabytes(bytes: u64) -> String {
+    format!("{:.1} MB", bytes as f64 / 1e6)
+}
+
+#[cfg(test)]
+mod megabytes_tests {
+    #[test]
+    fn small_files_are_not_zero() {
+        assert_eq!(super::megabytes(933_572), "0.9 MB");
+        assert_eq!(super::megabytes(16_200_000), "16.2 MB");
+    }
 }

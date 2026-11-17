@@ -3,12 +3,19 @@ import { toHiragana } from "wanakana";
 /**
  * Furigana syntax in the search box: `<日本>{にほん}語` searches the term 日本語 whose reading
  * starts with にほん. `{reading}` alone searches by reading only, e.g. `{ni3 hao3}`.
+ *
+ * Wildcards (SQLite GLOB): `*` any characters, `?` one character, in the term and in a
+ * term's reading (`<日>{に?}本`); `[...]` / `[^...]` one of / none of these characters, in
+ * the term (`[日月]曜日`). Not in a reading alone, nor in an exact (`=`) or token (`~`)
+ * search. `*<興>{キョウ}` with one character is not a pattern but the words with 興 read
+ * キョウ anywhere in them (`ch`, `chReading`).
  */
 
 const KANA = /^[\p{scx=Hiragana}\p{scx=Katakana}ー]+$/u;
 /** spells its own reading outside `<>{}`: kana, and Hangul (`<光>{광}나다`) */
 const SELF_READING = /^[\p{scx=Hiragana}\p{scx=Katakana}ー\p{sc=Hangul}]+$/u;
 const KANA_OR_WILDCARD = /^[\p{scx=Hiragana}\p{scx=Katakana}ー*?]+$/u;
+const HANGUL_OR_WILDCARD = /^[\p{sc=Hangul}*?]+$/u;
 /** a run of characters whose reading the IME (or the dictionary) supplies */
 const KANJI_RUN = /([\p{sc=Han}\p{N}々〆ヵヶ]+)/u;
 
@@ -23,11 +30,21 @@ export interface ParsedQuery {
   readingGlob: string;
   /** text after the first space: the query was split at a word boundary */
   rest: string;
+  /**
+   * `*<興>{キョウ}`: the words with the character 興 read キョウ anywhere in them, by the
+   * index of characters' readings. Empty for any other query.
+   */
+  ch?: string;
+  chReading?: string;
 }
 
-/** full-width brackets, as typed with a Japanese IME */
+/** one Han character, with a variation selector */
+const ONE_HAN =
+  /^[\p{sc=Han}\u2E80-\u2FDF\u31C0-\u31EF][\uFE00-\uFE0F\u{E0100}-\u{E01EF}]?$/u;
+
+/** full-width brackets and wildcards, as typed with a Japanese IME */
 export function normalizeQuery(q: string): string {
-  return q.replace(/[＜＞｛｝]/g, (c) =>
+  return q.replace(/[＜＞｛｝＊？［］＾]/g, (c) =>
     String.fromCharCode(c.charCodeAt(0) - 0xfee0),
   );
 }
@@ -47,6 +64,16 @@ function splitFirstWord(q: string): [string, string] {
 }
 
 export function parseQuery(raw: string): ParsedQuery {
+  const parsed = parseWord(raw);
+  const [first] = splitFirstWord(normalizeQuery(raw).trim());
+  const m = /^\*<([^<>{}]+)>\{([^{}*?]+)\}\*?$/u.exec(first);
+  if (m && ONE_HAN.test(m[1]) && m[2].trim()) {
+    return { ...parsed, ch: m[1], chReading: m[2].trim() };
+  }
+  return parsed;
+}
+
+function parseWord(raw: string): ParsedQuery {
   const [first, rest] = splitFirstWord(normalizeQuery(raw).trim());
 
   let term = "";
@@ -74,7 +101,13 @@ export function parseQuery(raw: string): ParsedQuery {
   if (!hasReading || !reading.replace(/[*?\s]/g, "")) {
     return { term, reading: "", readingGlob: "", rest };
   }
-  if (term && KANA_OR_WILDCARD.test(reading)) {
+  // a Hangul reading is matched as reading tokens (whole words), unless a wildcard puts it
+  // elsewhere in the word: `*<興>{흥}` finds 復興 (부흥)
+  if (
+    term &&
+    (KANA_OR_WILDCARD.test(reading) ||
+      (/[*?]/u.test(reading) && HANGUL_OR_WILDCARD.test(reading)))
+  ) {
     return { term, reading: "", readingGlob: reading, rest };
   }
   return {

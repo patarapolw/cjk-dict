@@ -66,7 +66,11 @@
       </div>
       <p class="search-hint">
         <!-- what the query is understood as, so the syntax and modes explain themselves -->
-        <template v-if="parsed.term || hintReading">
+        <template v-if="charReading">
+          Searching words with <code>{{ charReading.ch }}</code> read
+          <code>{{ charReading.reading }}</code>
+        </template>
+        <template v-else-if="parsed.term || hintReading">
           Searching
           <code v-if="parsed.term">{{ parsed.term }}</code>
           <template v-if="hintReading">
@@ -170,6 +174,15 @@
             >
               {{ braced(headReading(it)) }}
             </button>
+            <button
+              v-if="hanChars(headTerm(it)).length"
+              type="button"
+              class="link-button"
+              title="Its characters: components, readings and meanings"
+              @click="toCharacters(headTerm(it))"
+            >
+              字 {{ hanChars(headTerm(it)).join("") }}
+            </button>
           </div>
           <Term
             v-for="(ent, j) in it.entries"
@@ -183,6 +196,17 @@
           />
         </div>
       </section>
+      <!-- results load as the list scrolls near its end; a list too short to scroll, e.g.
+           with every result collapsed, needs a way to ask too -->
+      <button
+        v-if="items.length && nextOffset !== null"
+        type="button"
+        class="more-button"
+        :disabled="loading"
+        @click="loadMore()"
+      >
+        More results
+      </button>
     </div>
   </main>
 </template>
@@ -210,6 +234,7 @@ import {
   parseQuery,
   toFurigana,
 } from "../util/furigana";
+import { hanChars } from "../util/han";
 import { dictsVersion, toBeLoaded } from "../util/loading";
 import { lang } from "../util/settings";
 
@@ -248,10 +273,13 @@ function toggleQueryState(value: string) {
   qState.value = qState.value === value ? null : value;
 }
 
-function toggleItem(id: number) {
+async function toggleItem(id: number) {
   openedItems.value = openedItems.value.includes(id)
     ? openedItems.value.filter((itemId) => itemId !== id)
     : [...openedItems.value, id];
+  // collapsing can leave the list too short to scroll, so that onScroll never asks for more
+  await nextTick();
+  onScroll();
 }
 
 const isJapanese = computed(() => ["", "ja-JP"].includes(lang.value));
@@ -271,6 +299,13 @@ const romanizedQuery = computed(
 );
 
 /** the parsed reading, e.g. `にほん*` (`*`: the rest of the reading is unknown) */
+/** `*<興>{キョウ}`: words with 興 read キョウ, by the index of characters' readings */
+const charReading = computed(() =>
+  parsed.value.ch && parsed.value.chReading && !qState.value
+    ? { ch: parsed.value.ch, reading: parsed.value.chReading }
+    : null,
+);
+
 const hintReading = computed(
   () => parsed.value.reading || parsed.value.readingGlob,
 );
@@ -341,6 +376,12 @@ async function searchFor(query: string, state: string | null = qState.value) {
   readingMode.value = false;
   q.value = query;
   await setRouteQuery();
+}
+
+/** The characters view, keeping the current search in the history (back button). */
+async function toCharacters(term: string) {
+  await setRouteQuery();
+  await router.push({ path: "/kanji", query: { q: hanChars(term).join("") } });
 }
 
 function searchNext() {
@@ -509,6 +550,8 @@ async function loadMore(isNew?: boolean) {
         reading,
         readingGlob,
         romanized,
+        ch: charReading.value?.ch,
+        chReading: charReading.value?.reading,
         limit: 5,
         offset,
         type,
@@ -647,16 +690,26 @@ function toggleClipboardMonitor() {
 
 const routerListener = ref<() => void>();
 
+/** a taller window, or a rotated phone, can leave room for more results too */
+let resizeObserver: ResizeObserver | undefined;
+
 onMounted(() => {
   loadFromRouteQuery();
 
-  routerListener.value = router.afterEach(() => {
-    loadFromRouteQuery();
+  if (typeof ResizeObserver !== "undefined" && elScroller.value) {
+    resizeObserver = new ResizeObserver(() => onScroll());
+    resizeObserver.observe(elScroller.value);
+  }
+
+  routerListener.value = router.afterEach((to) => {
+    // not the query of another view being navigated to
+    if (to.path === "/dictionary") loadFromRouteQuery();
   });
 });
 
 onBeforeUnmount(() => {
   clearTimeout(searchTimer);
+  resizeObserver?.disconnect();
   if (clipboardInterval.value) {
     clearInterval(clipboardInterval.value);
     clipboardInterval.value = 0;
@@ -774,6 +827,23 @@ onBeforeUnmount(() => {
 .no-results {
   padding: 0.5rem;
   color: var(--app-text-muted);
+}
+
+.more-button {
+  display: block;
+  margin: 0.75rem auto;
+  padding: 0.25rem 1rem;
+  border: 1px solid var(--app-input-border);
+  border-radius: 0.25rem;
+  background: var(--app-control-background);
+  color: var(--app-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.more-button:disabled {
+  cursor: progress;
+  opacity: 0.55;
 }
 
 .link-button {

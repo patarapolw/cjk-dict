@@ -1,7 +1,7 @@
 //! Default dictionaries (ported from cjk-explainer's old `src/util/dicts.ts`).
 //!
 //! GitHub sources resolve to the matching asset of the repo's latest release;
-//! the wty dictionaries have fixed URLs.
+//! the wty dictionaries have fixed URLs. KANJIDIC comes as JSON, which `add` converts.
 
 use anyhow::{Context, Result, bail};
 use regex::Regex;
@@ -15,6 +15,18 @@ struct GhSource {
 }
 
 const GITHUB: &[(&str, &[GhSource])] = &[
+    (
+        // KANJIDIC2 (EDRDG, part of the JMdict project) as JSON; `add` converts it to a
+        // Yomitan kanji dictionary. Kanji: readings (also Chinese, Korean and Vietnamese),
+        // meanings, stroke counts, grades, ...
+        "scriptin/jmdict-simplified",
+        &[GhSource {
+            name: "KANJIDIC",
+            pattern: r"^kanjidic2-en-.+\.json\.zip$",
+            // Japanese, Chinese and Korean readings alike
+            lang: None,
+        }],
+    ),
     (
         "MarvNC/pixiv-yomitan",
         &[GhSource {
@@ -206,6 +218,11 @@ mod tests {
                 "ko.Wikipedia.2026-11-01.json",
             ),
             ("CC-CEDICT", "CC-CEDICT.zip", "CC-CEDICT.Hanzi.zip"),
+            (
+                "KANJIDIC",
+                "kanjidic2-en-3.6.2+20261116213322.json.zip",
+                "kanjidic2-all-3.6.2+20261116213322.json.zip",
+            ),
             ("KO-EN.KRDICT", "KO-EN.KRDICT.zip", "KO-KO.KRDICT.zip"),
         ];
         for (name, yes, no) in examples {
@@ -227,6 +244,6 @@ mod tests {
         assert_eq!(r[0].lang, Some("zh-CN"));
         assert!(r[0].url.ends_with("/dict/zh/en/wty-zh-en.zip"));
         assert!(resolve(&["Nope".to_string()]).is_err());
-        assert_eq!(names().len(), 9);
+        assert_eq!(names().len(), 10);
     }
 }

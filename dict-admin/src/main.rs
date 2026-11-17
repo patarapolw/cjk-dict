@@ -8,6 +8,8 @@
 
 mod defaults;
 mod download;
+mod ids;
+mod kanjidic;
 mod library;
 mod lindera;
 
@@ -21,7 +23,7 @@ use std::{
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use yomitan_parser::{
-    parser::{self, YomitanZip},
+    parser::{self, BankKind, YomitanZip},
     search::{self, DictSource, parse_lang},
     tokenize::TokenizerMapper,
 };
@@ -59,7 +61,8 @@ enum Cmd {
         lang: Option<String>,
     },
 
-    /// Add a Yomitan dictionary zip (local path or http(s) URL) to the library
+    /// Add a Yomitan dictionary zip (local path or http(s) URL) to the library. KANJIDIC2
+    /// JSON from jmdict-simplified (or a zip of it) is converted to one.
     Add {
         source: String,
 
@@ -99,6 +102,11 @@ enum Cmd {
         /// Lindera tokenizer dictionaries (downloaded if missing)
         #[arg(long, env = "CJK_DICT_LINDERA_DIR", default_value = "tmp/lindera")]
         lindera_dir: PathBuf,
+
+        /// Character decomposition data: the CJKVI IDS database's ids.txt (downloaded if
+        /// missing; delete it to update)
+        #[arg(long, env = "CJK_DICT_IDS_DIR", default_value = "tmp/cjkvi-ids")]
+        ids_dir: PathBuf,
     },
 
     /// Rebuild search.db and manifest.json from scratch
@@ -106,6 +114,11 @@ enum Cmd {
         /// Lindera tokenizer dictionaries (downloaded if missing)
         #[arg(long, env = "CJK_DICT_LINDERA_DIR", default_value = "tmp/lindera")]
         lindera_dir: PathBuf,
+
+        /// Character decomposition data: the CJKVI IDS database's ids.txt (downloaded if
+        /// missing; delete it to update)
+        #[arg(long, env = "CJK_DICT_IDS_DIR", default_value = "tmp/cjkvi-ids")]
+        ids_dir: PathBuf,
     },
 
     /// Mirror the library to R2 with rclone (zips first, then search.db, then manifest.json)
@@ -138,7 +151,7 @@ async fn main() -> Result<()> {
                 let terms = built
                     .as_ref()
                     .and_then(|m| m.dicts.iter().find(|x| x.name == d.name))
-                    .map(|x| format!("{} terms", x.term_count))
+                    .map(|x| x.counts())
                     .unwrap_or_else(|| "not built".into());
                 println!(
                     "{}\t{}\t{}\t{}\t{}",
@@ -209,8 +222,14 @@ async fn main() -> Result<()> {
             let _ = std::fs::remove_file(lib.zip_path(&name));
             eprintln!("removed {name}; run `build` and `upload` to publish");
         }
-        Cmd::Build { lindera_dir } => build(&lib, &lindera_dir, false).await?,
-        Cmd::Rebuild { lindera_dir } => build(&lib, &lindera_dir, true).await?,
+        Cmd::Build {
+            lindera_dir,
+            ids_dir,
+        } => build(&lib, &lindera_dir, &ids_dir, false).await?,
+        Cmd::Rebuild {
+            lindera_dir,
+            ids_dir,
+        } => build(&lib, &lindera_dir, &ids_dir, true).await?,
         Cmd::Upload { remote, dry_run } => upload(&lib, &remote, dry_run)?,
     }
 
@@ -266,9 +285,33 @@ fn add(
     } else {
         std::fs::copy(source, &tmp).with_context(|| format!("copying {source}"))?;
     }
+    // KANJIDIC2 (jmdict-simplified JSON): converted to a Yomitan kanji dictionary
+    if kanjidic::is_kanjidic(&tmp) {
+        let converted = lib.dir.join(format!(".{name}.zip.converted"));
+        let done = kanjidic::convert(&tmp, &converted)
+            .and_then(|n| Ok(std::fs::rename(&converted, &tmp).map(|_| n)?));
+        match done {
+            Ok(n) => eprintln!("converted KANJIDIC2 JSON: {n} characters"),
+            Err(e) => {
+                let _ = std::fs::remove_file(&converted);
+                let _ = std::fs::remove_file(&tmp);
+                return Err(e);
+            }
+        }
+    }
     let index = YomitanZip::open(&tmp)
-        .and_then(|mut z| z.index())
-        .with_context(|| format!("{source} is not a Yomitan dictionary zip"));
+        .and_then(|mut z| Ok((z.index()?, z.banks())))
+        .with_context(|| format!("{source} is not a Yomitan dictionary zip"))
+        .and_then(|(index, banks)| {
+            // e.g. a release whose conversion failed, with only index.json and tags
+            if !banks
+                .iter()
+                .any(|b| matches!(b.kind, BankKind::Term | BankKind::Kanji))
+            {
+                bail!("{source} has no term or kanji entries");
+            }
+            Ok(index)
+        });
     let index = match index {
         Ok(i) => i,
         Err(e) => {
@@ -311,7 +354,7 @@ fn rebank(zip: &Path, name: &str) -> Result<()> {
         Ok(true) => {
             std::fs::rename(&tmp, zip)?;
             eprintln!(
-                "{name}: split term banks into {} KB ones ({:.1}s)",
+                "{name}: split term and kanji banks into {} KB ones ({:.1}s)",
                 parser::TERM_BANK_BYTES >> 10,
                 t.elapsed().as_secs_f64()
             );
@@ -325,9 +368,17 @@ fn rebank(zip: &Path, name: &str) -> Result<()> {
     }
 }
 
-async fn build(lib: &Library, lindera_dir: &Path, rebuild: bool) -> Result<()> {
+async fn build(lib: &Library, lindera_dir: &Path, ids_dir: &Path, rebuild: bool) -> Result<()> {
     let dicts = lib.dicts()?;
     let db = lib.dir.join(SEARCH_DB);
+    // built before katakana and hiragana were matched alike: its terms can't be updated
+    let rebuild = rebuild || {
+        let old = search::needs_rebuild(&db)?;
+        if old {
+            eprintln!("{SEARCH_DB} predates kana folding: rebuilding it from scratch");
+        }
+        old
+    };
     let previous = if !rebuild && db.is_file() {
         lib.manifest()?
     } else {
@@ -430,10 +481,27 @@ async fn build(lib: &Library, lindera_dir: &Path, rebuild: bool) -> Result<()> {
         t.elapsed().as_secs_f64()
     );
 
+    // character decomposition; how often characters are used follows the dictionaries
+    let ids_txt = ids::ensure(ids_dir)?;
+    let t = Instant::now();
+    let dicts_changed =
+        rebuild_from_scratch || !changed_sources.is_empty() || !removed_names.is_empty();
+    if search::build_chars(&db, &ids_txt, dicts_changed)? {
+        eprintln!("character tables in {:.1}s", t.elapsed().as_secs_f64());
+    }
+    if search::missing_kanji_readings(&db)? {
+        eprintln!(
+            "warning: no kanji dictionary with Japanese readings, so `*<興>{{キョウ}}` finds no \
+             Japanese words: pnpm admin defaults --only KANJIDIC"
+        );
+    }
+
     let indexed: std::collections::HashMap<_, _> = infos
         .into_iter()
         .map(|info| (info.name.clone(), info))
         .collect();
+    // from search.db: dictionaries indexed in an earlier build count too
+    let char_counts = search::char_counts(&db)?;
     let mut out = vec![];
     for d in &dicts {
         let file = zip_infos.remove(&d.name).expect("zip info was collected");
@@ -462,6 +530,7 @@ async fn build(lib: &Library, lindera_dir: &Path, rebuild: bool) -> Result<()> {
             revision,
             lang,
             term_count,
+            char_count: char_counts.get(&d.name).copied().unwrap_or(0),
             file,
         });
     }
@@ -476,9 +545,9 @@ async fn build(lib: &Library, lindera_dir: &Path, rebuild: bool) -> Result<()> {
 
     for d in &manifest.dicts {
         eprintln!(
-            "  {}: {} terms, {:.1} MB",
+            "  {}: {}, {:.1} MB",
             d.name,
-            d.term_count,
+            d.counts(),
             d.file.size as f64 / 1e6
         );
     }
@@ -619,12 +688,31 @@ mod tests {
             revision: "1".into(),
             lang: lang.map(String::from),
             term_count: 0,
+            char_count: 0,
             file: FileInfo {
                 file: format!("{name}.zip"),
                 size,
                 sha256: String::new(),
             },
         }
+    }
+
+    #[test]
+    fn counts_say_what_a_dictionary_has() {
+        let mut d = dict("x", None, 0);
+        d.term_count = 528000;
+        assert_eq!(d.counts(), "528000 terms");
+        d.char_count = 10384;
+        assert_eq!(d.counts(), "528000 terms, 10384 characters");
+        d.term_count = 0;
+        assert_eq!(d.counts(), "10384 characters");
+        // manifests from before char_count
+        let old: ManifestDict = serde_json::from_str(
+            r#"{"name":"x","title":"x","revision":"1","lang":null,"term_count":5,"file":"x.zip","size":1,"sha256":""}"#,
+        )
+        .unwrap();
+        assert_eq!(old.char_count, 0);
+        assert!(!serde_json::to_string(&old).unwrap().contains("char_count"));
     }
 
     #[test]

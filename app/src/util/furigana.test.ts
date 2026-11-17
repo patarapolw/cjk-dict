@@ -74,6 +74,55 @@ describe("parseQuery", () => {
       readingGlob: "",
     });
   });
+
+  it("reads full-width wildcards as typed with a Japanese IME", () => {
+    expect(parseQuery("＊＜興＞｛＊キョウ｝")).toMatchObject({
+      term: "*興",
+      readingGlob: "*キョウ",
+    });
+    expect(parseQuery("［日月］曜日")).toMatchObject({ term: "[日月]曜日" });
+  });
+
+  it("reads *<興>{キョウ} as a character's reading", () => {
+    expect(parseQuery("*<興>{キョウ}")).toMatchObject({
+      ch: "興",
+      chReading: "キョウ",
+    });
+    expect(parseQuery("*<興>{キョウ}*")).toMatchObject({ ch: "興" });
+    expect(parseQuery("*<興>{xīng}")).toMatchObject({
+      ch: "興",
+      chReading: "xīng",
+    });
+    // not one character, or a pattern: wildcards
+    expect(parseQuery("*<興味>{きょうみ}").ch).toBeUndefined();
+    expect(parseQuery("*<興>{キョ*}").ch).toBeUndefined();
+    expect(parseQuery("<興>{キョウ}").ch).toBeUndefined();
+    expect(parseQuery("*<興>{おこ}る").ch).toBeUndefined();
+  });
+
+  it("matches a reading anywhere in the word after a *", () => {
+    expect(parseQuery("*<興>{キョウ}")).toMatchObject({
+      term: "*興",
+      reading: "",
+      readingGlob: "*キョウ",
+    });
+    expect(parseQuery("*<興>{おこ}る")).toMatchObject({
+      term: "*興る",
+      readingGlob: "*おこる",
+    });
+    // Hangul too, as a pattern over the reading, not a reading token
+    expect(parseQuery("*<興>{흥}")).toMatchObject({
+      term: "*興",
+      reading: "",
+      readingGlob: "*흥",
+    });
+    // pinyin: per-syllable reading tokens already match anywhere
+    expect(parseQuery("*<興>{xīng}")).toMatchObject({
+      term: "*興",
+      reading: "xīng",
+      readingGlob: "",
+    });
+  });
 });
 
 describe("toFurigana", () => {

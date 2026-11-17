@@ -18,6 +18,9 @@ interface SearchOpts {
   readingGlob: string;
   /** `term` may be Korean romanization: `hangugeo` finds 한국어 */
   romanized?: boolean;
+  /** with `chReading`: the words with this character read so anywhere (`*<興>{キョウ}`) */
+  ch?: string;
+  chReading?: string;
   limit: number;
   offset: number;
   type: string | null;
@@ -51,6 +54,59 @@ type SearchResult = {
   next: number | null;
 };
 
+/** One way to write a character, from the CJKVI IDS database: `⿰木木` for 林 */
+export interface IIds {
+  ids: string;
+  /** region letters the IDS applies to, e.g. `GTKV`; empty for all */
+  regions: string;
+}
+
+/** A kanji dictionary's note on a tag or stat, from its tag banks */
+export interface ITagMeta {
+  category: string;
+  order: number;
+  notes: string;
+}
+
+/** A kanji dictionary entry (Yomitan kanji bank), e.g. KANJIDIC's */
+export interface IKanjiEntry {
+  dict_id: number;
+  dict_path: string;
+  /** the dictionary's source language, e.g. `ja-JP` */
+  lang: string | null;
+  character: string;
+  /** space-separated */
+  onyomi: string;
+  /** space-separated */
+  kunyomi: string;
+  /** space-separated */
+  tags: string;
+  meanings: string[];
+  /** [name, value] by name */
+  stats: [string, string][];
+  tag_meta: Record<string, ITagMeta>;
+}
+
+export interface IHanChar {
+  ch: string;
+  /** empty if the library has no decomposition for it */
+  ids: IIds[];
+  /** what the IDS name directly */
+  components: string[];
+  /** every component, broken down all the way */
+  all_components: string[];
+  /** Hangul readings (eum) */
+  hangul: string[];
+  /** terms with the character */
+  uses: number;
+  entries: IKanjiEntry[];
+}
+
+export interface IHanList {
+  items: { ch: string; uses: number }[];
+  next: number | null;
+}
+
 const ALL_LANGS = ["ja-JP", "zh-CN", "ko-KR"];
 
 class SearchDatabase {
@@ -78,6 +134,8 @@ class SearchDatabase {
         reading: opts.reading,
         reading_glob: opts.readingGlob,
         romanized: opts.romanized ?? false,
+        ch: opts.ch ?? "",
+        ch_reading: opts.chReading ?? "",
         tokens,
         limit: opts.limit,
         offset: opts.offset,
@@ -92,6 +150,24 @@ class SearchDatabase {
         );
       }
     }
+  }
+
+  /** The Han characters of `text`: how each breaks down, and its kanji entries. */
+  async hanChars(text: string): Promise<IHanChar[]> {
+    return await invoke<IHanChar[]>("han_chars", { text });
+  }
+
+  /** Characters made of every character of `components`, the most used first. */
+  async hanContaining(
+    components: string,
+    limit: number,
+    offset: number,
+  ): Promise<IHanList> {
+    return await invoke<IHanList>("han_containing", {
+      components,
+      limit,
+      offset,
+    });
   }
 
   /** URL of a media file inside a dictionary zip, for a plain `<img src>` (dict:// protocol). */

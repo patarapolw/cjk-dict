@@ -1,6 +1,8 @@
+pub mod char_reading;
 pub mod error;
 #[cfg(feature = "hangul-readings")]
 pub mod hanja;
+pub mod ids;
 pub mod korean;
 #[cfg(feature = "zip")]
 pub mod parser;
