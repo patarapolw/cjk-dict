@@ -15,7 +15,7 @@ import { romajiTailGlob } from "./romaji";
  * With `kanaRow` (auto-convert to kana), an incomplete romaji syllable, which auto-convert
  * leaves as typed, is its kana row: at the end of every reading (before its `}`, or the end
  * of an unclosed one), and at the end of the term when the word ends with it. `にほんg` is
- * `にほん[がぎぐげご]`, `{にほn` `{にほ[なにぬねのん]`, `<食>{たb}べる` `<食>{た[ばびぶべぼ]}べる`.
+ * `にほん[がぎぐげごっ]`, `{にほn` `{にほ[なにぬねのん]`, `<食>{たb}べる` `<食>{た[っばびぶべぼ]}べる`.
  * A reading alone matches each kana of the row by prefix.
  */
 

@@ -263,7 +263,7 @@ const autoKana = ref(lang.value === "ja-JP");
 const parsed = computed(() => {
   const query = q.value.trim();
   // auto-convert to kana leaves an incomplete syllable as typed (にほんg): search its kana
-  // row (にほん[がぎぐげご]) instead of nothing, which would split the query into words
+  // row (にほん[がぎぐげごっ]) instead of nothing, which would split the query into words
   const opts = { kanaRow: autoKana.value && isJapanese.value };
   // furigana syntax typed by hand still wins
   if (readingMode.value && query && !/[<>{}＜＞｛｝]/u.test(query)) {

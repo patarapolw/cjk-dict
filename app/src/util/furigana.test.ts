@@ -154,14 +154,14 @@ describe("parseQuery with kanaRow", () => {
 
   it("searches the kana row of incomplete romaji at the end of the term", () => {
     expect(parse("にほんg")).toEqual({
-      term: "にほん[がぎぐげご]",
+      term: "にほん[がぎぐげごっ]",
       reading: "",
       readingGlob: "",
       rest: "",
       incomplete: true,
     });
     expect(parse("<日本>{にほん}g")).toMatchObject({
-      term: "日本[がぎぐげご]",
+      term: "日本[がぎぐげごっ]",
       readingGlob: "にほん*",
       incomplete: true,
     });
@@ -192,7 +192,7 @@ describe("parseQuery with kanaRow", () => {
     // okurigana or other characters after the reading
     expect(parse("<食>{たb}べる")).toMatchObject({
       term: "食べる",
-      readingGlob: "た[ばびぶべぼ]べる",
+      readingGlob: "た[っばびぶべぼ]べる",
       incomplete: true,
     });
     expect(parse("<日本>{にほn}語")).toMatchObject({
@@ -211,7 +211,7 @@ describe("parseQuery with kanaRow", () => {
     expect(parse("<日本g>{にほん}")).not.toHaveProperty("incomplete");
     // the term after a complete reading
     expect(parse("<食>{た}b")).toMatchObject({
-      term: "食[ばびぶべぼ]",
+      term: "食[っばびぶべぼ]",
       incomplete: true,
     });
   });
