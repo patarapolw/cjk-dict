@@ -11,7 +11,10 @@ struct GhSource {
     name: &'static str,
     /// matched against release asset names
     pattern: &'static str,
+    /// source language (L1), the terms'
     lang: Option<&'static str>,
+    /// target language (L2), the definitions', when index.json doesn't say
+    target_lang: Option<&'static str>,
 }
 
 const GITHUB: &[(&str, &[GhSource])] = &[
@@ -25,6 +28,7 @@ const GITHUB: &[(&str, &[GhSource])] = &[
             pattern: r"^kanjidic2-en-.+\.json\.zip$",
             // Japanese, Chinese and Korean readings alike
             lang: None,
+            target_lang: None,
         }],
     ),
     (
@@ -33,6 +37,8 @@ const GITHUB: &[(&str, &[GhSource])] = &[
             name: "Pixiv",
             pattern: r"^Pixiv_.+\.zip$",
             lang: None,
+            // an encyclopedia in Japanese
+            target_lang: Some("ja"),
         }],
     ),
     (
@@ -42,16 +48,20 @@ const GITHUB: &[(&str, &[GhSource])] = &[
                 name: "ja.Wikipedia",
                 pattern: r"^ja\.Wikipedia\..+\.zip$",
                 lang: Some("ja-JP"),
+                target_lang: Some("ja"),
             },
             GhSource {
                 name: "zh.Wikipedia",
                 pattern: r"^zh\.Wikipedia\..+\.zip$",
-                lang: Some("zh-CN"),
+                // Chinese Wikipedia is written in both scripts, for every region
+                lang: Some("zh"),
+                target_lang: Some("zh"),
             },
             GhSource {
                 name: "ko.Wikipedia",
                 pattern: r"^ko\.Wikipedia\..+\.zip$",
                 lang: Some("ko-KR"),
+                target_lang: Some("ko"),
             },
         ],
     ),
@@ -60,7 +70,9 @@ const GITHUB: &[(&str, &[GhSource])] = &[
         &[GhSource {
             name: "CC-CEDICT",
             pattern: r"^CC-CEDICT\.zip$",
-            lang: Some("zh-CN"),
+            // Mandarin, traditional and simplified alike
+            lang: Some("zh"),
+            target_lang: Some("en"),
         }],
     ),
     (
@@ -69,16 +81,19 @@ const GITHUB: &[(&str, &[GhSource])] = &[
             name: "KO-EN.KRDICT",
             pattern: r"^KO-EN\.KRDICT\.zip$",
             lang: Some("ko-KR"),
+            target_lang: Some("en"),
         }],
     ),
 ];
 
-/// wty (Wiktionary) dictionaries, L1 -> English
-const WTY_LANGS: &[&str] = &["ja-JP", "ko-KR", "zh-CN"];
+/// wty (Wiktionary) dictionaries, L1 -> English. Chinese is `zh`: Wiktionary has both
+/// scripts, and more than Mandarin of the mainland.
+const WTY_LANGS: &[&str] = &["ja-JP", "ko-KR", "zh"];
 
 pub struct DefaultDict {
     pub name: &'static str,
     pub lang: Option<&'static str>,
+    pub target_lang: Option<&'static str>,
     pub url: String,
 }
 
@@ -171,6 +186,7 @@ pub fn resolve(only: &[String]) -> Result<Vec<DefaultDict>> {
             out.push(DefaultDict {
                 name: s.name,
                 lang: s.lang,
+                target_lang: s.target_lang,
                 url: asset.browser_download_url.clone(),
             });
         }
@@ -185,6 +201,7 @@ pub fn resolve(only: &[String]) -> Result<Vec<DefaultDict>> {
         out.push(DefaultDict {
             name,
             lang: Some(lang),
+            target_lang: Some("en"),
             url: format!(
                 "https://huggingface.co/datasets/daxida/wty-release/resolve/main/latest/dict/{l1}/en/{name}.zip"
             ),
@@ -241,7 +258,7 @@ mod tests {
     fn only_filters_without_network() {
         let r = resolve(&["wty-zh-en".to_string()]).unwrap();
         assert_eq!(r.len(), 1);
-        assert_eq!(r[0].lang, Some("zh-CN"));
+        assert_eq!(r[0].lang, Some("zh"));
         assert!(r[0].url.ends_with("/dict/zh/en/wty-zh-en.zip"));
         assert!(resolve(&["Nope".to_string()]).is_err());
         assert_eq!(names().len(), 10);

@@ -56,7 +56,10 @@ describe("sortIds", () => {
   ];
   it("puts the language's region first", () => {
     expect(sortIds(ids, "ja-JP")[0].ids).toBe("⿻②一");
-    expect(sortIds(ids, "zh-CN")[0].ids).toBe("⿹②一");
+    expect(sortIds(ids, "zh")[0].ids).toBe("⿹②一");
+    // Chinese: Taiwan's too
+    const tw = [ids[1], { ids: "⿰②一", regions: "T" }];
+    expect(sortIds(tw, "zh")[0].ids).toBe("⿰②一");
     expect(sortIds(ids, "")).toBe(ids);
   });
 });
@@ -90,6 +93,6 @@ describe("readingQuery", () => {
     expect(readingLang("キョウ")).toBe("ja-JP");
     expect(readingLang("おこ.る")).toBe("ja-JP");
     expect(readingLang("흥")).toBe("ko-KR");
-    expect(readingLang("xīng")).toBe("zh-CN");
+    expect(readingLang("xīng")).toBe("zh");
   });
 });

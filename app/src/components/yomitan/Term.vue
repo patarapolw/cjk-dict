@@ -4,14 +4,24 @@
       <ruby
         v-if="showTerm && row.reading && row.reading !== row.term"
         class="entry-term"
+        :lang="termLang(row, lang)"
         >{{ row.term }}<rt>{{ row.reading }}</rt></ruby
       >
-      <span v-else-if="showTerm" class="entry-term">{{ row.term }}</span>
+      <span
+        v-else-if="showTerm"
+        class="entry-term"
+        :lang="termLang(row, lang)"
+        >{{ row.term }}</span
+      >
       <span class="tag" data-category="dictionary">{{ row.dict_path }}</span>
       <span v-for="t in tags" :key="t" class="tag">{{ t }}</span>
     </header>
 
-    <ol class="gloss-list" :data-count="definitions.length">
+    <ol
+      class="gloss-list"
+      :data-count="definitions.length"
+      :lang="glossLang(row)"
+    >
       <li v-for="(def, i) in definitions" :key="i" class="gloss-item">
         <DefinitionEntry
           :def="def"
@@ -29,6 +39,8 @@ import { computed, watchEffect } from "vue";
 
 import { ITerm } from "../../db/search.ts";
 import { loadDictStyles } from "../../util/dict-styles.ts";
+import { glossLang, termLang } from "../../util/lang.ts";
+import { lang } from "../../util/settings.ts";
 import DefinitionEntry from "./DefinitionEntry.vue";
 
 const props = defineProps<{

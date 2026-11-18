@@ -125,7 +125,9 @@ const downloadsCollapsed = ref(false);
 const langSelectOptions = ref([
   { label: "Auto-detect", value: "" },
   { label: "ja-JP", value: "ja-JP" },
-  { label: "zh-CN", value: "zh-CN" },
+  // Mandarin, simplified (zh-CN) and traditional (zh-TW) alike: each entry's own
+  // language picks the characters' forms
+  { label: "zh-CN/TW", value: "zh" },
   { label: "ko-KR", value: "ko-KR" },
 ]);
 

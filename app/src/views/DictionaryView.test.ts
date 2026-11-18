@@ -228,4 +228,44 @@ describe("DictionaryView", () => {
     });
     wrapper.unmount();
   });
+  it("marks terms with their language and definitions with the dictionary's", async () => {
+    const glossary = JSON.stringify([
+      {
+        type: "structured-content",
+        content: [{ tag: "span", lang: "zh-Hant", content: "學習" }],
+      },
+    ]);
+    mockIPC((cmd, args) => {
+      if (cmd === "dict_styles") return null;
+      if (cmd !== "search") throw new Error(`unexpected command: ${cmd}`);
+      searches.push((args as { req: Record<string, unknown> }).req);
+      const entry = {
+        dict_id: 1,
+        dict_path: "CC-CEDICT",
+        lang: "zh",
+        target_lang: "en",
+        term_id: 1,
+        term: "學習",
+        reading: "xué xí",
+        def_tags: "",
+        rules: "",
+        score: 0,
+        glossary,
+        sequence: null,
+        tags: "",
+      };
+      return {
+        items: [{ id: 1, term: "學習", reading: "", entries: [entry] }],
+        next: null,
+      };
+    });
+    const wrapper = await mountView();
+    await wrapper.get("input.search-input").setValue("學習");
+    await lastSearch();
+    await flushPromises();
+    expect(wrapper.get(".headword").attributes("lang")).toBe("zh-Hant");
+    // the first result opens by itself
+    expect(wrapper.get(".gloss-list").attributes("lang")).toBe("en");
+    wrapper.unmount();
+  });
 });

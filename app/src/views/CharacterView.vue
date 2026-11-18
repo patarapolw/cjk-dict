@@ -220,7 +220,11 @@
               </dd>
             </template>
           </dl>
-          <ol v-if="e.meanings.length" class="meanings">
+          <ol
+            v-if="e.meanings.length"
+            class="meanings"
+            :lang="e.target_lang || undefined"
+          >
             <li v-for="(m, j) in e.meanings" :key="j">{{ m }}</li>
           </ol>
           <details v-if="sortedStats(e).length" class="stats">

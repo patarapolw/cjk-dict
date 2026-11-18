@@ -37,6 +37,10 @@ export interface ITerm {
   dict_id: number;
   /** dictionary name on the server */
   dict_path: string;
+  /** the dictionary's source language (L1), the terms', e.g. `ja-JP` or `zh` */
+  lang?: string | null;
+  /** the dictionary's target language (L2), the definitions', e.g. `en` */
+  target_lang?: string | null;
   term_id: number;
 
   term: string;
@@ -74,6 +78,8 @@ export interface IKanjiEntry {
   dict_path: string;
   /** the dictionary's source language, e.g. `ja-JP` */
   lang: string | null;
+  /** the dictionary's target language, the meanings', e.g. `en` */
+  target_lang?: string | null;
   character: string;
   /** space-separated */
   onyomi: string;
@@ -107,7 +113,7 @@ export interface IHanList {
   next: number | null;
 }
 
-const ALL_LANGS = ["ja-JP", "zh-CN", "ko-KR"];
+const ALL_LANGS = ["ja-JP", "zh", "ko-KR"];
 
 class SearchDatabase {
   async search(opts: SearchOpts): Promise<SearchResult> {

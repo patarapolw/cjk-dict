@@ -24,7 +24,7 @@ use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use yomitan_parser::{
     parser::{self, BankKind, YomitanZip},
-    search::{self, DictSource, parse_lang},
+    search::{self, DictSource, lang_tag, parse_lang},
     tokenize::TokenizerMapper,
 };
 
@@ -70,9 +70,15 @@ enum Cmd {
         #[arg(long)]
         name: Option<String>,
 
-        /// Source language, e.g. ja-JP / zh-CN / ko-KR (default: index.json sourceLanguage)
+        /// Source language, the terms', e.g. ja-JP / zh / zh-TW / ko-KR (default: index.json
+        /// sourceLanguage)
         #[arg(long)]
         lang: Option<String>,
+
+        /// Target language, the definitions', e.g. en / ja (default: index.json
+        /// targetLanguage)
+        #[arg(long)]
+        target_lang: Option<String>,
 
         /// Overwrite a dictionary of the same name
         #[arg(long)]
@@ -168,9 +174,10 @@ async fn main() -> Result<()> {
             source,
             name,
             lang,
+            target_lang,
             replace,
         } => {
-            add(&lib, &source, name, lang, replace)?;
+            add(&lib, &source, name, lang, target_lang, replace)?;
             eprintln!("run `build` (and `upload`) to publish");
         }
         Cmd::Defaults {
@@ -200,6 +207,7 @@ async fn main() -> Result<()> {
                     &d.url,
                     Some(d.name.to_string()),
                     d.lang.map(String::from),
+                    d.target_lang.map(String::from),
                     replace,
                 ) {
                     eprintln!("error: {}: {e:#}", d.name);
@@ -242,6 +250,7 @@ fn add(
     source: &str,
     name: Option<String>,
     lang: Option<String>,
+    target_lang: Option<String>,
     replace: bool,
 ) -> Result<()> {
     if let Some(l) = &lang {
@@ -328,6 +337,7 @@ fn add(
     let entry = DictEntry {
         name: name.clone(),
         lang,
+        target_lang,
         source: Some(if is_url {
             source.to_string()
         } else {
@@ -398,28 +408,31 @@ async fn build(lib: &Library, lindera_dir: &Path, ids_dir: &Path, rebuild: bool)
         let old = previous
             .as_ref()
             .and_then(|m| m.dicts.iter().find(|x| x.name == d.name));
-        let requested_lang = d
-            .lang
-            .as_deref()
-            .and_then(parse_lang)
-            .map(|lang| lang.to_string());
+        let requested_lang = d.lang.as_deref().and_then(lang_tag);
         let lang_changed = requested_lang
             .as_ref()
             .is_some_and(|lang| old.and_then(|x| x.lang.as_deref()) != Some(lang.as_str()));
+        let target_lang_changed = d
+            .target_lang
+            .as_ref()
+            .is_some_and(|lang| old.and_then(|x| x.target_lang.as_deref()) != Some(lang.as_str()));
         let changed = rebuild_from_scratch
             || old.is_none_or(|x| x.file.size != file.size || x.file.sha256 != file.sha256)
-            || lang_changed;
+            || lang_changed
+            || target_lang_changed;
         let source = DictSource {
             name: d.name.clone(),
             zip,
-            lang: d.lang.as_deref().and_then(parse_lang),
+            lang: requested_lang,
+            target_lang: d.target_lang.clone(),
         };
         if changed {
             changed_names.push(d.name.clone());
             changed_sources.push(DictSource {
                 name: source.name.clone(),
                 zip: source.zip.clone(),
-                lang: source.lang,
+                lang: source.lang.clone(),
+                target_lang: source.target_lang.clone(),
             });
         }
         sources.push(source);
@@ -509,17 +522,19 @@ async fn build(lib: &Library, lindera_dir: &Path, ids_dir: &Path, rebuild: bool)
         let old = previous
             .as_ref()
             .and_then(|m| m.dicts.iter().find(|x| x.name == d.name));
-        let (title, revision, lang, term_count) = match (info, old) {
+        let (title, revision, lang, target_lang, term_count) = match (info, old) {
             (Some(info), _) => (
                 info.title.clone(),
                 info.revision.clone(),
                 info.lang.clone(),
+                info.target_lang.clone(),
                 info.term_count,
             ),
             (None, Some(old)) => (
                 old.title.clone(),
                 old.revision.clone(),
                 old.lang.clone(),
+                old.target_lang.clone(),
                 old.term_count,
             ),
             (None, None) => bail!("missing build information for {}", d.name),
@@ -529,6 +544,7 @@ async fn build(lib: &Library, lindera_dir: &Path, ids_dir: &Path, rebuild: bool)
             title,
             revision,
             lang,
+            target_lang,
             term_count,
             char_count: char_counts.get(&d.name).copied().unwrap_or(0),
             file,
@@ -609,11 +625,7 @@ fn upload(lib: &Library, remote: &str, dry_run: bool) -> Result<()> {
 fn size(lib: &Library, lang: Option<&str>) -> Result<()> {
     let manifest = lib.check_fresh()?;
     let lang_filter = lang
-        .map(|lang| {
-            parse_lang(lang)
-                .map(|lang| lang.to_string())
-                .with_context(|| format!("unsupported language {lang}"))
-        })
+        .map(|lang| size_group(lang).with_context(|| format!("unsupported language {lang}")))
         .transpose()?;
     let zip_sizes = zip_size_by_lang(&manifest.dicts, lang_filter.as_deref());
 
@@ -651,6 +663,11 @@ fn size(lib: &Library, lang: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+/// The language `size` groups a dictionary under: `ja-JP`, `ko-KR`, or `zh` for any Chinese
+fn size_group(lang: &str) -> Option<String> {
+    lang_tag(lang.split(['-', '_']).next()?)
+}
+
 fn zip_size_by_lang(
     dicts: &[ManifestDict],
     lang_filter: Option<&str>,
@@ -660,11 +677,7 @@ fn zip_size_by_lang(
         let lang = dict
             .lang
             .as_deref()
-            .map(|lang| {
-                parse_lang(lang)
-                    .map(|lang| lang.to_string())
-                    .unwrap_or_else(|| lang.to_string())
-            })
+            .map(|lang| size_group(lang).unwrap_or_else(|| lang.to_string()))
             .unwrap_or_else(|| "unknown".to_string());
         if lang_filter.is_some_and(|filter| filter != lang) {
             continue;
@@ -687,6 +700,7 @@ mod tests {
             title: name.into(),
             revision: "1".into(),
             lang: lang.map(String::from),
+            target_lang: None,
             term_count: 0,
             char_count: 0,
             file: FileInfo {
@@ -721,6 +735,7 @@ mod tests {
             dict("ja-one", Some("ja"), 10),
             dict("ja-two", Some("ja-JP"), 20),
             dict("zh", Some("zh-CN"), 30),
+            dict("zh-tw", Some("zh-TW"), 5),
             dict("unknown", None, 40),
         ];
 
@@ -729,7 +744,7 @@ mod tests {
             BTreeMap::from([
                 ("ja-JP".into(), (2, 30)),
                 ("unknown".into(), (1, 40)),
-                ("zh-CN".into(), (1, 30)),
+                ("zh".into(), (2, 35)),
             ])
         );
         assert_eq!(

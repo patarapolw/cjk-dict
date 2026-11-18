@@ -21,6 +21,9 @@ pub struct DictEntry {
     /// overrides index.json sourceLanguage, e.g. ja-JP
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lang: Option<String>,
+    /// overrides index.json targetLanguage, the definitions' language, e.g. ja
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_lang: Option<String>,
     /// where it came from (URL or file name), informational
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
@@ -47,6 +50,9 @@ pub struct ManifestDict {
     pub title: String,
     pub revision: String,
     pub lang: Option<String>,
+    /// the definitions' language; absent in manifests from before
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_lang: Option<String>,
     pub term_count: usize,
     /// characters: the single-character kanji bank entries indexed (e.g. KANJIDIC's, or
     /// CC-CEDICT's Hanzi edition's); absent in manifests from before, and for dictionaries

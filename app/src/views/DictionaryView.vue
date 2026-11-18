@@ -141,13 +141,15 @@
           :aria-expanded="openedItems.includes(it.id)"
           @click="toggleItem(it.id)"
         >
-          <ruby v-if="headReading(it)" class="headword"
+          <ruby v-if="headReading(it)" class="headword" :lang="headLang(it)"
             >{{ headTerm(it) }}<rt>{{ headReading(it) }}</rt></ruby
           >
-          <span v-else class="headword">{{ headTerm(it) }}</span>
+          <span v-else class="headword" :lang="headLang(it)">{{
+            headTerm(it)
+          }}</span>
         </button>
         <div v-if="openedItems.includes(it.id)" class="accordion-content">
-          <div class="item-actions">
+          <div class="item-actions" :lang="headLang(it)">
             <button
               type="button"
               class="link-button"
@@ -235,6 +237,7 @@ import {
   toFurigana,
 } from "../util/furigana";
 import { hanChars } from "../util/han";
+import { termLang } from "../util/lang";
 import { dictsVersion, toBeLoaded } from "../util/loading";
 import { remainingScroll, scrollToStart } from "../util/scroll";
 import { lang } from "../util/settings";
@@ -321,7 +324,7 @@ const examples = computed(
     ({
       "ja-JP": { furigana: "<日本>{にほん}語", reading: "にほんご" },
       "": { furigana: "<日本>{にほん}語", reading: "にほんご" },
-      "zh-CN": { furigana: "<中国>{zhong guo}", reading: "zhong1 guo2" },
+      zh: { furigana: "<中国>{zhong guo}", reading: "zhong1 guo2" },
       "ko-KR": { furigana: "<光速>{광속}", reading: "광속" },
     })[lang.value] ?? { furigana: "", reading: "" },
 );
@@ -329,7 +332,7 @@ const examples = computed(
 const placeholder = computed(() =>
   readingMode.value
     ? examples.value.reading || "Reading"
-    : ({ "ja-JP": "日本語", "zh-CN": "中文", "ko-KR": "한국어" }[lang.value] ??
+    : ({ "ja-JP": "日本語", zh: "中文", "ko-KR": "한국어" }[lang.value] ??
       "Search"),
 );
 
@@ -514,7 +517,7 @@ function segmentLang(text: string) {
   if (lang.value) return lang.value;
   if (/\p{sc=Hangul}/u.test(text)) return "ko-KR";
   if (/[\p{scx=Hiragana}\p{scx=Katakana}]/u.test(text)) return "ja-JP";
-  return "zh-CN";
+  return "zh";
 }
 
 async function loadMore(isNew?: boolean) {
@@ -626,6 +629,12 @@ async function loadMore(isNew?: boolean) {
 
 function headTerm(it: Item) {
   return it.entries[0]?.term || it.term;
+}
+
+/** the heading's language, so its Han characters take that language's forms */
+function headLang(it: Item) {
+  const e = it.entries[0];
+  return e ? termLang(e, lang.value) : lang.value || undefined;
 }
 
 function headReading(it: Item) {

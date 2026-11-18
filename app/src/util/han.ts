@@ -82,10 +82,11 @@ export const REGION_NAMES: Record<string, string> = {
   X: "alternative",
 };
 
-const LANG_REGION: Record<string, string> = {
-  "ja-JP": "J",
-  "zh-CN": "G",
-  "ko-KR": "K",
+/** a search language's IDS regions: Chinese is China's and Taiwan's, Hong Kong's, ... */
+const LANG_REGIONS: Record<string, string> = {
+  ja: "J",
+  zh: "GTHM",
+  ko: "K",
 };
 
 /**
@@ -96,9 +97,10 @@ export function sortIds<T extends { regions: string }>(
   ids: T[],
   lang: string,
 ): T[] {
-  const region = LANG_REGION[lang];
-  if (!region) return ids;
-  const rank = (i: T) => (!i.regions || i.regions.includes(region) ? 0 : 1);
+  const regions = LANG_REGIONS[lang.split("-")[0]];
+  if (!regions) return ids;
+  const rank = (i: T) =>
+    !i.regions || [...regions].some((r) => i.regions.includes(r)) ? 0 : 1;
   return [...ids].sort((a, b) => rank(a) - rank(b));
 }
 
@@ -115,7 +117,7 @@ export function sortByLang<T extends { lang: string | null }>(
 
 /** KANJIDIC stats that are readings to search by, and their language */
 export const READING_STAT_LANGS: Record<string, string> = {
-  pinyin: "zh-CN",
+  pinyin: "zh",
   korean_h: "ko-KR",
   nanori: "ja-JP",
 };
@@ -124,7 +126,7 @@ export const READING_STAT_LANGS: Record<string, string> = {
 export function readingLang(reading: string): string {
   if (/\p{sc=Hangul}/u.test(reading)) return "ko-KR";
   if (/[\p{scx=Hiragana}\p{scx=Katakana}]/u.test(reading)) return "ja-JP";
-  return "zh-CN";
+  return "zh";
 }
 
 /**
