@@ -188,10 +188,25 @@ describe("parseQuery with kanaRow", () => {
     });
   });
 
-  it("only where the word ends", () => {
+  it("expands trailing romaji before every }", () => {
     // okurigana or other characters after the reading
-    expect(parse("<食>{たb}べる")).not.toHaveProperty("incomplete");
-    expect(parse("<日本>{にほn}語")).not.toHaveProperty("incomplete");
+    expect(parse("<食>{たb}べる")).toMatchObject({
+      term: "食べる",
+      readingGlob: "た[ばびぶべぼ]べる",
+      incomplete: true,
+    });
+    expect(parse("<日本>{にほn}語")).toMatchObject({
+      term: "日本語",
+      readingGlob: "にほ[なにぬねのん]*",
+      incomplete: true,
+    });
+    expect(parse("{にほn}{ご}")).toMatchObject({
+      reading: "にほ[なにぬねのん]ご",
+      incomplete: true,
+    });
+  });
+
+  it("expands the term's trailing romaji only at the end of the word", () => {
     // romaji in the base, not at the end of the word
     expect(parse("<日本g>{にほん}")).not.toHaveProperty("incomplete");
     // the term after a complete reading

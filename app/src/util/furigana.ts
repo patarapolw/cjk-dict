@@ -12,11 +12,11 @@ import { romajiTailGlob } from "./romaji";
  * search. `*<興>{キョウ}` with one character is not a pattern but the words with 興 read
  * キョウ anywhere in them (`ch`, `chReading`).
  *
- * With `kanaRow` (auto-convert to kana), an incomplete romaji syllable at the end of the word,
- * in the term or in a reading that ends the word (not one followed by okurigana), which
- * auto-convert leaves as typed, is its kana row: `にほんg` is
- * `にほん[がぎぐげご]`, `{にほn` `{にほ[なにぬねのん]`. A reading alone matches each kana of
- * the row by prefix.
+ * With `kanaRow` (auto-convert to kana), an incomplete romaji syllable, which auto-convert
+ * leaves as typed, is its kana row: at the end of every reading (before its `}`, or the end
+ * of an unclosed one), and at the end of the term when the word ends with it. `にほんg` is
+ * `にほん[がぎぐげご]`, `{にほn` `{にほ[なにぬねのん]`, `<食>{たb}べる` `<食>{た[ばびぶべぼ]}べる`.
+ * A reading alone matches each kana of the row by prefix.
  */
 
 const KANA = /^[\p{scx=Hiragana}\p{scx=Katakana}ー]+$/u;
@@ -96,16 +96,24 @@ function parseWord(raw: string, opts: ParseOptions): ParsedQuery {
   let hasReading = false;
   /** the word ends with a reading, not okurigana or other characters after it */
   let endsWithReading = false;
+  let incomplete = false;
+  /** a reading's trailing romaji (before its `}`, or the end) as its kana row */
+  const rowOf = (rt: string) => {
+    const glob = opts.kanaRow ? romajiTailGlob(rt) : null;
+    if (glob === null) return rt;
+    incomplete = true;
+    return glob;
+  };
 
   for (const m of first.matchAll(SEGMENT)) {
     const [, base, rt, rtOnly, plain] = m;
     endsWithReading = plain === undefined;
     if (base !== undefined) {
       term += base;
-      reading += rt;
+      reading += rowOf(rt);
       hasReading = true;
     } else if (rtOnly !== undefined) {
-      reading += rtOnly;
+      reading += rowOf(rtOnly);
       hasReading = true;
     } else if (plain !== undefined) {
       const text = plain.replace(/[<>]/g, "");
@@ -117,14 +125,13 @@ function parseWord(raw: string, opts: ParseOptions): ParsedQuery {
 
   reading = reading.replace(/\*+/g, "*").trim();
 
-  let incomplete = false;
-  if (opts.kanaRow) {
-    // only where the typing is: at the end of the term, or of a reading that ends the word
-    const t = endsWithReading ? null : romajiTailGlob(term);
-    if (t !== null) term = t;
-    const r = endsWithReading ? romajiTailGlob(reading) : null;
-    if (r !== null) reading = r;
-    incomplete = t !== null || r !== null;
+  // the term's, only at the end of the word: not in a furigana base (`<日本g>{にほん}`)
+  if (opts.kanaRow && !endsWithReading) {
+    const t = romajiTailGlob(term);
+    if (t !== null) {
+      term = t;
+      incomplete = true;
+    }
   }
   const flag = incomplete ? { incomplete } : {};
   if (!hasReading || !reading.replace(/[*?\s]/g, "")) {
