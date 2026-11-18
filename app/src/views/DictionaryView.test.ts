@@ -232,7 +232,10 @@ describe("DictionaryView", () => {
     const glossary = JSON.stringify([
       {
         type: "structured-content",
-        content: [{ tag: "span", lang: "zh-Hant", content: "學習" }],
+        content: [
+          { tag: "span", lang: "zh-Hant", content: "學習" },
+          { tag: "span", lang: "zh-Hans", content: "学习" },
+        ],
       },
     ]);
     mockIPC((cmd, args) => {

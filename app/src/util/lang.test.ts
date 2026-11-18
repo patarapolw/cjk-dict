@@ -61,6 +61,17 @@ describe("glossaryTermLang", () => {
     expect(glossaryTermLang("学", g, "zh")).toBeNull();
   });
 
+  it("ignores a script without the other one next to it", () => {
+    // CC-CEDICT's 直: the same in both scripts, written once
+    const g = [
+      {
+        type: "structured-content",
+        content: [{ tag: "span", content: "直", lang: "zh-Hans" }],
+      },
+    ];
+    expect(glossaryTermLang("直", g, "zh")).toBeNull();
+  });
+
   it("ignores another language than the dictionary's", () => {
     const g = cedict("學習", "学习");
     expect(glossaryTermLang("學習", g, "ja-JP")).toBeNull();

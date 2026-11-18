@@ -51,11 +51,25 @@ function findLang(node: unknown, term: string, depth = 0): string | null {
   return findLang(el.content, term, depth + 1);
 }
 
+/** every `lang` in `node` */
+function allLangs(node: unknown, out = new Set<string>(), depth = 0) {
+  if (depth > 32 || !node || typeof node !== "object") return out;
+  if (Array.isArray(node)) {
+    for (const n of node) allLangs(n, out, depth + 1);
+    return out;
+  }
+  const el = node as { lang?: unknown; content?: unknown };
+  if (typeof el.lang === "string" && el.lang) out.add(el.lang);
+  return allLangs(el.content, out, depth + 1);
+}
+
 /**
  * The language a term is written in, from its glossary: a dictionary may say which script
  * a headword is in, e.g. CC-CEDICT's `<span lang="zh-Hant">學習</span>` and
  * `<span lang="zh-Hans">学习</span>`, as Mandarin isn't always written as in China. Only a
- * language matching `l1` (or any of Japanese, Chinese and Korean without one) counts.
+ * language matching `l1` (or any of Japanese, Chinese and Korean without one) counts, and
+ * only next to another form of it: CC-CEDICT writes a term the same in both scripts (直)
+ * once, as `zh-Hans`, which then says nothing of its script.
  */
 export function glossaryTermLang(
   term: string,
@@ -67,7 +81,10 @@ export function glossaryTermLang(
   if (!found) return null;
   const p = primaryLang(found);
   if (l1 ? p !== primaryLang(l1) : !CJK.includes(p)) return null;
-  return found;
+  const other = [...allLangs(glossary)].some(
+    (l) => l !== found && primaryLang(l) === p,
+  );
+  return other ? found : null;
 }
 
 const cache = new WeakMap<ITerm, string | null>();
