@@ -1,20 +1,30 @@
 #!/usr/bin/env node
 // Print what dictionaries say about themselves in their index.json: title, revision,
-// sourceLanguage and targetLanguage, next to dict-admin's overrides. The output is a
-// Markdown table, to paste into a pull request or a conversation.
+// sourceLanguage and targetLanguage, next to the library's overrides (dicts.json). The
+// output is a Markdown table, to paste into a pull request or a conversation.
 //
-//   node scripts/dict-index.mjs                     # the default dictionaries (dict-admin)
-//   node scripts/dict-index.mjs library             # every zip in a directory
-//   node scripts/dict-index.mjs a.zip https://example.com/b.zip
+//   node scripts/dict-index.mjs                 # the library, with the defaults it lacks
+//   node scripts/dict-index.mjs --no-download   # the library as it is
+//   node scripts/dict-index.mjs a.zip some/folder https://example.com/b.zip
 //
-// With no arguments it runs `pnpm admin defaults --list` (cargo, and GitHub's API: set
-// GITHUB_TOKEN if rate limited). URLs are read with HTTP range requests, so only the zip's
-// directory and index.json are downloaded, not the whole dictionary.
+// With no arguments it first runs `pnpm admin defaults`, which downloads only the default
+// dictionaries not in the library yet (it uses GitHub's API: set GITHUB_TOKEN if rate
+// limited), then reads the library (CJK_DICT_LIBRARY, else `library/`). URLs are read with
+// HTTP range requests: only the zip's directory and index.json are downloaded.
 
 import { execFileSync } from "node:child_process";
-import { openSync, readSync, fstatSync, closeSync, statSync } from "node:fs";
-import { readdirSync } from "node:fs";
-import { basename, join } from "node:path";
+import {
+  closeSync,
+  existsSync,
+  fstatSync,
+  openSync,
+  readFileSync,
+  readSync,
+  readdirSync,
+  statSync,
+} from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { inflateRawSync } from "node:zlib";
 
 /** random access to a local file or a URL: `size` and `read(offset, length)` */
@@ -42,6 +52,7 @@ async function source(location) {
       },
     };
   }
+  if (!existsSync(location)) throw new Error(`no ${basename(location)}`);
   const fd = openSync(location, "r");
   return {
     size: fstatSync(fd).size,
@@ -115,37 +126,59 @@ async function readZipEntry(src, name) {
   throw new Error(`no ${name}`);
 }
 
-/** [name, location, dict-admin's L1, dict-admin's L2] */
-function defaults() {
-  let out;
-  try {
-    out = execFileSync(
-      "cargo",
-      [
-        "run",
-        "--release",
-        "-q",
-        "-p",
-        "dict-admin",
-        "--",
-        "defaults",
-        "--list",
-      ],
-      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+/** the library folder, as dict-admin finds it: CJK_DICT_LIBRARY (also from .env), else `library` */
+function libraryDir() {
+  let dir = process.env.CJK_DICT_LIBRARY;
+  const env = join(root, ".env");
+  if (!dir && existsSync(env)) {
+    const m = readFileSync(env, "utf8").match(
+      /^\s*CJK_DICT_LIBRARY\s*=\s*["']?([^"'\r\n]*)/m,
     );
-  } catch (e) {
-    const why = String(e.stderr ?? e.message).split("\n")[0];
-    console.error(`pnpm admin defaults --list failed: ${why}`);
-    console.error("Pass zips, a directory of them or URLs instead.");
+    dir = m?.[1].trim();
+  }
+  return resolve(root, dir || "library");
+}
+
+/**
+ * The library's dictionaries, after `dict-admin defaults` adds the default ones it lacks
+ * (those already there are skipped, not downloaded again): [name, zip, L1, L2], the
+ * languages being dicts.json's overrides.
+ */
+function library(download) {
+  const dir = libraryDir();
+  if (download) {
+    console.error(
+      "dict-admin defaults: adding default dictionaries not in the library…",
+    );
+    try {
+      execFileSync(
+        "cargo",
+        ["run", "--release", "-q", "-p", "dict-admin", "--", "defaults"],
+        {
+          cwd: root,
+          stdio: ["ignore", "inherit", "inherit"],
+          env: { ...process.env, RUST_BACKTRACE: "0", RUST_LIB_BACKTRACE: "0" },
+        },
+      );
+    } catch {
+      console.error(
+        "dict-admin defaults failed; listing the library as it is.",
+      );
+    }
+  }
+  const json = join(dir, "dicts.json");
+  if (!existsSync(json)) {
+    console.error(`${json} not found: no library there.`);
     process.exit(1);
   }
-  return out
-    .trim()
-    .split("\n")
-    .map((line) => {
-      const [name, lang, targetLang, url] = line.split("\t");
-      return [name, url, lang, targetLang];
-    });
+  return JSON.parse(readFileSync(json, "utf8")).map((d) => [
+    d.name,
+    join(dir, `${d.name}.zip`),
+    d.lang ?? "",
+    d.target_lang ?? "",
+  ]);
 }
 
 function fromArgs(args) {
@@ -160,8 +193,11 @@ function fromArgs(args) {
   });
 }
 
-const args = process.argv.slice(2);
-const dicts = args.length ? fromArgs(args) : defaults();
+const argv = process.argv.slice(2);
+const args = argv.filter((a) => a !== "--no-download");
+const dicts = args.length
+  ? fromArgs(args)
+  : library(!argv.includes("--no-download"));
 /** an error on one line, with its cause (fetch's "fetch failed" says little alone) */
 const errorText = (e) =>
   [e?.message ?? e, e?.cause?.message ?? e?.cause?.code]
@@ -173,7 +209,7 @@ const cell = (v) =>
   v === undefined || v === null || v === "" ? "-" : String(v);
 
 console.log(
-  "| name | sourceLanguage | targetLanguage | dict-admin L1 | dict-admin L2 | title | revision |",
+  "| name | sourceLanguage | targetLanguage | dicts.json lang | dicts.json target_lang | title | revision |",
 );
 console.log("| --- | --- | --- | --- | --- | --- | --- |");
 for (const [name, location, l1, l2] of dicts) {

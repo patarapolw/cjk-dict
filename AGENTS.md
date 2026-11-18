@@ -123,8 +123,11 @@ and don't write code that relies on a guess without saying so. Instead:
   Check it as far as your environment allows (local files, reachable hosts), and put the
   command in the checklist item, asking for its output.
 
-- Existing scripts: [`scripts/dict-index.mjs`](scripts/dict-index.mjs) prints the
-  dictionaries' `index.json` languages next to `dict-admin`'s overrides.
+- Prefer what the user already has to downloading it again: the library
+  (`CJK_DICT_LIBRARY`, else `library/`) has the default dictionaries, and
+  `pnpm admin defaults` adds only those it lacks.
+- Existing scripts: [`scripts/dict-index.mjs`](scripts/dict-index.mjs) prints the library's
+  dictionaries' `index.json` languages next to their `dicts.json` overrides.
 - Keep the list in step with later commits: remove items a commit made moot.
 
 ## Commit messages

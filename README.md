@@ -42,7 +42,7 @@ library/
 
 ```bash
 pnpm admin defaults --list                 # default dictionaries and their latest download URLs
-node scripts/dict-index.mjs                # their index.json languages vs. dict-admin's overrides
+node scripts/dict-index.mjs                # add missing defaults, then index.json languages vs. dicts.json's
 pnpm admin defaults                        # download all that aren't in the library yet
 pnpm admin defaults --only CC-CEDICT --only wty-zh-en
 pnpm admin defaults --only CC-CEDICT --replace           # update to the latest release
