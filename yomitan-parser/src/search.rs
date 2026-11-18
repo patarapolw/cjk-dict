@@ -37,8 +37,8 @@ CREATE TABLE dict (
   name        TEXT NOT NULL UNIQUE,   -- key; the zip is <name>.zip
   title       TEXT NOT NULL,
   revision    TEXT,
-  L1          TEXT,                   -- source language, e.g. ja-JP
-  L2          TEXT,
+  L1          TEXT,                   -- source language (the terms'), e.g. ja-JP, zh, zh-TW
+  L2          TEXT,                   -- target language (the definitions'), e.g. en
   index_json  TEXT,
   term_count  INTEGER NOT NULL DEFAULT 0
 );
@@ -178,6 +178,16 @@ pub fn char_counts(db: &Path) -> Result<HashMap<String, usize>, YomitanError> {
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
+/// Each dictionary's source and target languages (L1, L2) as indexed, by name
+pub fn dict_langs(
+    db: &Path,
+) -> Result<HashMap<String, (Option<String>, Option<String>)>, YomitanError> {
+    let conn = Connection::open_with_flags(db, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let mut st = conn.prepare("SELECT name, L1, L2 FROM dict")?;
+    let rows = st.query_map([], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?))))?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
 /// Whether `db` has Japanese terms with readings but no kanji dictionary with kana readings
 /// (e.g. KANJIDIC), so that [`build_chars`] could not index the readings of their kanji:
 /// `*<興>{キョウ}` finds no Japanese words then.
@@ -241,8 +251,11 @@ END;
 pub struct DictSource {
     pub name: String,
     pub zip: PathBuf,
-    /// overrides index.json `sourceLanguage`
-    pub lang: Option<Lang>,
+    /// overrides index.json `sourceLanguage`, e.g. `ja-JP`, `zh` or `zh-TW`
+    pub lang: Option<String>,
+    /// overrides index.json `targetLanguage` (the definitions' language), e.g. `ja` for
+    /// Pixiv, which doesn't say
+    pub target_lang: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -251,7 +264,19 @@ pub struct DictInfo {
     pub title: String,
     pub revision: String,
     pub lang: Option<String>,
+    pub target_lang: Option<String>,
     pub term_count: usize,
+}
+
+/// The tag a dictionary's source language is stored as: `ja`/`ko` become `ja-JP`/`ko-KR`,
+/// but Chinese keeps what it says, as Mandarin isn't always `zh-CN`: `zh` (both scripts),
+/// `zh-TW`, `zh-Hant`, ... `None` if not Japanese, Chinese or Korean.
+pub fn lang_tag(s: &str) -> Option<String> {
+    let s = s.trim().replace('_', "-");
+    match parse_lang(&s)? {
+        Lang::Zh => Some(s),
+        l => Some(l.to_string()),
+    }
 }
 
 pub fn parse_lang(s: &str) -> Option<Lang> {
@@ -401,9 +426,17 @@ async fn build_inner(
         let mut zip = YomitanZip::open(&d.zip)?;
         let index_str = zip.index_json_str()?;
         let index = zip.index()?;
-        let lang = d
+        let l1 = d
             .lang
-            .or_else(|| index.source_language.as_deref().and_then(parse_lang));
+            .as_deref()
+            .and_then(lang_tag)
+            .or_else(|| index.source_language.as_deref().and_then(lang_tag));
+        let lang = l1.as_deref().and_then(parse_lang);
+        let target_lang = d
+            .target_lang
+            .clone()
+            .or_else(|| index.target_language.clone())
+            .and_then(|l| l.trim().replace('_', "-").non_empty_trimmed());
 
         let tx = conn.transaction()?;
         tx.execute(
@@ -412,8 +445,8 @@ async fn build_inner(
                 d.name,
                 index.title,
                 index.revision,
-                lang.map(|l| l.to_string()),
-                index.target_language,
+                l1,
+                target_lang,
                 index_str
             ],
         )?;
@@ -515,7 +548,8 @@ async fn build_inner(
             name: d.name.clone(),
             title: index.title,
             revision: index.revision,
-            lang: lang.map(|l| l.to_string()),
+            lang: l1,
+            target_lang,
             term_count: count,
         });
     }
@@ -1349,6 +1383,10 @@ pub struct TermEntryOut {
     pub dict_id: i64,
     /// dictionary name
     pub dict_path: String,
+    /// the dictionary's source language (L1, the terms'), e.g. `ja-JP` or `zh`
+    pub lang: Option<String>,
+    /// the dictionary's target language (L2, the definitions'), e.g. `en`
+    pub target_lang: Option<String>,
     pub term_id: i64,
     pub term: String,
     pub reading: String,
@@ -1392,6 +1430,8 @@ pub struct KanjiEntryOut {
     pub dict_path: String,
     /// the dictionary's source language
     pub lang: Option<String>,
+    /// the dictionary's target language, the meanings', e.g. `en`
+    pub target_lang: Option<String>,
     pub character: String,
     /// space-separated
     pub onyomi: String,
@@ -1447,8 +1487,10 @@ pub struct SearchDb {
     dicts_dir: PathBuf,
     /// dict_id -> name
     names: HashMap<i64, String>,
-    /// dict_id -> source language, e.g. ja-JP
+    /// dict_id -> source language (L1), e.g. ja-JP
     langs: HashMap<i64, String>,
+    /// dict_id -> target language (L2), e.g. en
+    target_langs: HashMap<i64, String>,
     /// search.db has `kanji_link` / `han_char`
     has_kanji: bool,
     has_han: bool,
@@ -1654,11 +1696,14 @@ impl SearchDb {
             st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
                 .collect::<Result<HashMap<i64, String>, _>>()?
         };
-        let langs = {
-            let mut st = conn.prepare("SELECT id, L1 FROM dict WHERE L1 IS NOT NULL")?;
-            st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
-                .collect::<Result<HashMap<i64, String>, _>>()?
+        let by_dict = |col: &str| -> rusqlite::Result<HashMap<i64, String>> {
+            let mut st = conn.prepare(&format!(
+                "SELECT id, {col} FROM dict WHERE {col} IS NOT NULL AND {col} != ''"
+            ))?;
+            st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()
         };
+        let langs = by_dict("L1")?;
+        let target_langs = by_dict("L2")?;
         let has_roman = has_table(&conn, "term_roman")?;
         let kana_folded = meta(&conn, "kana")?.is_some();
         let has_term_char = meta(&conn, "term_char")?.is_some();
@@ -1671,6 +1716,7 @@ impl SearchDb {
             has_kanji,
             has_han,
             langs,
+            target_langs,
             tag_meta: Mutex::new(HashMap::new()),
             conn: Mutex::new(conn),
             dicts_dir: dicts_dir.to_path_buf(),
@@ -2010,6 +2056,8 @@ impl SearchDb {
             let entry = TermEntryOut {
                 dict_id,
                 dict_path: name.clone(),
+                lang: self.langs.get(&dict_id).cloned(),
+                target_lang: self.target_langs.get(&dict_id).cloned(),
                 term_id: (bank << 32) | idx,
                 term: s(0),
                 reading: s(1),
@@ -2197,6 +2245,7 @@ impl SearchDb {
             dict_id,
             dict_path: name.clone(),
             lang: self.langs.get(&dict_id).cloned(),
+            target_lang: self.target_langs.get(&dict_id).cloned(),
             character: s(0),
             onyomi: s(1),
             kunyomi: s(2),
@@ -2320,7 +2369,7 @@ impl SearchDb {
     pub fn dicts(&self) -> Result<Vec<DictInfo>, YomitanError> {
         let conn = self.conn.lock()?;
         let mut st =
-            conn.prepare("SELECT name, title, revision, L1, term_count FROM dict ORDER BY id")?;
+            conn.prepare("SELECT name, title, revision, L1, L2, term_count FROM dict ORDER BY id")?;
         let rows = st
             .query_map([], |r| {
                 Ok(DictInfo {
@@ -2328,7 +2377,8 @@ impl SearchDb {
                     title: r.get(1)?,
                     revision: r.get::<_, Option<String>>(2)?.unwrap_or_default(),
                     lang: r.get(3)?,
-                    term_count: r.get::<_, i64>(4)? as usize,
+                    target_lang: r.get(4)?,
+                    term_count: r.get::<_, i64>(5)? as usize,
                 })
             })?
             .collect::<Result<_, _>>()?;
@@ -2569,6 +2619,8 @@ mod han_tests {
                 name: "kanji".into(),
                 zip: dir.join("kanji.zip"),
                 lang: None,
+                // index.json doesn't say
+                target_lang: Some("en".into()),
             }],
             &tok,
             |_, _, _| {},
@@ -2610,6 +2662,11 @@ mod han_tests {
         assert_eq!(mori.entries.len(), 1);
         assert_eq!(mori.entries[0].kunyomi, "もり");
         assert_eq!(mori.entries[0].lang.as_deref(), Some("ja-JP"));
+        assert_eq!(mori.entries[0].target_lang.as_deref(), Some("en"));
+        assert_eq!(
+            dict_langs(&db_path).unwrap()["kanji"],
+            (Some("ja-JP".into()), Some("en".into()))
+        );
         let hayashi = &found[1];
         assert_eq!(hayashi.uses, 2);
         assert_eq!(hayashi.entries[0].meanings, ["grove", "forest"]);
@@ -2679,6 +2736,7 @@ mod han_tests {
             name: "kanji".into(),
             zip: dir.join("kanji.zip"),
             lang: None,
+            target_lang: None,
         };
         build(&db_path, &[kanji], &tok, |_, _, _| {}).await.unwrap();
         {
@@ -2984,6 +3042,7 @@ mod kana_tests {
             name: "x".into(),
             zip: dir.join("x.zip"),
             lang: None,
+            target_lang: None,
         };
         let err = build_incremental(&db_path, &[source], &[], &tok, |_, _, _| {})
             .await
@@ -3040,5 +3099,21 @@ mod kanji_reading_warning_tests {
         build_chars(&db_path, &ids_txt, true).unwrap();
         assert!(missing_kanji_readings(&db_path).unwrap());
         std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod lang_tag_tests {
+    use super::*;
+
+    #[test]
+    fn chinese_keeps_its_region_or_script() {
+        assert_eq!(lang_tag("ja").as_deref(), Some("ja-JP"));
+        assert_eq!(lang_tag("ko-KR").as_deref(), Some("ko-KR"));
+        // Mandarin isn't always zh-CN
+        assert_eq!(lang_tag("zh").as_deref(), Some("zh"));
+        assert_eq!(lang_tag("zh_TW").as_deref(), Some("zh-TW"));
+        assert_eq!(lang_tag("zh-Hant").as_deref(), Some("zh-Hant"));
+        assert_eq!(lang_tag("en"), None);
     }
 }

@@ -89,6 +89,80 @@ WebKitGTK doesn't speak the Chrome DevTools Protocol, so `scripts/webview.mjs` w
 on Windows. On Linux, run the tests above and say that the UI change wasn't checked in
 the running app, rather than checking it in a page made to look like it.
 
+## What you can't check
+
+Some checks need what your environment doesn't have: a host its network blocks (e.g.
+`huggingface.co`, where the wty dictionaries are), the dictionaries downloaded to
+`%APPDATA%\cc.polv.cjk-dict`, or the running app on Windows. Don't guess the result,
+and don't write code that relies on a guess without saying so. Instead:
+
+- Say in your reply what you couldn't check and why, e.g. which host was blocked.
+- List each such check in the pull request body under a `## To check locally` heading,
+  as a task list the user ticks off. Give each item what to run or look at, and what
+  result is expected or would change the code:
+
+  ```md
+  ## To check locally
+
+  - [ ] `wty-zh-en`'s `index.json` (huggingface.co was blocked): is `targetLanguage`
+        `en`? If not, the `target_lang` override in `dict-admin/src/defaults.rs` is needed.
+  - [ ] By hand, in the app: search `學習` (exact); the headword is drawn in traditional
+        Chinese forms.
+  ```
+
+- For each check, pick the cheapest way for the user, and say which in the item:
+  - **By hand**, when it's a quick look: what to open and what to see, e.g. "search
+    學習: the headword is in traditional forms", or a devtools (`Ctrl+Shift+I`)
+    expression to run. Often this is enough; don't make a script for it.
+  - **A local agent session** (Claude Code on the user's machine), when the checks are
+    many, need iterating, or need the running app: it can drive the app with
+    [`scripts/webview.mjs`](scripts/webview.mjs) and fix what it finds. Say what it
+    should check, but only suggest one when that's worth more than a few minutes by
+    hand. `scripts/webview.mjs` is for such sessions: don't ask the user to run it and
+    paste its output to you.
+  - **A script whose output the user pastes back**, when the answer is data to read
+    (e.g. what dictionaries' `index.json` says), as below.
+- Where a script is the way, write one rather than steps to follow by hand, so the
+  user runs one command and pastes its output back to you. Write it in Node (no
+  dependencies, like [`scripts/webview.mjs`](scripts/webview.mjs)) or Rust (e.g. a
+  `dict-admin` subcommand), put it in `scripts/` (or the crate), commit it, and have it:
+  - print plain text or a Markdown table, short enough to paste, with what each line
+    means; no secrets, tokens or the user's paths beyond what's needed;
+  - report a failure per item (with its cause, e.g. `ENOTFOUND huggingface.co`) and go
+    on with the rest, rather than stopping at the first;
+  - not download what the user already has (see below).
+
+  Check it as far as your environment allows (local files, reachable hosts), and put the
+  command in the checklist item, asking for its output.
+
+- Don't write scripts that download again what is already on the user's machine:
+  - Read local copies first: the `dict-admin` library (`CJK_DICT_LIBRARY`, also from
+    `.env`, else `library/`) has the default dictionaries and `dicts.json`; the app's
+    downloads are in `%APPDATA%\cc.polv.cjk-dict`.
+  - Fetch only what is missing, through the tool that already skips what's there
+    (`pnpm admin defaults`, without `--replace`), not a fetch of your own.
+  - Where something must come from the network, fetch the least: one file of a zip by
+    HTTP range requests, not the zip; `index.json`, not the term banks.
+  - Never re-download on every run, and don't keep a second copy of a dictionary
+    outside the library.
+- A script made for a pull request's checks is temporary: once the user has run it and
+  the results are in, remove it (and what mentions it) before the pull request is merged.
+  Keep only what is useful beyond the pull request, e.g. a `dict-admin` option the admin
+  will run again, and say which you kept and why.
+- Keep the list in step with later commits: remove items a commit made moot.
+
+## Dictionaries
+
+- The library the user runs `dict-admin` on may hold dictionaries besides the defaults
+  (`dict-admin/src/defaults.rs`). Those are personal: don't name them in code, tests,
+  comments, docs, commit messages or pull request bodies, even when a script's output
+  shows them. Use a made-up name such as `MyDict` in examples and tests.
+- Only default dictionaries get language overrides in code. Overriding others
+  (`dicts.json`, `add --lang` / `--target-lang`) is up to whoever runs `dict-admin`; don't
+  tell them what to set for a personal one in a pull request.
+- Squash merges keep only the pull request's title and body: put what matters there,
+  not only in commit messages.
+
 ## Commit messages
 
 Use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/):

@@ -123,7 +123,7 @@ describe("CharacterView", () => {
     await reading("lín").trigger("click");
     await flushPromises();
     expect(router.currentRoute.value.query.q).toBe("*<林>{lín}");
-    expect(lang.value).toBe("zh-CN");
+    expect(lang.value).toBe("zh");
     wrapper.unmount();
   });
 

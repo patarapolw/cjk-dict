@@ -24,7 +24,7 @@ use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use yomitan_parser::{
     parser::{self, BankKind, YomitanZip},
-    search::{self, DictSource, parse_lang},
+    search::{self, DictSource, lang_tag, parse_lang},
     tokenize::TokenizerMapper,
 };
 
@@ -51,7 +51,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// List dictionaries in the library
+    /// List dictionaries in the library: name, source and target languages (as built, else
+    /// as dicts.json sets them; `*`: set in dicts.json), zip size, entries, source
     List,
 
     /// Show the R2 mirror size, grouped by dictionary language
@@ -70,9 +71,15 @@ enum Cmd {
         #[arg(long)]
         name: Option<String>,
 
-        /// Source language, e.g. ja-JP / zh-CN / ko-KR (default: index.json sourceLanguage)
+        /// Source language, the terms', e.g. ja-JP / zh / zh-TW / ko-KR (default: index.json
+        /// sourceLanguage)
         #[arg(long)]
         lang: Option<String>,
+
+        /// Target language, the definitions', e.g. en / ja (default: index.json
+        /// targetLanguage)
+        #[arg(long)]
+        target_lang: Option<String>,
 
         /// Overwrite a dictionary of the same name
         #[arg(long)]
@@ -89,9 +96,15 @@ enum Cmd {
         #[arg(long)]
         replace: bool,
 
-        /// Print the default dictionaries and their download URLs, then exit
+        /// Print the default dictionaries (name, source and target language overrides, download
+        /// URL; tab-separated), then exit
         #[arg(long)]
         list: bool,
+
+        /// Set the default dictionaries' source and target languages in dicts.json, for those
+        /// already in the library, without downloading anything; then exit
+        #[arg(long)]
+        langs: bool,
     },
 
     /// Remove a dictionary from the library
@@ -148,15 +161,20 @@ async fn main() -> Result<()> {
                 let size = std::fs::metadata(lib.zip_path(&d.name))
                     .map(|m| format!("{:.1} MB", m.len() as f64 / 1e6))
                     .unwrap_or_else(|_| "missing!".into());
-                let terms = built
+                let info = built
                     .as_ref()
-                    .and_then(|m| m.dicts.iter().find(|x| x.name == d.name))
+                    .and_then(|m| m.dicts.iter().find(|x| x.name == d.name));
+                let terms = info
                     .map(|x| x.counts())
                     .unwrap_or_else(|| "not built".into());
                 println!(
-                    "{}\t{}\t{}\t{}\t{}",
+                    "{}\t{}\t{}\t{}\t{}\t{}",
                     d.name,
-                    d.lang.as_deref().unwrap_or("-"),
+                    list_lang(info.and_then(|x| x.lang.as_deref()), d.lang.as_deref()),
+                    list_lang(
+                        info.and_then(|x| x.target_lang.as_deref()),
+                        d.target_lang.as_deref()
+                    ),
                     size,
                     terms,
                     d.source.as_deref().unwrap_or("")
@@ -168,20 +186,42 @@ async fn main() -> Result<()> {
             source,
             name,
             lang,
+            target_lang,
             replace,
         } => {
-            add(&lib, &source, name, lang, replace)?;
+            add(&lib, &source, name, lang, target_lang, replace)?;
             eprintln!("run `build` (and `upload`) to publish");
         }
         Cmd::Defaults {
             only,
             replace,
             list,
+            langs,
         } => {
+            if langs {
+                let mut dicts = lib.dicts()?;
+                let changed = apply_default_langs(&mut dicts, &only);
+                for c in &changed {
+                    eprintln!("{c}");
+                }
+                if changed.is_empty() {
+                    eprintln!("dicts.json already has the default languages");
+                } else {
+                    lib.save_dicts(&dicts)?;
+                    eprintln!("run `build` (and `upload`) to publish");
+                }
+                return Ok(());
+            }
             let resolved = defaults::resolve(&only)?;
             if list {
                 for d in &resolved {
-                    println!("{}\t{}\t{}", d.name, d.lang.unwrap_or("-"), d.url);
+                    println!(
+                        "{}\t{}\t{}\t{}",
+                        d.name,
+                        d.lang.unwrap_or("-"),
+                        d.target_lang.unwrap_or("-"),
+                        d.url
+                    );
                 }
                 return Ok(());
             }
@@ -200,6 +240,7 @@ async fn main() -> Result<()> {
                     &d.url,
                     Some(d.name.to_string()),
                     d.lang.map(String::from),
+                    d.target_lang.map(String::from),
                     replace,
                 ) {
                     eprintln!("error: {}: {e:#}", d.name);
@@ -236,12 +277,52 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+/// A language for `list`: as built, else as dicts.json sets it, `*` marking the latter's
+fn list_lang(built: Option<&str>, set: Option<&str>) -> String {
+    match (built.or(set), set) {
+        (None, _) => "-".into(),
+        (Some(l), Some(_)) => format!("{l}*"),
+        (Some(l), None) => l.into(),
+    }
+}
+
+/// Set the default dictionaries' language overrides on their dicts.json entries (all, or
+/// `only`); returns what changed, e.g. `CC-CEDICT: lang zh-CN -> zh`.
+fn apply_default_langs(dicts: &mut [DictEntry], only: &[String]) -> Vec<String> {
+    let show = |v: &Option<String>| v.clone().unwrap_or_else(|| "-".into());
+    let mut changed = vec![];
+    for (name, lang, target_lang) in defaults::langs() {
+        if !only.is_empty() && !only.iter().any(|n| n == name) {
+            continue;
+        }
+        let Some(d) = dicts.iter_mut().find(|d| d.name == name) else {
+            continue;
+        };
+        for (field, slot, value) in [
+            ("lang", &mut d.lang, lang),
+            ("target_lang", &mut d.target_lang, target_lang),
+        ] {
+            let value = value.map(String::from);
+            if *slot != value {
+                changed.push(format!(
+                    "{name}: {field} {} -> {}",
+                    show(slot),
+                    show(&value)
+                ));
+                *slot = value;
+            }
+        }
+    }
+    changed
+}
+
 /// Copy or download a zip into the library as `<name>.zip` and record it in dicts.json.
 fn add(
     lib: &Library,
     source: &str,
     name: Option<String>,
     lang: Option<String>,
+    target_lang: Option<String>,
     replace: bool,
 ) -> Result<()> {
     if let Some(l) = &lang {
@@ -328,6 +409,7 @@ fn add(
     let entry = DictEntry {
         name: name.clone(),
         lang,
+        target_lang,
         source: Some(if is_url {
             source.to_string()
         } else {
@@ -398,28 +480,31 @@ async fn build(lib: &Library, lindera_dir: &Path, ids_dir: &Path, rebuild: bool)
         let old = previous
             .as_ref()
             .and_then(|m| m.dicts.iter().find(|x| x.name == d.name));
-        let requested_lang = d
-            .lang
-            .as_deref()
-            .and_then(parse_lang)
-            .map(|lang| lang.to_string());
+        let requested_lang = d.lang.as_deref().and_then(lang_tag);
         let lang_changed = requested_lang
             .as_ref()
             .is_some_and(|lang| old.and_then(|x| x.lang.as_deref()) != Some(lang.as_str()));
+        let target_lang_changed = d
+            .target_lang
+            .as_ref()
+            .is_some_and(|lang| old.and_then(|x| x.target_lang.as_deref()) != Some(lang.as_str()));
         let changed = rebuild_from_scratch
             || old.is_none_or(|x| x.file.size != file.size || x.file.sha256 != file.sha256)
-            || lang_changed;
+            || lang_changed
+            || target_lang_changed;
         let source = DictSource {
             name: d.name.clone(),
             zip,
-            lang: d.lang.as_deref().and_then(parse_lang),
+            lang: requested_lang,
+            target_lang: d.target_lang.clone(),
         };
         if changed {
             changed_names.push(d.name.clone());
             changed_sources.push(DictSource {
                 name: source.name.clone(),
                 zip: source.zip.clone(),
-                lang: source.lang,
+                lang: source.lang.clone(),
+                target_lang: source.target_lang.clone(),
             });
         }
         sources.push(source);
@@ -502,6 +587,8 @@ async fn build(lib: &Library, lindera_dir: &Path, ids_dir: &Path, rebuild: bool)
         .collect();
     // from search.db: dictionaries indexed in an earlier build count too
     let char_counts = search::char_counts(&db)?;
+    // also from search.db: manifests from before had no target language
+    let dict_langs = search::dict_langs(&db)?;
     let mut out = vec![];
     for d in &dicts {
         let file = zip_infos.remove(&d.name).expect("zip info was collected");
@@ -509,26 +596,33 @@ async fn build(lib: &Library, lindera_dir: &Path, ids_dir: &Path, rebuild: bool)
         let old = previous
             .as_ref()
             .and_then(|m| m.dicts.iter().find(|x| x.name == d.name));
-        let (title, revision, lang, term_count) = match (info, old) {
+        let (title, revision, lang, target_lang, term_count) = match (info, old) {
             (Some(info), _) => (
                 info.title.clone(),
                 info.revision.clone(),
                 info.lang.clone(),
+                info.target_lang.clone(),
                 info.term_count,
             ),
             (None, Some(old)) => (
                 old.title.clone(),
                 old.revision.clone(),
                 old.lang.clone(),
+                old.target_lang.clone(),
                 old.term_count,
             ),
             (None, None) => bail!("missing build information for {}", d.name),
         };
+        let (lang, target_lang) = dict_langs
+            .get(&d.name)
+            .cloned()
+            .unwrap_or((lang, target_lang));
         out.push(ManifestDict {
             name: d.name.clone(),
             title,
             revision,
             lang,
+            target_lang,
             term_count,
             char_count: char_counts.get(&d.name).copied().unwrap_or(0),
             file,
@@ -609,11 +703,7 @@ fn upload(lib: &Library, remote: &str, dry_run: bool) -> Result<()> {
 fn size(lib: &Library, lang: Option<&str>) -> Result<()> {
     let manifest = lib.check_fresh()?;
     let lang_filter = lang
-        .map(|lang| {
-            parse_lang(lang)
-                .map(|lang| lang.to_string())
-                .with_context(|| format!("unsupported language {lang}"))
-        })
+        .map(|lang| size_group(lang).with_context(|| format!("unsupported language {lang}")))
         .transpose()?;
     let zip_sizes = zip_size_by_lang(&manifest.dicts, lang_filter.as_deref());
 
@@ -651,6 +741,11 @@ fn size(lib: &Library, lang: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+/// The language `size` groups a dictionary under: `ja-JP`, `ko-KR`, or `zh` for any Chinese
+fn size_group(lang: &str) -> Option<String> {
+    lang_tag(lang.split(['-', '_']).next()?)
+}
+
 fn zip_size_by_lang(
     dicts: &[ManifestDict],
     lang_filter: Option<&str>,
@@ -660,11 +755,7 @@ fn zip_size_by_lang(
         let lang = dict
             .lang
             .as_deref()
-            .map(|lang| {
-                parse_lang(lang)
-                    .map(|lang| lang.to_string())
-                    .unwrap_or_else(|| lang.to_string())
-            })
+            .map(|lang| size_group(lang).unwrap_or_else(|| lang.to_string()))
             .unwrap_or_else(|| "unknown".to_string());
         if lang_filter.is_some_and(|filter| filter != lang) {
             continue;
@@ -679,6 +770,38 @@ fn zip_size_by_lang(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn list_shows_built_languages_and_marks_overrides() {
+        assert_eq!(list_lang(Some("ja-JP"), None), "ja-JP");
+        assert_eq!(list_lang(Some("zh"), Some("zh")), "zh*");
+        // not built yet
+        assert_eq!(list_lang(None, Some("ja")), "ja*");
+        assert_eq!(list_lang(None, None), "-");
+    }
+
+    #[test]
+    fn default_langs_are_set_without_downloading() {
+        let entry = |name: &str, lang: Option<&str>| DictEntry {
+            name: name.into(),
+            lang: lang.map(String::from),
+            target_lang: None,
+            source: None,
+        };
+        let mut dicts = vec![
+            entry("CC-CEDICT", Some("zh-CN")),
+            entry("Pixiv", None),
+            entry("wty-ja-en", Some("ja-JP")),
+            entry("MyDict", Some("ja-JP")),
+        ];
+        assert_eq!(
+            apply_default_langs(&mut dicts, &[]),
+            ["Pixiv: target_lang - -> ja", "CC-CEDICT: lang zh-CN -> zh",]
+        );
+        // not a default: left alone
+        assert_eq!(dicts[3].target_lang, None);
+        assert!(apply_default_langs(&mut dicts, &[]).is_empty());
+    }
     use crate::library::FileInfo;
 
     fn dict(name: &str, lang: Option<&str>, size: u64) -> ManifestDict {
@@ -687,6 +810,7 @@ mod tests {
             title: name.into(),
             revision: "1".into(),
             lang: lang.map(String::from),
+            target_lang: None,
             term_count: 0,
             char_count: 0,
             file: FileInfo {
@@ -721,6 +845,7 @@ mod tests {
             dict("ja-one", Some("ja"), 10),
             dict("ja-two", Some("ja-JP"), 20),
             dict("zh", Some("zh-CN"), 30),
+            dict("zh-tw", Some("zh-TW"), 5),
             dict("unknown", None, 40),
         ];
 
@@ -729,7 +854,7 @@ mod tests {
             BTreeMap::from([
                 ("ja-JP".into(), (2, 30)),
                 ("unknown".into(), (1, 40)),
-                ("zh-CN".into(), (1, 30)),
+                ("zh".into(), (2, 35)),
             ])
         );
         assert_eq!(
