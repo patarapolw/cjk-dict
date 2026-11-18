@@ -762,15 +762,11 @@ mod tests {
             entry("CC-CEDICT", Some("zh-CN")),
             entry("Pixiv", None),
             entry("wty-ja-en", Some("ja-JP")),
-            entry("smk8", Some("ja-JP")),
+            entry("MyDict", Some("ja-JP")),
         ];
         assert_eq!(
             apply_default_langs(&mut dicts, &[]),
-            [
-                "Pixiv: target_lang - -> ja",
-                "CC-CEDICT: lang zh-CN -> zh",
-                "CC-CEDICT: target_lang - -> en",
-            ]
+            ["Pixiv: target_lang - -> ja", "CC-CEDICT: lang zh-CN -> zh",]
         );
         // not a default: left alone
         assert_eq!(dicts[3].target_lang, None);

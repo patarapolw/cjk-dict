@@ -223,7 +223,7 @@
           <ol
             v-if="e.meanings.length"
             class="meanings"
-            :lang="e.target_lang || undefined"
+            :lang="e.target_lang || e.lang || undefined"
           >
             <li v-for="(m, j) in e.meanings" :key="j">{{ m }}</li>
           </ol>

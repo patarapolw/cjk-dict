@@ -13,7 +13,8 @@ struct GhSource {
     pattern: &'static str,
     /// source language (L1), the terms'
     lang: Option<&'static str>,
-    /// target language (L2), the definitions', when index.json doesn't say
+    /// target language (L2), the definitions': only where index.json doesn't say and it
+    /// isn't L1, which the app assumes then
     target_lang: Option<&'static str>,
 }
 
@@ -48,20 +49,20 @@ const GITHUB: &[(&str, &[GhSource])] = &[
                 name: "ja.Wikipedia",
                 pattern: r"^ja\.Wikipedia\..+\.zip$",
                 lang: Some("ja-JP"),
-                target_lang: Some("ja"),
+                target_lang: None,
             },
             GhSource {
                 name: "zh.Wikipedia",
                 pattern: r"^zh\.Wikipedia\..+\.zip$",
                 // Chinese Wikipedia is written in both scripts, for every region
                 lang: Some("zh"),
-                target_lang: Some("zh"),
+                target_lang: None,
             },
             GhSource {
                 name: "ko.Wikipedia",
                 pattern: r"^ko\.Wikipedia\..+\.zip$",
                 lang: Some("ko-KR"),
-                target_lang: Some("ko"),
+                target_lang: None,
             },
         ],
     ),
@@ -72,7 +73,7 @@ const GITHUB: &[(&str, &[GhSource])] = &[
             pattern: r"^CC-CEDICT\.zip$",
             // Mandarin, traditional and simplified alike
             lang: Some("zh"),
-            target_lang: Some("en"),
+            target_lang: None,
         }],
     ),
     (
@@ -81,7 +82,7 @@ const GITHUB: &[(&str, &[GhSource])] = &[
             name: "KO-EN.KRDICT",
             pattern: r"^KO-EN\.KRDICT\.zip$",
             lang: Some("ko-KR"),
-            target_lang: Some("en"),
+            target_lang: None,
         }],
     ),
 ];
@@ -104,7 +105,6 @@ pub fn langs() -> Vec<(&'static str, Option<&'static str>, Option<&'static str>)
         .iter()
         .flat_map(|(_, srcs)| srcs.iter().map(|s| (s.name, s.lang, s.target_lang)))
         .collect();
-    // their index.json says `en` itself
     out.extend(WTY_LANGS.iter().map(|&l| (wty_name(l), Some(l), None)));
     out
 }
@@ -271,8 +271,7 @@ mod tests {
         let langs = langs();
         assert_eq!(langs.len(), names().len());
         assert!(langs.contains(&("Pixiv", None, Some("ja"))));
-        // index.json says ko; its definitions are English
-        assert!(langs.contains(&("KO-EN.KRDICT", Some("ko-KR"), Some("en"))));
+        assert!(langs.contains(&("CC-CEDICT", Some("zh"), None)));
         let r = resolve(&["wty-zh-en".to_string()]).unwrap();
         assert_eq!(r.len(), 1);
         assert_eq!(r[0].lang, Some("zh"));

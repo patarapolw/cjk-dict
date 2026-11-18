@@ -77,8 +77,9 @@ describe("termLang", () => {
 });
 
 describe("glossLang", () => {
-  it("is the dictionary's L2", () => {
+  it("is the dictionary's L2, else its L1", () => {
     expect(glossLang({ target_lang: "ja" })).toBe("ja");
+    expect(glossLang({ lang: "zh", target_lang: null })).toBe("zh");
     expect(glossLang({ target_lang: null })).toBeUndefined();
   });
 });

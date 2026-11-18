@@ -149,6 +149,18 @@ and don't write code that relies on a guess without saying so. Instead:
   dictionaries' `index.json` languages next to their `dicts.json` overrides.
 - Keep the list in step with later commits: remove items a commit made moot.
 
+## Dictionaries
+
+- The library the user runs `dict-admin` on may hold dictionaries besides the defaults
+  (`dict-admin/src/defaults.rs`). Those are personal: don't name them in code, tests,
+  comments, docs, commit messages or pull request bodies, even when a script's output
+  shows them. Use a made-up name such as `MyDict` in examples and tests.
+- Only default dictionaries get language overrides in code. Overriding others
+  (`dicts.json`, `add --lang` / `--target-lang`) is up to whoever runs `dict-admin`; don't
+  tell them what to set for a personal one in a pull request.
+- Squash merges keep only the pull request's title and body: put what matters there,
+  not only in commit messages.
+
 ## Commit messages
 
 Use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/):
