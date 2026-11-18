@@ -51,7 +51,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// List dictionaries in the library
+    /// List dictionaries in the library: name, source and target languages (as built, else
+    /// as dicts.json sets them; `*`: set in dicts.json), zip size, entries, source
     List,
 
     /// Show the R2 mirror size, grouped by dictionary language
@@ -160,15 +161,20 @@ async fn main() -> Result<()> {
                 let size = std::fs::metadata(lib.zip_path(&d.name))
                     .map(|m| format!("{:.1} MB", m.len() as f64 / 1e6))
                     .unwrap_or_else(|_| "missing!".into());
-                let terms = built
+                let info = built
                     .as_ref()
-                    .and_then(|m| m.dicts.iter().find(|x| x.name == d.name))
+                    .and_then(|m| m.dicts.iter().find(|x| x.name == d.name));
+                let terms = info
                     .map(|x| x.counts())
                     .unwrap_or_else(|| "not built".into());
                 println!(
-                    "{}\t{}\t{}\t{}\t{}",
+                    "{}\t{}\t{}\t{}\t{}\t{}",
                     d.name,
-                    d.lang.as_deref().unwrap_or("-"),
+                    list_lang(info.and_then(|x| x.lang.as_deref()), d.lang.as_deref()),
+                    list_lang(
+                        info.and_then(|x| x.target_lang.as_deref()),
+                        d.target_lang.as_deref()
+                    ),
                     size,
                     terms,
                     d.source.as_deref().unwrap_or("")
@@ -269,6 +275,15 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// A language for `list`: as built, else as dicts.json sets it, `*` marking the latter's
+fn list_lang(built: Option<&str>, set: Option<&str>) -> String {
+    match (built.or(set), set) {
+        (None, _) => "-".into(),
+        (Some(l), Some(_)) => format!("{l}*"),
+        (Some(l), None) => l.into(),
+    }
 }
 
 /// Set the default dictionaries' language overrides on their dicts.json entries (all, or
@@ -749,6 +764,15 @@ fn zip_size_by_lang(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn list_shows_built_languages_and_marks_overrides() {
+        assert_eq!(list_lang(Some("ja-JP"), None), "ja-JP");
+        assert_eq!(list_lang(Some("zh"), Some("zh")), "zh*");
+        // not built yet
+        assert_eq!(list_lang(None, Some("ja")), "ja*");
+        assert_eq!(list_lang(None, None), "-");
+    }
 
     #[test]
     fn default_langs_are_set_without_downloading() {
