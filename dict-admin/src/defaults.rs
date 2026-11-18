@@ -97,6 +97,18 @@ pub struct DefaultDict {
     pub url: String,
 }
 
+/// Each default dictionary's (name, source language, target language) overrides; no
+/// network needed.
+pub fn langs() -> Vec<(&'static str, Option<&'static str>, Option<&'static str>)> {
+    let mut out: Vec<_> = GITHUB
+        .iter()
+        .flat_map(|(_, srcs)| srcs.iter().map(|s| (s.name, s.lang, s.target_lang)))
+        .collect();
+    // their index.json says `en` itself
+    out.extend(WTY_LANGS.iter().map(|&l| (wty_name(l), Some(l), None)));
+    out
+}
+
 /// All default dictionary names, in import order.
 pub fn names() -> Vec<&'static str> {
     let mut out: Vec<&'static str> = GITHUB
@@ -201,7 +213,7 @@ pub fn resolve(only: &[String]) -> Result<Vec<DefaultDict>> {
         out.push(DefaultDict {
             name,
             lang: Some(lang),
-            target_lang: Some("en"),
+            target_lang: None,
             url: format!(
                 "https://huggingface.co/datasets/daxida/wty-release/resolve/main/latest/dict/{l1}/en/{name}.zip"
             ),
@@ -256,6 +268,11 @@ mod tests {
 
     #[test]
     fn only_filters_without_network() {
+        let langs = langs();
+        assert_eq!(langs.len(), names().len());
+        assert!(langs.contains(&("Pixiv", None, Some("ja"))));
+        // index.json says ko; its definitions are English
+        assert!(langs.contains(&("KO-EN.KRDICT", Some("ko-KR"), Some("en"))));
         let r = resolve(&["wty-zh-en".to_string()]).unwrap();
         assert_eq!(r.len(), 1);
         assert_eq!(r[0].lang, Some("zh"));

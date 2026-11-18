@@ -46,6 +46,7 @@ node scripts/dict-index.mjs                # add missing defaults, then index.js
 pnpm admin defaults                        # download all that aren't in the library yet
 pnpm admin defaults --only CC-CEDICT --only wty-zh-en
 pnpm admin defaults --only CC-CEDICT --replace           # update to the latest release
+pnpm admin defaults --langs                # set the defaults' languages in dicts.json, no download
 
 pnpm admin add path/to/MyDict.zip --lang ja-JP
 pnpm admin add https://example.com/Other.zip --name Other --lang zh-TW --target-lang en

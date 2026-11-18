@@ -99,6 +99,11 @@ enum Cmd {
         /// URL; tab-separated), then exit
         #[arg(long)]
         list: bool,
+
+        /// Set the default dictionaries' source and target languages in dicts.json, for those
+        /// already in the library, without downloading anything; then exit
+        #[arg(long)]
+        langs: bool,
     },
 
     /// Remove a dictionary from the library
@@ -185,7 +190,22 @@ async fn main() -> Result<()> {
             only,
             replace,
             list,
+            langs,
         } => {
+            if langs {
+                let mut dicts = lib.dicts()?;
+                let changed = apply_default_langs(&mut dicts, &only);
+                for c in &changed {
+                    eprintln!("{c}");
+                }
+                if changed.is_empty() {
+                    eprintln!("dicts.json already has the default languages");
+                } else {
+                    lib.save_dicts(&dicts)?;
+                    eprintln!("run `build` (and `upload`) to publish");
+                }
+                return Ok(());
+            }
             let resolved = defaults::resolve(&only)?;
             if list {
                 for d in &resolved {
@@ -249,6 +269,36 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Set the default dictionaries' language overrides on their dicts.json entries (all, or
+/// `only`); returns what changed, e.g. `CC-CEDICT: lang zh-CN -> zh`.
+fn apply_default_langs(dicts: &mut [DictEntry], only: &[String]) -> Vec<String> {
+    let show = |v: &Option<String>| v.clone().unwrap_or_else(|| "-".into());
+    let mut changed = vec![];
+    for (name, lang, target_lang) in defaults::langs() {
+        if !only.is_empty() && !only.iter().any(|n| n == name) {
+            continue;
+        }
+        let Some(d) = dicts.iter_mut().find(|d| d.name == name) else {
+            continue;
+        };
+        for (field, slot, value) in [
+            ("lang", &mut d.lang, lang),
+            ("target_lang", &mut d.target_lang, target_lang),
+        ] {
+            let value = value.map(String::from);
+            if *slot != value {
+                changed.push(format!(
+                    "{name}: {field} {} -> {}",
+                    show(slot),
+                    show(&value)
+                ));
+                *slot = value;
+            }
+        }
+    }
+    changed
 }
 
 /// Copy or download a zip into the library as `<name>.zip` and record it in dicts.json.
@@ -699,6 +749,33 @@ fn zip_size_by_lang(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_langs_are_set_without_downloading() {
+        let entry = |name: &str, lang: Option<&str>| DictEntry {
+            name: name.into(),
+            lang: lang.map(String::from),
+            target_lang: None,
+            source: None,
+        };
+        let mut dicts = vec![
+            entry("CC-CEDICT", Some("zh-CN")),
+            entry("Pixiv", None),
+            entry("wty-ja-en", Some("ja-JP")),
+            entry("smk8", Some("ja-JP")),
+        ];
+        assert_eq!(
+            apply_default_langs(&mut dicts, &[]),
+            [
+                "Pixiv: target_lang - -> ja",
+                "CC-CEDICT: lang zh-CN -> zh",
+                "CC-CEDICT: target_lang - -> en",
+            ]
+        );
+        // not a default: left alone
+        assert_eq!(dicts[3].target_lang, None);
+        assert!(apply_default_langs(&mut dicts, &[]).is_empty());
+    }
     use crate::library::FileInfo;
 
     fn dict(name: &str, lang: Option<&str>, size: u64) -> ManifestDict {
