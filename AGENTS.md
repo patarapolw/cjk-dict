@@ -106,11 +106,23 @@ and don't write code that relies on a guess without saying so. Instead:
 
   - [ ] `wty-zh-en`'s `index.json` (huggingface.co was blocked): is `targetLanguage`
         `en`? If not, the `target_lang` override in `dict-admin/src/defaults.rs` is needed.
-  - [ ] In the running app, `#/dictionary?q=學習&qState=exact`: the headword is drawn
-        in traditional Chinese forms.
+  - [ ] By hand, in the app: search `學習` (exact); the headword is drawn in traditional
+        Chinese forms.
   ```
 
-- Where a script can do the check, write one rather than steps to follow by hand, so the
+- For each check, pick the cheapest way for the user, and say which in the item:
+  - **By hand**, when it's a quick look: what to open and what to see, e.g. "search
+    學習: the headword is in traditional forms", or a devtools (`Ctrl+Shift+I`)
+    expression to run. Often this is enough; don't make a script for it.
+  - **A local agent session** (Claude Code on the user's machine), when the checks are
+    many, need iterating, or need the running app: it can drive the app with
+    [`scripts/webview.mjs`](scripts/webview.mjs) and fix what it finds. Say what it
+    should check, but only suggest one when that's worth more than a few minutes by
+    hand. `scripts/webview.mjs` is for such sessions: don't ask the user to run it and
+    paste its output to you.
+  - **A script whose output the user pastes back**, when the answer is data to read
+    (e.g. what dictionaries' `index.json` says), as below.
+- Where a script is the way, write one rather than steps to follow by hand, so the
   user runs one command and pastes its output back to you. Write it in Node (no
   dependencies, like [`scripts/webview.mjs`](scripts/webview.mjs)) or Rust (e.g. a
   `dict-admin` subcommand), put it in `scripts/` (or the crate), commit it, and have it:
