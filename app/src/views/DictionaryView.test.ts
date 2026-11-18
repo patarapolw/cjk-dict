@@ -265,7 +265,8 @@ describe("DictionaryView", () => {
     await flushPromises();
     expect(wrapper.get(".headword").attributes("lang")).toBe("zh-Hant");
     // the first result opens by itself
-    expect(wrapper.get(".gloss-list").attributes("lang")).toBe("en");
+    // English definitions, but their Han characters are Chinese
+    expect(wrapper.get(".gloss-list").attributes("lang")).toBe("zh");
     wrapper.unmount();
   });
 });

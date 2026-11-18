@@ -4,8 +4,7 @@
  * and Korean: 直, 骨, 写, ... Only the `lang` of the text picks the right form.
  *
  * Each dictionary has a source language (L1, its terms') and a target language (L2, its
- * definitions'), e.g. wty-zh-en `zh` → `en`, Pixiv (none) → `ja`. Without an L2, L1 is
- * assumed: ja.Wikipedia `ja-JP`.
+ * definitions'), e.g. wty-zh-en `zh` → `en`, Pixiv (none) → `ja`.
  */
 
 import type { ITerm } from "../db/search";
@@ -93,12 +92,16 @@ export function termLang(row: ITerm, fallback = ""): string | undefined {
 }
 
 /**
- * The `lang` of an entry's definitions: the dictionary's target language (L2), else its
- * source language (L1), so Han characters in definitions without a language of their own
- * take the terms' forms. Elements the dictionary marks itself keep their `lang`.
+ * The `lang` of an entry's definitions, for the forms of the Han characters in them: the
+ * dictionary's target language (L2) when it is Japanese, Chinese or Korean (Pixiv's `ja`),
+ * else its source language (L1): the Han characters in wty-ja-en's English definitions are
+ * Japanese, and a dictionary without an L2 is taken to be written in L1 (ja.Wikipedia).
+ * Elements the dictionary marks itself keep their `lang`.
  */
 export function glossLang(
   row: Pick<ITerm, "lang" | "target_lang">,
 ): string | undefined {
-  return row.target_lang || row.lang || undefined;
+  const l2 = row.target_lang;
+  if (l2 && CJK.includes(primaryLang(l2))) return l2;
+  return row.lang || l2 || undefined;
 }

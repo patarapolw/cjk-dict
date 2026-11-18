@@ -77,9 +77,15 @@ describe("termLang", () => {
 });
 
 describe("glossLang", () => {
-  it("is the dictionary's L2, else its L1", () => {
-    expect(glossLang({ target_lang: "ja" })).toBe("ja");
+  it("is the dictionary's L2 if CJK, else its L1", () => {
+    // Pixiv
+    expect(glossLang({ lang: null, target_lang: "ja" })).toBe("ja");
+    expect(glossLang({ lang: "ko-KR", target_lang: "ko" })).toBe("ko");
+    // wty-ja-en: Han characters in English definitions are Japanese
+    expect(glossLang({ lang: "ja-JP", target_lang: "en" })).toBe("ja-JP");
     expect(glossLang({ lang: "zh", target_lang: null })).toBe("zh");
+    // KANJIDIC: no L1
+    expect(glossLang({ lang: null, target_lang: "en" })).toBe("en");
     expect(glossLang({ target_lang: null })).toBeUndefined();
   });
 });

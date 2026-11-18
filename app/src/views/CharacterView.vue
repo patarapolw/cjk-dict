@@ -220,11 +220,7 @@
               </dd>
             </template>
           </dl>
-          <ol
-            v-if="e.meanings.length"
-            class="meanings"
-            :lang="e.target_lang || e.lang || undefined"
-          >
+          <ol v-if="e.meanings.length" class="meanings" :lang="glossLang(e)">
             <li v-for="(m, j) in e.meanings" :key="j">{{ m }}</li>
           </ol>
           <details v-if="sortedStats(e).length" class="stats">
@@ -310,6 +306,7 @@ import {
   sortByLang,
   sortIds,
 } from "../util/han";
+import { glossLang } from "../util/lang";
 import { dictsVersion, toBeLoaded } from "../util/loading";
 import { scrollToStart } from "../util/scroll";
 import { lang } from "../util/settings";
