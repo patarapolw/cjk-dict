@@ -72,7 +72,7 @@ const GITHUB: &[(&str, &[GhSource])] = &[
             pattern: r"^CC-CEDICT\.zip$",
             // Mandarin, traditional and simplified alike
             lang: Some("zh"),
-            target_lang: Some("en"),
+            target_lang: None,
         }],
     ),
     (
@@ -81,7 +81,7 @@ const GITHUB: &[(&str, &[GhSource])] = &[
             name: "KO-EN.KRDICT",
             pattern: r"^KO-EN\.KRDICT\.zip$",
             lang: Some("ko-KR"),
-            target_lang: Some("en"),
+            target_lang: None,
         }],
     ),
 ];
@@ -201,7 +201,7 @@ pub fn resolve(only: &[String]) -> Result<Vec<DefaultDict>> {
         out.push(DefaultDict {
             name,
             lang: Some(lang),
-            target_lang: Some("en"),
+            target_lang: None,
             url: format!(
                 "https://huggingface.co/datasets/daxida/wty-release/resolve/main/latest/dict/{l1}/en/{name}.zip"
             ),
