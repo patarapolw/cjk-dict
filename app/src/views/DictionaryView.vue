@@ -235,6 +235,7 @@ import {
   toFurigana,
 } from "../util/furigana";
 import { hanChars } from "../util/han";
+import { romajiTailGlob } from "../util/romaji";
 import { dictsVersion, toBeLoaded } from "../util/loading";
 import { remainingScroll, scrollToStart } from "../util/scroll";
 import { lang } from "../util/settings";
@@ -542,12 +543,21 @@ async function loadMore(isNew?: boolean) {
   // a space marks a word boundary: look up the first word only
   if (rest) type = type || "exact";
 
+  // auto-convert to kana leaves an incomplete syllable as typed (にほんg): search its kana
+  // row (にほん[がぎぐげご]) instead of nothing, which would split the query into words
+  const romajiTail =
+    autoKana.value && isJapanese.value && !romanized
+      ? romajiTailGlob(term)
+      : null;
+  const searchTerm = romajiTail && type !== "fts" ? romajiTail : term;
+  if (romajiTail && type === "exact") type = null;
+
   let segmented: string[] = [];
 
   const request = (async () => {
     try {
       const result = await searchDB.search({
-        term,
+        term: searchTerm,
         reading,
         readingGlob,
         romanized,
@@ -568,6 +578,7 @@ async function loadMore(isNew?: boolean) {
         !reading &&
         !readingGlob &&
         !romanized &&
+        !romajiTail &&
         type !== "fts" &&
         [...term].length > 1
       ) {
