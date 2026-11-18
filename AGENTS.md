@@ -110,6 +110,21 @@ and don't write code that relies on a guess without saying so. Instead:
         in traditional Chinese forms.
   ```
 
+- Where a script can do the check, write one rather than steps to follow by hand, so the
+  user runs one command and pastes its output back to you. Write it in Node (no
+  dependencies, like [`scripts/webview.mjs`](scripts/webview.mjs)) or Rust (e.g. a
+  `dict-admin` subcommand), put it in `scripts/` (or the crate), commit it, and have it:
+  - print plain text or a Markdown table, short enough to paste, with what each line
+    means; no secrets, tokens or the user's paths beyond what's needed;
+  - report a failure per item (with its cause, e.g. `ENOTFOUND huggingface.co`) and go
+    on with the rest, rather than stopping at the first;
+  - download no more than it needs, e.g. HTTP range requests for one file of a zip.
+
+  Check it as far as your environment allows (local files, reachable hosts), and put the
+  command in the checklist item, asking for its output.
+
+- Existing scripts: [`scripts/dict-index.mjs`](scripts/dict-index.mjs) prints the
+  dictionaries' `index.json` languages next to `dict-admin`'s overrides.
 - Keep the list in step with later commits: remove items a commit made moot.
 
 ## Commit messages

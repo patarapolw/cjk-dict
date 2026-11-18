@@ -95,7 +95,8 @@ enum Cmd {
         #[arg(long)]
         replace: bool,
 
-        /// Print the default dictionaries and their download URLs, then exit
+        /// Print the default dictionaries (name, source and target language overrides, download
+        /// URL; tab-separated), then exit
         #[arg(long)]
         list: bool,
     },
@@ -188,7 +189,13 @@ async fn main() -> Result<()> {
             let resolved = defaults::resolve(&only)?;
             if list {
                 for d in &resolved {
-                    println!("{}\t{}\t{}", d.name, d.lang.unwrap_or("-"), d.url);
+                    println!(
+                        "{}\t{}\t{}\t{}",
+                        d.name,
+                        d.lang.unwrap_or("-"),
+                        d.target_lang.unwrap_or("-"),
+                        d.url
+                    );
                 }
                 return Ok(());
             }
