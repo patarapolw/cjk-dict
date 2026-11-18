@@ -118,14 +118,21 @@ and don't write code that relies on a guess without saying so. Instead:
     means; no secrets, tokens or the user's paths beyond what's needed;
   - report a failure per item (with its cause, e.g. `ENOTFOUND huggingface.co`) and go
     on with the rest, rather than stopping at the first;
-  - download no more than it needs, e.g. HTTP range requests for one file of a zip.
+  - not download what the user already has (see below).
 
   Check it as far as your environment allows (local files, reachable hosts), and put the
   command in the checklist item, asking for its output.
 
-- Prefer what the user already has to downloading it again: the library
-  (`CJK_DICT_LIBRARY`, else `library/`) has the default dictionaries, and
-  `pnpm admin defaults` adds only those it lacks.
+- Don't write scripts that download again what is already on the user's machine:
+  - Read local copies first: the `dict-admin` library (`CJK_DICT_LIBRARY`, also from
+    `.env`, else `library/`) has the default dictionaries and `dicts.json`; the app's
+    downloads are in `%APPDATA%\cc.polv.cjk-dict`.
+  - Fetch only what is missing, through the tool that already skips what's there
+    (`pnpm admin defaults`, without `--replace`), not a fetch of your own.
+  - Where something must come from the network, fetch the least: one file of a zip by
+    HTTP range requests, not the zip; `index.json`, not the term banks.
+  - Never re-download on every run, and don't keep a second copy of a dictionary
+    outside the library.
 - Existing scripts: [`scripts/dict-index.mjs`](scripts/dict-index.mjs) prints the library's
   dictionaries' `index.json` languages next to their `dicts.json` overrides.
 - Keep the list in step with later commits: remove items a commit made moot.
