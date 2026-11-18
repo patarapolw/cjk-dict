@@ -66,7 +66,26 @@ describe("glossaryTermLang", () => {
     const g = [
       {
         type: "structured-content",
-        content: [{ tag: "span", content: "直", lang: "zh-Hans" }],
+        content: [
+          {
+            tag: "div",
+            content: [
+              "【",
+              [{ tag: "span", content: "直", lang: "zh-Hans" }],
+              "】",
+            ],
+          },
+          // a reference in the definitions, in another script
+          {
+            tag: "ul",
+            content: [
+              {
+                tag: "li",
+                content: [{ tag: "span", content: "炎帝", lang: "zh" }],
+              },
+            ],
+          },
+        ],
       },
     ];
     expect(glossaryTermLang("直", g, "zh")).toBeNull();

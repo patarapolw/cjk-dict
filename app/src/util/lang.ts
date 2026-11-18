@@ -34,33 +34,36 @@ function textOf(node: unknown): string | null {
   return null;
 }
 
-/** the `lang` of the element in `node` that holds just `term` */
-function findLang(node: unknown, term: string, depth = 0): string | null {
+type El = { lang?: unknown; content?: unknown };
+
+const langOf = (n: unknown) =>
+  n && typeof n === "object" && typeof (n as El).lang === "string"
+    ? ((n as El).lang as string) || null
+    : null;
+
+/**
+ * The `lang` of an element in `node` that holds just `term`, with a sibling in another
+ * script of that language: CC-CEDICT's `【學習・学习】`, each span in its own script.
+ */
+function findScript(node: unknown, term: string, depth = 0): string | null {
   if (depth > 32 || !node || typeof node !== "object") return null;
   if (Array.isArray(node)) {
     for (const n of node) {
-      const l = findLang(n, term, depth + 1);
-      if (l) return l;
+      const l = langOf(n);
+      if (l && textOf((n as El).content) === term) {
+        const p = primaryLang(l);
+        const other = node.some((m) => {
+          const k = langOf(m);
+          return m !== n && k && k !== l && primaryLang(k) === p;
+        });
+        if (other) return l;
+      }
+      const found = findScript(n, term, depth + 1);
+      if (found) return found;
     }
     return null;
   }
-  const el = node as { lang?: unknown; content?: unknown };
-  if (typeof el.lang === "string" && el.lang && textOf(el.content) === term) {
-    return el.lang;
-  }
-  return findLang(el.content, term, depth + 1);
-}
-
-/** every `lang` in `node` */
-function allLangs(node: unknown, out = new Set<string>(), depth = 0) {
-  if (depth > 32 || !node || typeof node !== "object") return out;
-  if (Array.isArray(node)) {
-    for (const n of node) allLangs(n, out, depth + 1);
-    return out;
-  }
-  const el = node as { lang?: unknown; content?: unknown };
-  if (typeof el.lang === "string" && el.lang) out.add(el.lang);
-  return allLangs(el.content, out, depth + 1);
+  return findScript((node as El).content, term, depth + 1);
 }
 
 /**
@@ -68,8 +71,8 @@ function allLangs(node: unknown, out = new Set<string>(), depth = 0) {
  * a headword is in, e.g. CC-CEDICT's `<span lang="zh-Hant">學習</span>` and
  * `<span lang="zh-Hans">学习</span>`, as Mandarin isn't always written as in China. Only a
  * language matching `l1` (or any of Japanese, Chinese and Korean without one) counts, and
- * only next to another form of it: CC-CEDICT writes a term the same in both scripts (直)
- * once, as `zh-Hans`, which then says nothing of its script.
+ * only next to the term's form in another script: CC-CEDICT writes a term the same in
+ * both scripts (直) once, as `zh-Hans`, which then says nothing of its script.
  */
 export function glossaryTermLang(
   term: string,
@@ -77,14 +80,11 @@ export function glossaryTermLang(
   l1?: string | null,
 ): string | null {
   if (!term) return null;
-  const found = findLang(glossary, term);
+  const found = findScript(glossary, term);
   if (!found) return null;
   const p = primaryLang(found);
   if (l1 ? p !== primaryLang(l1) : !CJK.includes(p)) return null;
-  const other = [...allLangs(glossary)].some(
-    (l) => l !== found && primaryLang(l) === p,
-  );
-  return other ? found : null;
+  return found;
 }
 
 const cache = new WeakMap<ITerm, string | null>();
