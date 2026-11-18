@@ -188,6 +188,19 @@ describe("parseQuery with kanaRow", () => {
     });
   });
 
+  it("only where the word ends", () => {
+    // okurigana or other characters after the reading
+    expect(parse("<食>{たb}べる")).not.toHaveProperty("incomplete");
+    expect(parse("<日本>{にほn}語")).not.toHaveProperty("incomplete");
+    // romaji in the base, not at the end of the word
+    expect(parse("<日本g>{にほん}")).not.toHaveProperty("incomplete");
+    // the term after a complete reading
+    expect(parse("<食>{た}b")).toMatchObject({
+      term: "食[ばびぶべぼ]",
+      incomplete: true,
+    });
+  });
+
   it("leaves complete queries, pinyin and other options alone", () => {
     expect(parse("にほん")).not.toHaveProperty("incomplete");
     expect(parse("{ni3 hao}")).toMatchObject({ reading: "ni3 hao" });

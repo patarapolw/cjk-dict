@@ -12,8 +12,9 @@ import { romajiTailGlob } from "./romaji";
  * search. `*<興>{キョウ}` with one character is not a pattern but the words with 興 read
  * キョウ anywhere in them (`ch`, `chReading`).
  *
- * With `kanaRow` (auto-convert to kana), an incomplete romaji syllable at the end of the term
- * or of its reading, which auto-convert leaves as typed, is its kana row: `にほんg` is
+ * With `kanaRow` (auto-convert to kana), an incomplete romaji syllable at the end of the word,
+ * in the term or in a reading that ends the word (not one followed by okurigana), which
+ * auto-convert leaves as typed, is its kana row: `にほんg` is
  * `にほん[がぎぐげご]`, `{にほn` `{にほ[なにぬねのん]`. A reading alone matches each kana of
  * the row by prefix.
  */
@@ -93,9 +94,12 @@ function parseWord(raw: string, opts: ParseOptions): ParsedQuery {
   let term = "";
   let reading = "";
   let hasReading = false;
+  /** the word ends with a reading, not okurigana or other characters after it */
+  let endsWithReading = false;
 
   for (const m of first.matchAll(SEGMENT)) {
     const [, base, rt, rtOnly, plain] = m;
+    endsWithReading = plain === undefined;
     if (base !== undefined) {
       term += base;
       reading += rt;
@@ -115,9 +119,10 @@ function parseWord(raw: string, opts: ParseOptions): ParsedQuery {
 
   let incomplete = false;
   if (opts.kanaRow) {
-    const t = romajiTailGlob(term);
+    // only where the typing is: at the end of the term, or of a reading that ends the word
+    const t = endsWithReading ? null : romajiTailGlob(term);
     if (t !== null) term = t;
-    const r = hasReading ? romajiTailGlob(reading) : null;
+    const r = endsWithReading ? romajiTailGlob(reading) : null;
     if (r !== null) reading = r;
     incomplete = t !== null || r !== null;
   }
