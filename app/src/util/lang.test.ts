@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ITerm } from "../db/search";
-import { glossLang, glossaryTermLang, termLang } from "./lang";
+import { glossLang, glossaryTermLang, headLang, termLang } from "./lang";
 import { normalizeLang } from "./settings";
 
 /** CC-CEDICT's glossary: the headword in both scripts, each with its `lang` */
@@ -70,9 +70,32 @@ describe("termLang", () => {
       "zh-Hant",
     );
     expect(termLang(row({ term: "学", lang: "zh" }), "ja-JP")).toBe("zh");
-    // Pixiv: no L1
-    expect(termLang(row({ term: "初音ミク" }), "ja-JP")).toBe("ja-JP");
-    expect(termLang(row({ term: "初音ミク" }))).toBeUndefined();
+    // Pixiv: no L1, but its target language is CJK
+    expect(termLang(row({ term: "初音ミク", target_lang: "ja" }))).toBe("ja");
+    // KANJIDIC: neither
+    expect(termLang(row({ term: "直", target_lang: "en" }), "ko-KR")).toBe(
+      "ko-KR",
+    );
+    expect(termLang(row({ term: "直", target_lang: "en" }))).toBeUndefined();
+  });
+});
+
+describe("headLang", () => {
+  const glossary = JSON.stringify(cedict("學習", "学习"));
+  const wty = row({ term: "学习", lang: "zh" });
+  const cedictRow = row({ term: "学习", lang: "zh", glossary });
+
+  it("prefers an entry that names the term's script", () => {
+    expect(headLang([wty, cedictRow])).toBe("zh-Hans");
+  });
+
+  it("prefers entries in the search language", () => {
+    const ja = row({ term: "学习", lang: "ja-JP" });
+    expect(headLang([ja, cedictRow], "ja-JP")).toBe("ja-JP");
+    expect(headLang([ja, cedictRow], "zh")).toBe("zh-Hans");
+    expect(headLang([ja, wty], "ko-KR")).toBe("ja-JP");
+    expect(headLang([row({ term: "x" })], "ko-KR")).toBe("ko-KR");
+    expect(headLang([])).toBeUndefined();
   });
 });
 

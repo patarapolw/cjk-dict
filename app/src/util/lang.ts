@@ -72,11 +72,8 @@ export function glossaryTermLang(
 
 const cache = new WeakMap<ITerm, string | null>();
 
-/**
- * The `lang` of an entry's term: as its glossary says, else the dictionary's source
- * language, else `fallback` (e.g. the search language), else none (inherited).
- */
-export function termLang(row: ITerm, fallback = ""): string | undefined {
+/** the script the entry's glossary says its term is in (cached), e.g. `zh-Hant` */
+function declaredLang(row: ITerm): string | null {
   let found = cache.get(row);
   if (found === undefined) {
     let glossary: unknown;
@@ -88,7 +85,44 @@ export function termLang(row: ITerm, fallback = ""): string | undefined {
     found = glossaryTermLang(row.term, glossary, row.lang);
     cache.set(row, found);
   }
-  return found || row.lang || fallback || undefined;
+  return found;
+}
+
+const cjkOrNull = (tag?: string | null) =>
+  tag && CJK.includes(primaryLang(tag)) ? tag : null;
+
+/**
+ * The `lang` of an entry's term: as its glossary says, else the dictionary's source
+ * language (L1), else its target language if Japanese, Chinese or Korean (Pixiv: `ja`,
+ * no L1), else `fallback` (e.g. the search language), else none (inherited).
+ */
+export function termLang(row: ITerm, fallback = ""): string | undefined {
+  return (
+    declaredLang(row) ||
+    row.lang ||
+    cjkOrNull(row.target_lang) ||
+    fallback ||
+    undefined
+  );
+}
+
+/**
+ * The `lang` of a result's heading, from its entries, which may be from several
+ * dictionaries: of those in the search language (any, with none chosen), one whose
+ * glossary names the term's script (CC-CEDICT's `zh-Hans`) first, else the first entry's.
+ */
+export function headLang(entries: ITerm[], fallback = ""): string | undefined {
+  const known = entries.flatMap((e) => {
+    const lang = termLang(e);
+    return lang ? [{ lang, declared: !!declaredLang(e) }] : [];
+  });
+  const inSearchLang = fallback
+    ? known.filter((c) => primaryLang(c.lang) === primaryLang(fallback))
+    : [];
+  const pool = inSearchLang.length ? inSearchLang : known;
+  return (
+    (pool.find((c) => c.declared) ?? pool[0])?.lang ?? (fallback || undefined)
+  );
 }
 
 /**

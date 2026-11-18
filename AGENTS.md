@@ -145,8 +145,10 @@ and don't write code that relies on a guess without saying so. Instead:
     HTTP range requests, not the zip; `index.json`, not the term banks.
   - Never re-download on every run, and don't keep a second copy of a dictionary
     outside the library.
-- Existing scripts: [`scripts/dict-index.mjs`](scripts/dict-index.mjs) prints the library's
-  dictionaries' `index.json` languages next to their `dicts.json` overrides.
+- A script made for a pull request's checks is temporary: once the user has run it and
+  the results are in, remove it (and what mentions it) before the pull request is merged.
+  Keep only what is useful beyond the pull request, e.g. a `dict-admin` option the admin
+  will run again, and say which you kept and why.
 - Keep the list in step with later commits: remove items a commit made moot.
 
 ## Dictionaries

@@ -141,15 +141,15 @@
           :aria-expanded="openedItems.includes(it.id)"
           @click="toggleItem(it.id)"
         >
-          <ruby v-if="headReading(it)" class="headword" :lang="headLang(it)"
+          <ruby v-if="headReading(it)" class="headword" :lang="itemLang(it)"
             >{{ headTerm(it) }}<rt>{{ headReading(it) }}</rt></ruby
           >
-          <span v-else class="headword" :lang="headLang(it)">{{
+          <span v-else class="headword" :lang="itemLang(it)">{{
             headTerm(it)
           }}</span>
         </button>
         <div v-if="openedItems.includes(it.id)" class="accordion-content">
-          <div class="item-actions" :lang="headLang(it)">
+          <div class="item-actions" :lang="itemLang(it)">
             <button
               type="button"
               class="link-button"
@@ -237,7 +237,7 @@ import {
   toFurigana,
 } from "../util/furigana";
 import { hanChars } from "../util/han";
-import { termLang } from "../util/lang";
+import { headLang } from "../util/lang";
 import { dictsVersion, toBeLoaded } from "../util/loading";
 import { remainingScroll, scrollToStart } from "../util/scroll";
 import { lang } from "../util/settings";
@@ -632,9 +632,8 @@ function headTerm(it: Item) {
 }
 
 /** the heading's language, so its Han characters take that language's forms */
-function headLang(it: Item) {
-  const e = it.entries[0];
-  return e ? termLang(e, lang.value) : lang.value || undefined;
+function itemLang(it: Item) {
+  return headLang(it.entries, lang.value);
 }
 
 function headReading(it: Item) {
