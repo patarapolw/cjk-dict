@@ -587,6 +587,8 @@ async fn build(lib: &Library, lindera_dir: &Path, ids_dir: &Path, rebuild: bool)
         .collect();
     // from search.db: dictionaries indexed in an earlier build count too
     let char_counts = search::char_counts(&db)?;
+    // also from search.db: manifests from before had no target language
+    let dict_langs = search::dict_langs(&db)?;
     let mut out = vec![];
     for d in &dicts {
         let file = zip_infos.remove(&d.name).expect("zip info was collected");
@@ -611,6 +613,10 @@ async fn build(lib: &Library, lindera_dir: &Path, ids_dir: &Path, rebuild: bool)
             ),
             (None, None) => bail!("missing build information for {}", d.name),
         };
+        let (lang, target_lang) = dict_langs
+            .get(&d.name)
+            .cloned()
+            .unwrap_or((lang, target_lang));
         out.push(ManifestDict {
             name: d.name.clone(),
             title,

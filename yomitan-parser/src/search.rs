@@ -178,6 +178,16 @@ pub fn char_counts(db: &Path) -> Result<HashMap<String, usize>, YomitanError> {
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
+/// Each dictionary's source and target languages (L1, L2) as indexed, by name
+pub fn dict_langs(
+    db: &Path,
+) -> Result<HashMap<String, (Option<String>, Option<String>)>, YomitanError> {
+    let conn = Connection::open_with_flags(db, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let mut st = conn.prepare("SELECT name, L1, L2 FROM dict")?;
+    let rows = st.query_map([], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?))))?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
 /// Whether `db` has Japanese terms with readings but no kanji dictionary with kana readings
 /// (e.g. KANJIDIC), so that [`build_chars`] could not index the readings of their kanji:
 /// `*<興>{キョウ}` finds no Japanese words then.
@@ -2653,6 +2663,10 @@ mod han_tests {
         assert_eq!(mori.entries[0].kunyomi, "もり");
         assert_eq!(mori.entries[0].lang.as_deref(), Some("ja-JP"));
         assert_eq!(mori.entries[0].target_lang.as_deref(), Some("en"));
+        assert_eq!(
+            dict_langs(&db_path).unwrap()["kanji"],
+            (Some("ja-JP".into()), Some("en".into()))
+        );
         let hayashi = &found[1];
         assert_eq!(hayashi.uses, 2);
         assert_eq!(hayashi.entries[0].meanings, ["grove", "forest"]);
