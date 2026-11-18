@@ -1,5 +1,7 @@
 import { toHiragana } from "wanakana";
 
+import { romajiTailGlob } from "./romaji";
+
 /**
  * Furigana syntax in the search box: `<日本>{にほん}語` searches the term 日本語 whose reading
  * starts with にほん. `{reading}` alone searches by reading only, e.g. `{ni3 hao3}`.
@@ -9,12 +11,18 @@ import { toHiragana } from "wanakana";
  * the term (`[日月]曜日`). Not in a reading alone, nor in an exact (`=`) or token (`~`)
  * search. `*<興>{キョウ}` with one character is not a pattern but the words with 興 read
  * キョウ anywhere in them (`ch`, `chReading`).
+ *
+ * With `kanaRow` (auto-convert to kana), an incomplete romaji syllable, which auto-convert
+ * leaves as typed, is its kana row: at the end of every reading (before its `}`, or the end
+ * of an unclosed one), and at the end of the term when the word ends with it. `にほんg` is
+ * `にほん[がぎぐげごっ]`, `{にほn` `{にほ[なにぬねのん]`, `<食>{たb}べる` `<食>{た[っばびぶべぼ]}べる`.
+ * A reading alone matches each kana of the row by prefix.
  */
 
 const KANA = /^[\p{scx=Hiragana}\p{scx=Katakana}ー]+$/u;
 /** spells its own reading outside `<>{}`: kana, and Hangul (`<光>{광}나다`) */
 const SELF_READING = /^[\p{scx=Hiragana}\p{scx=Katakana}ー\p{sc=Hangul}]+$/u;
-const KANA_OR_WILDCARD = /^[\p{scx=Hiragana}\p{scx=Katakana}ー*?]+$/u;
+const KANA_OR_WILDCARD = /^[\p{scx=Hiragana}\p{scx=Katakana}ー*?[\]^]+$/u;
 const HANGUL_OR_WILDCARD = /^[\p{sc=Hangul}*?]+$/u;
 /** a run of characters whose reading the IME (or the dictionary) supplies */
 const KANJI_RUN = /([\p{sc=Han}\p{N}々〆ヵヶ]+)/u;
@@ -36,6 +44,13 @@ export interface ParsedQuery {
    */
   ch?: string;
   chReading?: string;
+  /** an incomplete romaji syllable was replaced by its kana row (`kanaRow`) */
+  incomplete?: boolean;
+}
+
+export interface ParseOptions {
+  /** an incomplete romaji syllable at the end is its kana row */
+  kanaRow?: boolean;
 }
 
 /** one Han character, with a variation selector */
@@ -63,8 +78,8 @@ function splitFirstWord(q: string): [string, string] {
   return [q, ""];
 }
 
-export function parseQuery(raw: string): ParsedQuery {
-  const parsed = parseWord(raw);
+export function parseQuery(raw: string, opts: ParseOptions = {}): ParsedQuery {
+  const parsed = parseWord(raw, opts);
   const [first] = splitFirstWord(normalizeQuery(raw).trim());
   const m = /^\*<([^<>{}]+)>\{([^{}*?]+)\}\*?$/u.exec(first);
   if (m && ONE_HAN.test(m[1]) && m[2].trim()) {
@@ -73,21 +88,32 @@ export function parseQuery(raw: string): ParsedQuery {
   return parsed;
 }
 
-function parseWord(raw: string): ParsedQuery {
+function parseWord(raw: string, opts: ParseOptions): ParsedQuery {
   const [first, rest] = splitFirstWord(normalizeQuery(raw).trim());
 
   let term = "";
   let reading = "";
   let hasReading = false;
+  /** the word ends with a reading, not okurigana or other characters after it */
+  let endsWithReading = false;
+  let incomplete = false;
+  /** a reading's trailing romaji (before its `}`, or the end) as its kana row */
+  const rowOf = (rt: string) => {
+    const glob = opts.kanaRow ? romajiTailGlob(rt) : null;
+    if (glob === null) return rt;
+    incomplete = true;
+    return glob;
+  };
 
   for (const m of first.matchAll(SEGMENT)) {
     const [, base, rt, rtOnly, plain] = m;
+    endsWithReading = plain === undefined;
     if (base !== undefined) {
       term += base;
-      reading += rt;
+      reading += rowOf(rt);
       hasReading = true;
     } else if (rtOnly !== undefined) {
-      reading += rtOnly;
+      reading += rowOf(rtOnly);
       hasReading = true;
     } else if (plain !== undefined) {
       const text = plain.replace(/[<>]/g, "");
@@ -98,8 +124,18 @@ function parseWord(raw: string): ParsedQuery {
   }
 
   reading = reading.replace(/\*+/g, "*").trim();
+
+  // the term's, only at the end of the word: not in a furigana base (`<日本g>{にほん}`)
+  if (opts.kanaRow && !endsWithReading) {
+    const t = romajiTailGlob(term);
+    if (t !== null) {
+      term = t;
+      incomplete = true;
+    }
+  }
+  const flag = incomplete ? { incomplete } : {};
   if (!hasReading || !reading.replace(/[*?\s]/g, "")) {
-    return { term, reading: "", readingGlob: "", rest };
+    return { term, reading: "", readingGlob: "", rest, ...flag };
   }
   // a Hangul reading is matched as reading tokens (whole words), unless a wildcard puts it
   // elsewhere in the word: `*<興>{흥}` finds 復興 (부흥)
@@ -108,13 +144,14 @@ function parseWord(raw: string): ParsedQuery {
     (KANA_OR_WILDCARD.test(reading) ||
       (/[*?]/u.test(reading) && HANGUL_OR_WILDCARD.test(reading)))
   ) {
-    return { term, reading: "", readingGlob: reading, rest };
+    return { term, reading: "", readingGlob: reading, rest, ...flag };
   }
   return {
     term,
     reading: reading.replace(/[*?]/g, " ").replace(/\s+/g, " ").trim(),
     readingGlob: "",
     rest,
+    ...flag,
   };
 }
 

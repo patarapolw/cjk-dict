@@ -257,13 +257,19 @@ function toggleReadingMode() {
   elSearchInput.value?.focus();
 }
 
+const isJapanese = computed(() => ["", "ja-JP"].includes(lang.value));
+const autoKana = ref(lang.value === "ja-JP");
+
 const parsed = computed(() => {
   const query = q.value.trim();
+  // auto-convert to kana leaves an incomplete syllable as typed (にほんg): search its kana
+  // row (にほん[がぎぐげごっ]) instead of nothing, which would split the query into words
+  const opts = { kanaRow: autoKana.value && isJapanese.value };
   // furigana syntax typed by hand still wins
   if (readingMode.value && query && !/[<>{}＜＞｛｝]/u.test(query)) {
-    return parseQuery(`{${query}}`);
+    return parseQuery(`{${query}}`, opts);
   }
-  return parseQuery(q.value);
+  return parseQuery(q.value, opts);
 });
 
 // "~" needs the lindera tokenizer, which downloads in the background on first launch
@@ -283,8 +289,6 @@ async function toggleItem(id: number) {
   onScroll();
 }
 
-const isJapanese = computed(() => ["", "ja-JP"].includes(lang.value));
-const autoKana = ref(lang.value === "ja-JP");
 const imeFurigana = ref(true);
 
 const isKorean = computed(() => lang.value === "ko-KR");
@@ -399,7 +403,7 @@ async function clearQuery() {
 const SEARCH_DEBOUNCE_MS = 200;
 let searchTimer: ReturnType<typeof setTimeout> | undefined;
 
-watch([q, qState, readingMode, lang, dictsVersion, romanKo], () => {
+watch([q, qState, readingMode, lang, dictsVersion, romanKo, autoKana], () => {
   // bump now, so an in-flight search for the old query discards its results
   const id = ++requestId;
   clearTimeout(searchTimer);
@@ -542,6 +546,9 @@ async function loadMore(isNew?: boolean) {
   // a space marks a word boundary: look up the first word only
   if (rest) type = type || "exact";
 
+  // an incomplete syllable is still being typed: what it starts, not an exact word
+  if (query.incomplete && type === "exact") type = null;
+
   let segmented: string[] = [];
 
   const request = (async () => {
@@ -568,6 +575,7 @@ async function loadMore(isNew?: boolean) {
         !reading &&
         !readingGlob &&
         !romanized &&
+        !query.incomplete &&
         type !== "fts" &&
         [...term].length > 1
       ) {
