@@ -1071,6 +1071,18 @@ mod reading_tests {
     }
 
     #[test]
+    fn classes_expand_to_their_characters() {
+        assert_eq!(expand_classes("にほん", 10), None);
+        assert_eq!(
+            expand_classes("に[ほっ][んぽ]", 10).unwrap(),
+            ["にほん", "にほぽ", "にっん", "にっぽ"]
+        );
+        assert_eq!(expand_classes("に[^ほ]", 10), None);
+        assert_eq!(expand_classes("に[ほ", 10), None);
+        assert_eq!(expand_classes("[あい][うえ]", 3), None);
+    }
+
+    #[test]
     fn reading_alone_is_a_prefix_search_unless_exact() {
         let (dir, db) = fixture();
         let req = |kind: Option<&str>, reading: &str| SearchRequest {
@@ -1087,6 +1099,16 @@ mod reading_tests {
             found(&db, req(Some("exact"), "にっぽん")),
             pairs(&[("日本", "にっぽん")])
         );
+        // `[...]` is one of its characters, e.g. the kana row of incomplete romaji
+        assert_eq!(
+            found(&db, req(None, "にほ[なにぬねのん]")),
+            pairs(&[
+                ("日本", "にほん"),
+                ("日本橋", "にほんばし"),
+                ("日本語", "にほんご")
+            ])
+        );
+        assert_eq!(found(&db, req(None, "にほんば[あいうえお]")), pairs(&[]));
         drop(db);
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -1566,6 +1588,40 @@ fn search_roman(
     Ok(out)
 }
 
+/// `[...]` classes in a reading alone, each expanded to its characters:
+/// `にほ[なに]` -> `にほな`, `にほに`. None without a class, with a negated (`[^...]`) or
+/// unclosed one, or with more than `max` readings.
+fn expand_classes(reading: &str, max: usize) -> Option<Vec<String>> {
+    if !reading.contains('[') {
+        return None;
+    }
+    let mut out = vec![String::new()];
+    let mut chars = reading.chars();
+    while let Some(c) = chars.next() {
+        let alts: Vec<char> = if c == '[' {
+            let mut class = vec![];
+            loop {
+                match chars.next()? {
+                    ']' => break,
+                    '^' if class.is_empty() => return None,
+                    c => class.push(c),
+                }
+            }
+            class
+        } else {
+            vec![c]
+        };
+        if alts.is_empty() || out.len() * alts.len() > max {
+            return None;
+        }
+        out = out
+            .iter()
+            .flat_map(|s| alts.iter().map(move |a| format!("{s}{a}")))
+            .collect();
+    }
+    Some(out)
+}
+
 fn fts_phrase(s: &str) -> String {
     format!("\"{}\"", s.replace('"', " "))
 }
@@ -1690,6 +1746,11 @@ impl SearchDb {
         let reading = req.reading.trim();
         let readings: Vec<String> = if reading.is_empty() {
             vec![]
+        } else if let Some(expanded) = expand_classes(reading, MAX_READINGS) {
+            // e.g. the kana row of an incomplete romaji syllable: `{にほ[なにぬねのん]`
+            let mut v: Vec<String> = expanded.iter().map(|r| self.fold(r).into_owned()).collect();
+            v.dedup();
+            v
         } else {
             let expanded = if lang.is_empty() || lang == "zh" {
                 expand_pinyin(reading)

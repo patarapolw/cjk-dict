@@ -36,5 +36,8 @@ describe("romajiTailGlob", () => {
   it("is null without trailing romaji that starts a syllable", () => {
     expect(romajiTailGlob("にほん")).toBeNull();
     expect(romajiTailGlob("てst")).toBeNull();
+    // pinyin, or other words with vowels
+    expect(romajiTailGlob("zhong")).toBeNull();
+    expect(romajiTailGlob("ni3 hao")).toBeNull();
   });
 });

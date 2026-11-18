@@ -37,7 +37,9 @@ function globClass(chars: Set<string>): string {
  * starts a syllable.
  */
 export function romajiTailGlob(term: string): string | null {
-  const m = /[a-z]+$/i.exec(term);
+  // consonants only: wanakana converts a syllable as soon as its vowel comes, so letters
+  // with a vowel (pinyin's `hao`, `zhong`) aren't one being typed
+  const m = /(?<![a-z])[bcdfghjklmnpqrstvwxyz]+$/i.exec(term);
   if (!m) return null;
   const row = kanaRow(m[0]).map((k) => [...k]);
   if (!row.length) return null;

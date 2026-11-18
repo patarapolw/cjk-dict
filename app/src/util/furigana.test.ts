@@ -148,3 +148,49 @@ describe("toFurigana", () => {
     expect(toFurigana("食べる", "のむ")).toBe("<食べる>{のむ}");
   });
 });
+
+describe("parseQuery with kanaRow", () => {
+  const parse = (q: string) => parseQuery(q, { kanaRow: true });
+
+  it("searches the kana row of incomplete romaji at the end of the term", () => {
+    expect(parse("にほんg")).toEqual({
+      term: "にほん[がぎぐげご]",
+      reading: "",
+      readingGlob: "",
+      rest: "",
+      incomplete: true,
+    });
+    expect(parse("<日本>{にほん}g")).toMatchObject({
+      term: "日本[がぎぐげご]",
+      readingGlob: "にほん*",
+      incomplete: true,
+    });
+  });
+
+  it("searches the kana row of incomplete romaji at the end of the reading", () => {
+    // an unclosed `{` is a reading too
+    expect(parse("{にほn")).toEqual({
+      term: "",
+      reading: "にほ[なにぬねのん]",
+      readingGlob: "",
+      rest: "",
+      incomplete: true,
+    });
+    expect(parse("<日本>{にほn")).toEqual({
+      term: "日本",
+      reading: "",
+      readingGlob: "にほ[なにぬねのん]",
+      rest: "",
+      incomplete: true,
+    });
+    expect(parse("<日本>{にほn}")).toMatchObject({
+      readingGlob: "にほ[なにぬねのん]",
+    });
+  });
+
+  it("leaves complete queries, pinyin and other options alone", () => {
+    expect(parse("にほん")).not.toHaveProperty("incomplete");
+    expect(parse("{ni3 hao}")).toMatchObject({ reading: "ni3 hao" });
+    expect(parseQuery("にほんg")).toMatchObject({ term: "にほんg" });
+  });
+});
