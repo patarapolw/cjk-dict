@@ -307,6 +307,7 @@ import {
   sortIds,
 } from "../util/han";
 import { dictsVersion, toBeLoaded } from "../util/loading";
+import { scrollToStart } from "../util/scroll";
 import { lang } from "../util/settings";
 
 /** characters [`han_chars`] looks up at once (MAX_HAN_CHARS in search.rs) */
@@ -355,7 +356,7 @@ async function load() {
     containing.value = list.items;
     containingNext.value = list.next;
     error.value = "";
-    if (elScroller.value) elScroller.value.scrollTop = 0;
+    if (elScroller.value) scrollToStart(elScroller.value);
   } catch (e) {
     // e.g. "no dictionaries downloaded yet" on first launch
     console.error(e);
@@ -539,6 +540,8 @@ onBeforeUnmount(() => {
   height: 100%;
   display: grid;
   grid-template-rows: auto 1fr;
+  /* not wider than the window (see App.vue) */
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .search-box {
@@ -785,5 +788,19 @@ h3 {
   color: var(--app-text);
   font: inherit;
   cursor: pointer;
+}
+/* A short window, such as an Android pop-up (floating) window: the search box and
+   options would leave little room for results, so the whole page scrolls instead
+   (App.vue). Keep in step with the media query there. */
+@media (max-height: 28rem) {
+  .container {
+    height: auto;
+    display: block;
+    padding: 0.5em;
+  }
+
+  .scroller {
+    overflow: visible;
+  }
 }
 </style>
