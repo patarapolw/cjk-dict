@@ -89,6 +89,29 @@ WebKitGTK doesn't speak the Chrome DevTools Protocol, so `scripts/webview.mjs` w
 on Windows. On Linux, run the tests above and say that the UI change wasn't checked in
 the running app, rather than checking it in a page made to look like it.
 
+## What you can't check
+
+Some checks need what your environment doesn't have: a host its network blocks (e.g.
+`huggingface.co`, where the wty dictionaries are), the dictionaries downloaded to
+`%APPDATA%\cc.polv.cjk-dict`, or the running app on Windows. Don't guess the result,
+and don't write code that relies on a guess without saying so. Instead:
+
+- Say in your reply what you couldn't check and why, e.g. which host was blocked.
+- List each such check in the pull request body under a `## To check locally` heading,
+  as a task list the user ticks off. Give each item what to run or look at, and what
+  result is expected or would change the code:
+
+  ```md
+  ## To check locally
+
+  - [ ] `wty-zh-en`'s `index.json` (huggingface.co was blocked): is `targetLanguage`
+        `en`? If not, the `target_lang` override in `dict-admin/src/defaults.rs` is needed.
+  - [ ] In the running app, `#/dictionary?q=學習&qState=exact`: the headword is drawn
+        in traditional Chinese forms.
+  ```
+
+- Keep the list in step with later commits: remove items a commit made moot.
+
 ## Commit messages
 
 Use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/):
