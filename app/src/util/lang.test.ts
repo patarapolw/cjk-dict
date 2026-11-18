@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import type { ITerm } from "../db/search";
-import { glossLang, glossaryTermLang, headLang, termLang } from "./lang";
+import {
+  glossLang,
+  glossaryTermLang,
+  headLang,
+  refineHeadLangs,
+  termLang,
+} from "./lang";
 import { normalizeLang } from "./settings";
 
 /** CC-CEDICT's glossary: the headword in both scripts, each with its `lang` */
@@ -96,6 +102,25 @@ describe("headLang", () => {
     expect(headLang([ja, wty], "ko-KR")).toBe("ja-JP");
     expect(headLang([row({ term: "x" })], "ko-KR")).toBe("ko-KR");
     expect(headLang([])).toBeUndefined();
+  });
+});
+
+describe("refineHeadLangs", () => {
+  it("gives a bare language the script another result names", () => {
+    const items = [
+      { term: "学习", lang: "zh", declared: null },
+      { term: "学习", lang: "zh-Hans", declared: "zh-Hans" },
+      { term: "学习144号文件", lang: "zh", declared: null },
+      { term: "学习", lang: "ja", declared: null },
+    ];
+    expect(
+      refineHeadLangs(
+        items,
+        (i) => i.lang,
+        (i) => i.term,
+        (i) => i.declared,
+      ),
+    ).toEqual(["zh-Hans", "zh-Hans", "zh", "ja"]);
   });
 });
 

@@ -106,6 +106,39 @@ export function termLang(row: ITerm, fallback = ""): string | undefined {
   );
 }
 
+/** the script an entry of `entries` names the term to be in, e.g. CC-CEDICT's `zh-Hans` */
+export function declaredHeadLang(entries: ITerm[]): string | null {
+  for (const e of entries) {
+    const l = declaredLang(e);
+    if (l) return l;
+  }
+  return null;
+}
+
+/**
+ * Results' heading languages, a bare language (`zh`) made the script another result with
+ * the same term names (`zh-Hans`): wty-zh-en's 学习 is a result of its own, without the
+ * script CC-CEDICT's 学习 names. `lang(i)` and `term(i)` are a result's.
+ */
+export function refineHeadLangs<T>(
+  items: T[],
+  lang: (item: T) => string | undefined,
+  term: (item: T) => string,
+  declared: (item: T) => string | null,
+): (string | undefined)[] {
+  const known = new Map<string, string>();
+  for (const it of items) {
+    const d = declared(it);
+    const key = d && `${term(it)}\t${primaryLang(d)}`;
+    if (key && !known.has(key)) known.set(key, d);
+  }
+  return items.map((it) => {
+    const l = lang(it);
+    if (!l || l.includes("-")) return l;
+    return known.get(`${term(it)}\t${primaryLang(l)}`) ?? l;
+  });
+}
+
 /**
  * The `lang` of a result's heading, from its entries, which may be from several
  * dictionaries: of those in the search language (any, with none chosen), one whose

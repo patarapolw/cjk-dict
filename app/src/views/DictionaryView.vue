@@ -237,7 +237,7 @@ import {
   toFurigana,
 } from "../util/furigana";
 import { hanChars } from "../util/han";
-import { headLang } from "../util/lang";
+import { declaredHeadLang, headLang, refineHeadLangs } from "../util/lang";
 import { dictsVersion, toBeLoaded } from "../util/loading";
 import { remainingScroll, scrollToStart } from "../util/scroll";
 import { lang } from "../util/settings";
@@ -631,9 +631,19 @@ function headTerm(it: Item) {
   return it.entries[0]?.term || it.term;
 }
 
-/** the heading's language, so its Han characters take that language's forms */
+/** the headings' languages, so their Han characters take that language's forms */
+const itemLangs = computed(() => {
+  const langs = refineHeadLangs(
+    items.value,
+    (it) => headLang(it.entries, lang.value),
+    headTerm,
+    (it) => declaredHeadLang(it.entries),
+  );
+  return new Map(items.value.map((it, i) => [it.id, langs[i]]));
+});
+
 function itemLang(it: Item) {
-  return headLang(it.entries, lang.value);
+  return itemLangs.value.get(it.id);
 }
 
 function headReading(it: Item) {
