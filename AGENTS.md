@@ -204,6 +204,13 @@ and don't write code that relies on a guess without saying so. Instead:
     results or sections;
   - keep what the user changed, unless your change makes it untrue;
   - rewrite only the parts your change is about, rather than replacing the whole body.
+- Reply to every comment on a pull request you work on: conversation comments and
+  review comments alike.
+  - Reply once the comment is dealt with: say what changed and in which commits, or why
+    nothing changed.
+  - Answer a review comment in its own thread, and resolve the thread once it's
+    addressed. Answer a conversation comment with a new comment that quotes it.
+  - A question gets an answer even when it needs no change.
 
 ## Commit messages
 
