@@ -32,14 +32,22 @@ KANJIDIC2 JSON from jmdict-simplified (`kanjidic2-en-*.json.zip`, or the `.json`
 
 ## `defaults`
 
-The default dictionaries (the list the app used to download itself):
+The default dictionaries (the list the app used to download itself), each downloaded from the project that converts it to Yomitan:
 
-- KANJIDIC: kanji, from [jmdict-simplified](https://github.com/scriptin/jmdict-simplified)'s JSON of the JMdict project's KANJIDIC2. No source language, as it has Japanese, Chinese and Korean readings; its meanings are English.
-- Pixiv.
-- `ja`/`zh`/`ko.Wikipedia` (MarvNC).
-- CC-CEDICT.
-- KO-EN.KRDICT.
-- `wty-ja-en`/`wty-ko-en`/`wty-zh-en` (Wiktionary).
+| Name                                | What                                                                                                    | Yomitan conversion                                                                                                                                                                                                                                      | From                                                                                                              |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| KANJIDIC                            | kanji: Japanese, Chinese and Korean readings, English meanings; no source language, as it has all three | [scriptin/jmdict-simplified](https://github.com/scriptin/jmdict-simplified) (JSON), converted by `add`                                                                                                                                                  | [KANJIDIC2](https://www.edrdg.org/wiki/index.php/KANJIDIC_Project) (EDRDG)                                        |
+| Pixiv                               | Japanese encyclopedia entries                                                                           | [MarvNC/pixiv-yomitan](https://github.com/MarvNC/pixiv-yomitan)                                                                                                                                                                                         | [pixiv百科事典](https://dic.pixiv.net/)                                                                           |
+| `ja`/`zh`/`ko.Wikipedia`            | Wikipedia articles' short abstracts                                                                     | [MarvNC/wikipedia-yomitan](https://github.com/MarvNC/wikipedia-yomitan)                                                                                                                                                                                 | Wikipedia, via [DBpedia](https://dbpedia.org/)'s short-abstract dumps                                             |
+| CC-CEDICT                           | Chinese–English                                                                                         | [MarvNC/cc-cedict-yomitan](https://github.com/MarvNC/cc-cedict-yomitan)                                                                                                                                                                                 | [CC-CEDICT](https://cc-cedict.org/wiki/)                                                                          |
+| KO-EN.KRDICT                        | Korean–English                                                                                          | [Lyroxide/yomitan-ko-dic](https://github.com/Lyroxide/yomitan-ko-dic)                                                                                                                                                                                   | the National Institute of Korean Language's [Basic Korean Dictionary](https://krdict.korean.go.kr/eng/mainAction) |
+| `wty-ja-en`/`wty-ko-en`/`wty-zh-en` | Japanese, Korean and Chinese–English                                                                    | [yomidevs/wiktionary-to-yomitan](https://github.com/yomidevs/wiktionary-to-yomitan), released on [Hugging Face](https://huggingface.co/datasets/daxida/wty-release) (its [download page](https://yomidevs.github.io/wiktionary-to-yomitan/) links them) | Wiktionary, via [kaikki.org](https://kaikki.org/) ([wiktextract](https://github.com/tatuylonen/wiktextract))      |
+
+These dictionaries aren't part of cjk-dict:
+
+- cjk-dict doesn't include or redistribute them; `dict-admin` downloads them from the projects above.
+- Each belongs to its authors and keeps its own license and terms; see its project. cjk-dict isn't affiliated with them.
+- Check those terms before sharing a build or the library with anyone (see [Security](../README.md#security)).
 
 Options and behavior:
 

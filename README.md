@@ -174,7 +174,7 @@ How the app downloads and searches the library: [docs/app.md](docs/app.md), [doc
 ## License
 
 - The code is under the [MIT License](LICENSE).
-- Dictionaries, and data built from them such as `search.db`, keep their own licenses. So do:
+- Dictionaries, and data built from them such as `search.db`, keep their own licenses: see the [default dictionaries](docs/dict-admin.md#defaults) and their projects. So do:
   - [lindera](https://github.com/lindera/lindera)'s tokenizer dictionaries, downloaded from its releases;
   - [hanja_hangul](https://crates.io/crates/hanja_hangul)'s word tables, which `dict-admin` includes;
   - the [CJKVI IDS database](https://github.com/cjkvi/cjkvi-ids)'s `ids.txt` (derived from the CHISE project, GPLv2), which `search.db` includes.
