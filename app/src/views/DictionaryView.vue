@@ -130,10 +130,62 @@
           <input type="checkbox" name="clipboard" v-model="clipboardMonitor" />
           <span>Clipboard monitor</span>
         </label>
+
+        <!-- one dictionary needs no choosing, unless it's left out (from another
+             search language's list) and so must be ticked again -->
+        <details
+          v-if="shownDicts.length > 1 || excludedCount"
+          class="dict-filter"
+          :class="{ 'dict-filter-all': !excludedCount }"
+        >
+          <summary>
+            Dictionaries
+            <span class="dict-filter-count"
+              >({{ includedCount }} of {{ shownDicts.length }})</span
+            >
+          </summary>
+          <div class="dict-filter-list">
+            <label
+              v-for="d in shownDicts"
+              :key="d.name"
+              :title="
+                [d.name, d.lang, d.target_lang].filter(Boolean).join(' · ')
+              "
+            >
+              <!-- the last one ticked can't be unticked: a search needs a dictionary -->
+              <input
+                type="checkbox"
+                :checked="!excludedDicts.includes(d.name)"
+                :disabled="
+                  includedCount === 1 && !excludedDicts.includes(d.name)
+                "
+                @change="
+                  setDictIncluded(
+                    d.name,
+                    ($event.target as HTMLInputElement).checked,
+                  )
+                "
+              />
+              <span>{{ d.title || d.name }}</span>
+            </label>
+          </div>
+          <button
+            v-if="excludedCount"
+            type="button"
+            class="link-button"
+            @click="searchAllDicts"
+          >
+            Search all
+          </button>
+        </details>
+        <p v-if="noDicts" class="dict-filter-warning" role="alert">
+          No dictionary of this language is chosen: tick one in Dictionaries to
+          search.
+        </p>
       </nav>
     </header>
     <div class="scroller" ref="scroller">
-      <p v-if="noResults" class="no-results">No results</p>
+      <p v-if="noResults && !noDicts" class="no-results">No results</p>
       <section v-for="it in items" :key="it.id" class="accordion-item">
         <button
           type="button"
@@ -236,6 +288,13 @@ import {
   parseQuery,
   toFurigana,
 } from "../util/furigana";
+import {
+  dictList,
+  excludedDicts,
+  loadDicts,
+  setDictIncluded,
+  wordDicts,
+} from "../util/dicts";
 import { hanChars } from "../util/han";
 import { declaredHeadLang, headLang, refineHeadLangs } from "../util/lang";
 import { dictsVersion, toBeLoaded } from "../util/loading";
@@ -336,6 +395,35 @@ const placeholder = computed(() =>
       "Search"),
 );
 
+/** the word dictionaries of the search language, to choose from */
+const shownDicts = computed(() => wordDicts(dictList.value, lang.value));
+
+/** of those, the ones left out: a name may also be of one not shown, or since removed */
+const excludedCount = computed(
+  () =>
+    shownDicts.value.filter((d) => excludedDicts.value.includes(d.name)).length,
+);
+
+const includedCount = computed(
+  () => shownDicts.value.length - excludedCount.value,
+);
+
+/**
+ * every dictionary listed is left out, e.g. after switching the search language: say so,
+ * rather than tick one for the user
+ */
+const noDicts = computed(
+  () => shownDicts.value.length > 0 && includedCount.value === 0,
+);
+
+/** tick the dictionaries shown; those of other languages stay as they are */
+function searchAllDicts() {
+  const shown = new Set(shownDicts.value.map((d) => d.name));
+  excludedDicts.value = excludedDicts.value.filter((n) => !shown.has(n));
+}
+
+watch(dictsVersion, () => loadDicts());
+
 const loading = ref(false);
 const nextOffset = ref<number | null>(0);
 
@@ -406,18 +494,31 @@ async function clearQuery() {
 const SEARCH_DEBOUNCE_MS = 200;
 let searchTimer: ReturnType<typeof setTimeout> | undefined;
 
-watch([q, qState, readingMode, lang, dictsVersion, romanKo, autoKana], () => {
-  // bump now, so an in-flight search for the old query discards its results
-  const id = ++requestId;
-  clearTimeout(searchTimer);
-  searchTimer = setTimeout(async () => {
-    await activeRequest;
-    if (id !== requestId) return;
+watch(
+  [
+    q,
+    qState,
+    readingMode,
+    lang,
+    dictsVersion,
+    romanKo,
+    autoKana,
+    excludedDicts,
+  ],
+  () => {
+    // bump now, so an in-flight search for the old query discards its results
+    const id = ++requestId;
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(async () => {
+      await activeRequest;
+      if (id !== requestId) return;
 
-    nextOffset.value = 0;
-    loadMore(true);
-  }, SEARCH_DEBOUNCE_MS);
-});
+      nextOffset.value = 0;
+      loadMore(true);
+    }, SEARCH_DEBOUNCE_MS);
+  },
+  { deep: true },
+);
 
 let isWanakanaFinished = true;
 
@@ -563,6 +664,7 @@ async function loadMore(isNew?: boolean) {
         romanized,
         ch: charReading.value?.ch,
         chReading: charReading.value?.reading,
+        excludeDicts: excludedDicts.value,
         limit: 5,
         offset,
         type,
@@ -720,6 +822,7 @@ let resizeObserver: ResizeObserver | undefined;
 
 onMounted(() => {
   loadFromRouteQuery();
+  loadDicts();
 
   if (typeof ResizeObserver !== "undefined" && elScroller.value) {
     resizeObserver = new ResizeObserver(() => onScroll());
@@ -854,6 +957,40 @@ onBeforeUnmount(() => {
     align-items: center;
     gap: 0.5em;
     min-width: 0;
+  }
+
+  .dict-filter summary {
+    cursor: pointer;
+  }
+
+  /* the list takes a line of its own when open */
+  .dict-filter[open] {
+    flex-basis: 100%;
+  }
+
+  .dict-filter-count {
+    color: var(--app-text-muted);
+  }
+
+  /* collapsed, the count shows only when some are left out */
+  .dict-filter-all:not([open]) .dict-filter-count {
+    display: none;
+  }
+
+  .dict-filter-warning {
+    flex-basis: 100%;
+    margin: 0;
+    color: var(--app-error);
+  }
+
+  .dict-filter-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25em 1em;
+    margin: 0.25em 0;
+    /* a long list scrolls instead of pushing the results off a short window */
+    max-height: 10em;
+    overflow: auto;
   }
 }
 

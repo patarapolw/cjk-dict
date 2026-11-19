@@ -44,6 +44,7 @@ pub fn run() {
             dicts::dict_plan,
             dicts::dict_commit,
             dicts::search,
+            dicts::dicts,
             dicts::han_chars,
             dicts::han_containing,
             dicts::dict_styles,

@@ -3,26 +3,40 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryHistory, createRouter } from "vue-router";
 
+import { type IDictInfo, excludedDicts } from "../util/dicts";
 import { lang } from "../util/settings";
 import DictionaryView from "./DictionaryView.vue";
+
+/** what the `dicts` command returns */
+let dicts: Partial<IDictInfo>[] = [];
+
+const dict = (name: string, lang: string | null, term_count = 10) => ({
+  name,
+  title: `${name} title`,
+  lang,
+  term_count,
+});
 
 /** the `req` of each `search` command */
 let searches: Record<string, unknown>[] = [];
 
 beforeEach(() => {
   searches = [];
+  dicts = [];
   mockIPC((cmd, args) => {
     if (cmd === "search") {
       searches.push((args as { req: Record<string, unknown> }).req);
       return { items: [], next: null };
     }
     if (cmd === "segment") return [];
+    if (cmd === "dicts") return dicts;
     throw new Error(`unexpected command: ${cmd}`);
   });
 });
 
 afterEach(() => {
   lang.value = "";
+  excludedDicts.value = [];
 });
 
 async function mountView() {
@@ -240,6 +254,7 @@ describe("DictionaryView", () => {
     ]);
     mockIPC((cmd, args) => {
       if (cmd === "dict_styles") return null;
+      if (cmd === "dicts") return [];
       if (cmd !== "search") throw new Error(`unexpected command: ${cmd}`);
       searches.push((args as { req: Record<string, unknown> }).req);
       const entry = {
@@ -270,6 +285,113 @@ describe("DictionaryView", () => {
     // the first result opens by itself
     // English definitions, but their Han characters are Chinese
     expect(wrapper.get(".gloss-list").attributes("lang")).toBe("zh");
+    wrapper.unmount();
+  });
+  it("leaves out the dictionaries unticked, and remembers them", async () => {
+    // listed without a language first: MyDict, then A
+    dicts = [dict("A", "ja-JP"), dict("MyDict", null)];
+    const wrapper = await mountView();
+    await flushPromises();
+    const boxes = wrapper.findAll(".dict-filter-list input");
+    expect(boxes.map((b) => (b.element as HTMLInputElement).checked)).toEqual([
+      true,
+      true,
+    ]);
+
+    await boxes[0].setValue(false);
+    await wrapper.get("input.search-input").setValue("日本");
+    expect(await lastSearch()).toMatchObject({ exclude_dicts: ["MyDict"] });
+    expect(wrapper.get(".dict-filter-count").text()).toBe("(1 of 2)");
+    expect(JSON.parse(localStorage.getItem("cjk-dict.excludedDicts")!)).toEqual(
+      ["MyDict"],
+    );
+
+    searches = [];
+    await wrapper.get(".dict-filter .link-button").trigger("click");
+    expect(await lastSearch()).toMatchObject({ exclude_dicts: [] });
+    wrapper.unmount();
+  });
+
+  it("hides the dictionary filter with one dictionary", async () => {
+    // a kanji dictionary has no words to choose
+    dicts = [dict("A", "ja-JP"), dict("Kanji", "ja-JP", 0)];
+    const wrapper = await mountView();
+    await flushPromises();
+    expect(wrapper.find(".dict-filter").exists()).toBe(false);
+    wrapper.unmount();
+  });
+  it("lists the dictionaries of the search language only", async () => {
+    lang.value = "zh";
+    dicts = [
+      dict("A", "ja-JP"),
+      dict("B", "zh-TW"),
+      dict("C", "zh"),
+      dict("MyDict", null),
+    ];
+    excludedDicts.value = ["A", "B"];
+    const wrapper = await mountView();
+    await flushPromises();
+    const names = wrapper
+      .findAll(".dict-filter-list span")
+      .map((s) => s.text());
+    expect(names).toEqual(["MyDict title", "C title", "B title"]);
+    expect(wrapper.get(".dict-filter-count").text()).toBe("(2 of 3)");
+
+    // A, of another language, stays left out
+    await wrapper.get(".dict-filter .link-button").trigger("click");
+    expect(excludedDicts.value).toEqual(["A"]);
+    wrapper.unmount();
+  });
+
+  it("hides the dictionary filter with one dictionary of the language", async () => {
+    lang.value = "ko-KR";
+    dicts = [dict("A", "ja-JP"), dict("B", "ko-KR")];
+    const wrapper = await mountView();
+    await flushPromises();
+    expect(wrapper.find(".dict-filter").exists()).toBe(false);
+    wrapper.unmount();
+  });
+  it("keeps the last dictionary ticked", async () => {
+    dicts = [dict("A", "ja-JP"), dict("B", "ja-JP")];
+    excludedDicts.value = ["A"];
+    const wrapper = await mountView();
+    await flushPromises();
+    const boxes = wrapper.findAll(".dict-filter-list input");
+    // A is left out and can be ticked; B is the last one ticked
+    expect(boxes.map((b) => b.attributes("disabled") !== undefined)).toEqual([
+      false,
+      true,
+    ]);
+    // some are left out: the count shows even collapsed
+    expect(wrapper.get(".dict-filter").classes()).not.toContain(
+      "dict-filter-all",
+    );
+    wrapper.unmount();
+  });
+
+  it("warns when the search language's dictionaries are all left out", async () => {
+    dicts = [dict("A", "ja-JP"), dict("B", "ko-KR")];
+    excludedDicts.value = ["B"];
+    const wrapper = await mountView();
+    await flushPromises();
+    expect(wrapper.find(".dict-filter-warning").exists()).toBe(false);
+    expect(wrapper.get(".dict-filter").classes()).not.toContain(
+      "dict-filter-all",
+    );
+
+    lang.value = "ko-KR";
+    await flushPromises();
+    expect(wrapper.find(".dict-filter-warning").exists()).toBe(true);
+    // listed even alone, so that it can be ticked again; not ticked for the user
+    const box = wrapper.get(".dict-filter-list input");
+    expect((box.element as HTMLInputElement).checked).toBe(false);
+    expect(wrapper.get(".dict-filter-count").text()).toBe("(0 of 1)");
+
+    await box.setValue(true);
+    expect(excludedDicts.value).toEqual([]);
+    expect(wrapper.find(".dict-filter-warning").exists()).toBe(false);
+    // one dictionary, ticked: nothing to choose
+    expect(wrapper.find(".dict-filter").exists()).toBe(false);
     wrapper.unmount();
   });
 });

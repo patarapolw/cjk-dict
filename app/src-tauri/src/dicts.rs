@@ -18,7 +18,7 @@ use tauri_plugin_http::reqwest;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager, State};
-use yomitan_parser::search::{HanChar, HanList, SearchDb, SearchRequest, SearchResult};
+use yomitan_parser::search::{DictInfo, HanChar, HanList, SearchDb, SearchRequest, SearchResult};
 
 use crate::error::AppError;
 
@@ -437,6 +437,16 @@ pub async fn search(
 ) -> Result<SearchResult, AppError> {
     let db = state.get()?;
     tauri::async_runtime::spawn_blocking(move || db.search(&req))
+        .await
+        .map_err(|e| AppError::Error(e.to_string()))?
+        .map_err(AppError::from)
+}
+
+/// The dictionaries in search.db, in build order, e.g. to choose which to search.
+#[tauri::command]
+pub async fn dicts(state: State<'_, DictState>) -> Result<Vec<DictInfo>, AppError> {
+    let db = state.get()?;
+    tauri::async_runtime::spawn_blocking(move || db.dicts())
         .await
         .map_err(|e| AppError::Error(e.to_string()))?
         .map_err(AppError::from)

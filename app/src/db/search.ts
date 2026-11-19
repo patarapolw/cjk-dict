@@ -21,6 +21,8 @@ interface SearchOpts {
   /** with `chReading`: the words with this character read so anywhere (`*<興>{キョウ}`) */
   ch?: string;
   chReading?: string;
+  /** dictionary names to leave out */
+  excludeDicts?: string[];
   limit: number;
   offset: number;
   type: string | null;
@@ -143,6 +145,7 @@ class SearchDatabase {
         ch: opts.ch ?? "",
         ch_reading: opts.chReading ?? "",
         tokens,
+        exclude_dicts: opts.excludeDicts ?? [],
         limit: opts.limit,
         offset: opts.offset,
       };
