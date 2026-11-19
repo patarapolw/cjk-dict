@@ -4,7 +4,7 @@ How the app's search works. The [README](../README.md#app) has how to run the ap
 
 ## The search box
 
-- One search box. The search language in the header narrows the search to one language; it is the only setting remembered, per device.
+- One search box. The search language in the header narrows the search to one language; it is remembered per device, as are the [dictionaries chosen](#choosing-dictionaries).
 - Search modes:
   - prefix (default);
   - `=` exact;
@@ -109,3 +109,14 @@ Optional, below the search box:
   - `<食>{たb}べる` is `<食>{た[っばびぶべぼ]}べる`.
 - **Get reading from IME**: a Japanese IME's reading is kept as `<漢字>{かんじ}` when you convert.
 - **Clipboard monitor**: checks the clipboard every second, and searches copied text that starts with Chinese, Japanese or Korean.
+
+## Choosing dictionaries
+
+With more than one dictionary downloaded, **Dictionaries** below the search box lists them, each with a checkbox:
+
+- An unticked dictionary is left out of word searches:
+  - its entries aren't shown;
+  - a word only it has isn't found.
+- The summary counts the ones searched, e.g. "Dictionaries (3 of 5)"; **Search all** ticks them all again.
+- The choice is remembered per device, as the dictionaries left out: one added to the library later is searched.
+- The Characters view still shows every dictionary.

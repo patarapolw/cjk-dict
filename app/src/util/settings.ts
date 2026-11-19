@@ -1,7 +1,7 @@
 import { ref, watch } from "vue";
 
 /**
- * Search language ("" = all; `ja-JP`, `zh` or `ko-KR`). The only user setting; persisted
+ * Search language ("" = all; `ja-JP`, `zh` or `ko-KR`), persisted
  * per device. Chinese is `zh`, for simplified and traditional alike.
  */
 const KEY = "cjk-dict.lang";

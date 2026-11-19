@@ -130,6 +130,45 @@
           <input type="checkbox" name="clipboard" v-model="clipboardMonitor" />
           <span>Clipboard monitor</span>
         </label>
+
+        <details v-if="dictList.length > 1" class="dict-filter">
+          <summary>
+            Dictionaries
+            <span v-if="excludedCount" class="dict-filter-count"
+              >({{ dictList.length - excludedCount }} of
+              {{ dictList.length }})</span
+            >
+          </summary>
+          <div class="dict-filter-list">
+            <label
+              v-for="d in dictList"
+              :key="d.name"
+              :title="
+                [d.name, d.lang, d.target_lang].filter(Boolean).join(' · ')
+              "
+            >
+              <input
+                type="checkbox"
+                :checked="!excludedDicts.includes(d.name)"
+                @change="
+                  setDictIncluded(
+                    d.name,
+                    ($event.target as HTMLInputElement).checked,
+                  )
+                "
+              />
+              <span>{{ d.title || d.name }}</span>
+            </label>
+          </div>
+          <button
+            v-if="excludedCount"
+            type="button"
+            class="link-button"
+            @click="searchAllDicts"
+          >
+            Search all
+          </button>
+        </details>
       </nav>
     </header>
     <div class="scroller" ref="scroller">
@@ -236,6 +275,12 @@ import {
   parseQuery,
   toFurigana,
 } from "../util/furigana";
+import {
+  dictList,
+  excludedDicts,
+  loadDicts,
+  setDictIncluded,
+} from "../util/dicts";
 import { hanChars } from "../util/han";
 import { declaredHeadLang, headLang, refineHeadLangs } from "../util/lang";
 import { dictsVersion, toBeLoaded } from "../util/loading";
@@ -336,6 +381,18 @@ const placeholder = computed(() =>
       "Search"),
 );
 
+/** dictionaries left out that are in the library: a name may be of one since removed */
+const excludedCount = computed(
+  () =>
+    dictList.value.filter((d) => excludedDicts.value.includes(d.name)).length,
+);
+
+function searchAllDicts() {
+  excludedDicts.value = [];
+}
+
+watch(dictsVersion, () => loadDicts());
+
 const loading = ref(false);
 const nextOffset = ref<number | null>(0);
 
@@ -406,18 +463,31 @@ async function clearQuery() {
 const SEARCH_DEBOUNCE_MS = 200;
 let searchTimer: ReturnType<typeof setTimeout> | undefined;
 
-watch([q, qState, readingMode, lang, dictsVersion, romanKo, autoKana], () => {
-  // bump now, so an in-flight search for the old query discards its results
-  const id = ++requestId;
-  clearTimeout(searchTimer);
-  searchTimer = setTimeout(async () => {
-    await activeRequest;
-    if (id !== requestId) return;
+watch(
+  [
+    q,
+    qState,
+    readingMode,
+    lang,
+    dictsVersion,
+    romanKo,
+    autoKana,
+    excludedDicts,
+  ],
+  () => {
+    // bump now, so an in-flight search for the old query discards its results
+    const id = ++requestId;
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(async () => {
+      await activeRequest;
+      if (id !== requestId) return;
 
-    nextOffset.value = 0;
-    loadMore(true);
-  }, SEARCH_DEBOUNCE_MS);
-});
+      nextOffset.value = 0;
+      loadMore(true);
+    }, SEARCH_DEBOUNCE_MS);
+  },
+  { deep: true },
+);
 
 let isWanakanaFinished = true;
 
@@ -563,6 +633,7 @@ async function loadMore(isNew?: boolean) {
         romanized,
         ch: charReading.value?.ch,
         chReading: charReading.value?.reading,
+        excludeDicts: excludedDicts.value,
         limit: 5,
         offset,
         type,
@@ -720,6 +791,7 @@ let resizeObserver: ResizeObserver | undefined;
 
 onMounted(() => {
   loadFromRouteQuery();
+  loadDicts();
 
   if (typeof ResizeObserver !== "undefined" && elScroller.value) {
     resizeObserver = new ResizeObserver(() => onScroll());
@@ -854,6 +926,29 @@ onBeforeUnmount(() => {
     align-items: center;
     gap: 0.5em;
     min-width: 0;
+  }
+
+  .dict-filter summary {
+    cursor: pointer;
+  }
+
+  /* the list takes a line of its own when open */
+  .dict-filter[open] {
+    flex-basis: 100%;
+  }
+
+  .dict-filter-count {
+    color: var(--app-text-muted);
+  }
+
+  .dict-filter-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25em 1em;
+    margin: 0.25em 0;
+    /* a long list scrolls instead of pushing the results off a short window */
+    max-height: 10em;
+    overflow: auto;
   }
 }
 

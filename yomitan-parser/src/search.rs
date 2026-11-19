@@ -1326,6 +1326,129 @@ mod romanized_tests {
     }
 }
 
+#[cfg(test)]
+mod dict_filter_tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// dictionaries `A` (id 1) and `B` (id 2); 日本 and 하늘 are in both, the rest in one
+    fn fixture() -> (PathBuf, SearchDb) {
+        let id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("cjk-dict-filter-{}-{id}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("search.db");
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        conn.execute_batch(FTS_TRIGGERS).unwrap();
+        conn.execute_batch(ROMAN_SCHEMA).unwrap();
+        conn.execute_batch("INSERT INTO dict (name, title) VALUES ('A', 'A'), ('B', 'B')")
+            .unwrap();
+        for (term, col, reading, score, dicts) in [
+            ("日本", "term_ja", " にほん ", 30, &[1, 2][..]),
+            ("日本語", "term_ja", " にほんご ", 20, &[2]),
+            ("日本橋", "term_ja", " にほんばし ", 10, &[1]),
+            ("하늘", "term_ko", "", 30, &[1, 2]),
+            ("하늘색", "term_ko", "", 20, &[2]),
+        ] {
+            let id: i64 = conn
+                .query_row(
+                    &format!(
+                        "INSERT INTO term_search (term, {col}, reading, score)
+                         VALUES (?1, ?1, ?2, ?3) RETURNING id"
+                    ),
+                    params![term, reading, score],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            for d in dicts {
+                conn.execute(
+                    "INSERT INTO term_link (search_id, dict_id, bank, idx) VALUES (?1, ?2, 1, 0)",
+                    params![id, d],
+                )
+                .unwrap();
+            }
+            for key in korean::keys(term) {
+                conn.execute(ROMAN_UPSERT, params![key, id, score]).unwrap();
+            }
+        }
+        drop(conn);
+        let db = SearchDb::open(&db_path, &dir).unwrap();
+        (dir, db)
+    }
+
+    fn found(db: &SearchDb, req: SearchRequest) -> Vec<String> {
+        db.search(&req)
+            .unwrap()
+            .items
+            .into_iter()
+            .map(|i| i.term)
+            .collect()
+    }
+
+    #[test]
+    fn excluded_dictionaries_terms_are_not_found() {
+        let (dir, db) = fixture();
+        let req = |exclude: &[&str]| SearchRequest {
+            exclude_dicts: exclude.iter().map(|s| s.to_string()).collect(),
+            ..Default::default()
+        };
+
+        let prefix = |exclude: &[&str]| SearchRequest {
+            term: "日本".into(),
+            ..req(exclude)
+        };
+        assert_eq!(found(&db, prefix(&[])), ["日本", "日本語", "日本橋"]);
+        assert_eq!(found(&db, prefix(&["B"])), ["日本", "日本橋"]);
+        assert_eq!(found(&db, prefix(&["A"])), ["日本", "日本語"]);
+        assert!(found(&db, prefix(&["A", "B"])).is_empty());
+        // unknown names are ignored
+        assert_eq!(found(&db, prefix(&["MyDict"])).len(), 3);
+
+        let reading = SearchRequest {
+            reading: "にほん".into(),
+            lang: "ja-JP".into(),
+            ..req(&["A"])
+        };
+        assert_eq!(found(&db, reading), ["日本", "日本語"]);
+
+        let fts = |exclude: &[&str]| SearchRequest {
+            kind: Some("fts".into()),
+            tokens: HashMap::from([("ja".into(), "日本語".into())]),
+            ..req(exclude)
+        };
+        assert_eq!(found(&db, fts(&[])), ["日本語"]);
+        assert!(found(&db, fts(&["B"])).is_empty());
+
+        let hangul = SearchRequest {
+            term: "하늘".into(),
+            lang: "ko-KR".into(),
+            ..req(&["A"])
+        };
+        assert_eq!(found(&db, hangul), ["하늘", "하늘색"]);
+        let hangul = SearchRequest {
+            term: "하늘".into(),
+            lang: "ko-KR".into(),
+            ..req(&["B"])
+        };
+        assert_eq!(found(&db, hangul), ["하늘"]);
+
+        let roman = |exclude: &[&str]| SearchRequest {
+            term: "haneul".into(),
+            lang: "ko-KR".into(),
+            romanized: true,
+            ..req(exclude)
+        };
+        assert_eq!(found(&db, roman(&[])), ["하늘", "하늘색"]);
+        assert_eq!(found(&db, roman(&["B"])), ["하늘"]);
+
+        drop(db);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
 #[derive(Debug, Default, Deserialize)]
 pub struct SearchRequest {
     /// "fts" = token search; "exact" = term equality; anything else = prefix search
@@ -1359,6 +1482,10 @@ pub struct SearchRequest {
     pub ch: String,
     #[serde(default)]
     pub ch_reading: String,
+    /// dictionary names to leave out: their entries aren't shown, and terms only they have
+    /// aren't found. Unknown names are ignored.
+    #[serde(default)]
+    pub exclude_dicts: Vec<String>,
     #[serde(default)]
     pub limit: Option<u32>,
     #[serde(default)]
@@ -1536,6 +1663,7 @@ fn search_roman(
     conn: &Connection,
     roman: &RomanQuery,
     lang_filter: &str,
+    excluded: &[i64],
     limit: u32,
     offset: u32,
     map_row: impl Fn(&rusqlite::Row) -> rusqlite::Result<SearchItem>,
@@ -1575,8 +1703,9 @@ fn search_roman(
         let sql = format!(
             "SELECT s.*, max(r.key IN ({exact_in})) AS roman_exact
              FROM term_roman r JOIN term_search s ON s.id = r.search_id
-             WHERE {lang_filter}({wh})
-             GROUP BY s.id ORDER BY roman_exact DESC, s.score DESC LIMIT {limit} OFFSET {offset}"
+             WHERE {lang_filter}{}({wh})
+             GROUP BY s.id ORDER BY roman_exact DESC, s.score DESC LIMIT {limit} OFFSET {offset}",
+            dict_filter("s.id", excluded)
         );
         let mut st = conn.prepare_cached(&sql)?;
         return Ok(st
@@ -1600,7 +1729,8 @@ fn search_roman(
         ids.len() < limit as usize
     };
     let mut st = conn.prepare_cached(&format!(
-        "SELECT search_id FROM term_roman WHERE key IN ({exact_in}) ORDER BY score DESC"
+        "SELECT search_id FROM term_roman WHERE {}key IN ({exact_in}) ORDER BY score DESC",
+        dict_filter("term_roman.search_id", excluded)
     ))?;
     let mut rows = st.query(params_from_iter(patterns.iter()))?;
     let mut more = true;
@@ -1610,7 +1740,8 @@ fn search_roman(
     drop(rows);
     let mut st = conn.prepare_cached(&format!(
         "SELECT search_id FROM term_roman INDEXED BY idx_term_roman_score
-         WHERE {ranges} ORDER BY score DESC"
+         WHERE {}({ranges}) ORDER BY score DESC",
+        dict_filter("term_roman.search_id", excluded)
     ))?;
     let mut rows = st.query(params_from_iter(ps.iter()))?;
     while more && let Some(r) = rows.next()? {
@@ -1628,6 +1759,22 @@ fn search_roman(
         }
     }
     Ok(out)
+}
+
+/// `EXISTS (...) AND `: the term (its id in `col`) has an entry in a dictionary not in
+/// `excluded`; nothing without exclusions. The ids are integers, so inlined.
+fn dict_filter(col: &str, excluded: &[i64]) -> String {
+    if excluded.is_empty() {
+        return String::new();
+    }
+    let ids = excluded
+        .iter()
+        .map(i64::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "EXISTS (SELECT 1 FROM term_link l WHERE l.search_id = {col} AND l.dict_id NOT IN ({ids})) AND "
+    )
 }
 
 /// `[...]` classes in a reading alone, each expanded to its characters:
@@ -1758,6 +1905,14 @@ impl SearchDb {
             ""
         };
 
+        let mut excluded: Vec<i64> = self
+            .names
+            .iter()
+            .filter(|(_, n)| req.exclude_dicts.contains(n))
+            .map(|(id, _)| *id)
+            .collect();
+        excluded.sort_unstable();
+
         let ch = req.ch.trim();
         let ch_reading = req.ch_reading.trim();
         let ch_forms = if ch.is_empty() || ch_reading.is_empty() {
@@ -1783,6 +1938,7 @@ impl SearchDb {
                 } else {
                     ch_reading.to_string()
                 },
+                exclude_dicts: req.exclude_dicts.clone(),
                 limit: req.limit,
                 offset: req.offset,
                 ..Default::default()
@@ -1836,6 +1992,8 @@ impl SearchDb {
             } else {
                 format!("term_{lang} != '' AND ")
             };
+            // the language and the dictionaries left out, for queries over term_search
+            let filter = format!("{lang_filter}{}", dict_filter("id", &excluded));
 
             // Korean: a Hangul word is its own reading. Typed as a term or as `{reading}`, it
             // finds Hangul headwords spelled so and Hanja headwords read so (광속: 光速).
@@ -1856,7 +2014,7 @@ impl SearchDb {
                 let mut ps: Vec<&str> = vec![ch.as_str()];
                 ps.extend(forms.iter().map(String::as_str));
                 let sql = format!(
-                    "SELECT * FROM term_search WHERE {lang_filter}id IN (
+                    "SELECT * FROM term_search WHERE {filter}id IN (
                        SELECT search_id FROM term_char WHERE ch = ?1 AND reading IN ({})
                      ) ORDER BY score DESC LIMIT {} OFFSET {}",
                     (2..=ps.len())
@@ -1876,7 +2034,7 @@ impl SearchDb {
                     ("GLOB", format!("{word}*"))
                 };
                 let sql = format!(
-                    "SELECT * FROM term_search WHERE {lang_filter}id IN (
+                    "SELECT * FROM term_search WHERE {filter}id IN (
                        SELECT id FROM term_search WHERE term {op} ?1
                        UNION SELECT rowid FROM term_search_fts WHERE term_search_fts MATCH ?2
                      ) ORDER BY score DESC LIMIT {} OFFSET {}",
@@ -1887,7 +2045,15 @@ impl SearchDb {
                 st.query_map(params![term, reading_match(&[word], !is_exact)], map_row)?
                     .collect::<Result<_, _>>()?
             } else if let (Some(roman), true) = (&roman, self.has_roman) {
-                search_roman(&conn, roman, &lang_filter, limit + 1, offset, map_row)?
+                search_roman(
+                    &conn,
+                    roman,
+                    &lang_filter,
+                    &excluded,
+                    limit + 1,
+                    offset,
+                    map_row,
+                )?
             } else if let Some(roman) = roman {
                 // search.db from before `term_roman`: the rows whose first character the query
                 // can start with, by the index on `term`; then romanize each one
@@ -1909,7 +2075,7 @@ impl SearchDb {
                     let sql = format!(
                         "SELECT * FROM (
                            SELECT *, ko_roman_rank(term, ?1) AS roman_rank FROM term_search
-                           WHERE {lang_filter}({})
+                           WHERE {filter}({})
                          ) WHERE roman_rank > 0
                          ORDER BY roman_rank DESC, score DESC LIMIT {} OFFSET {}",
                         or.join(" OR "),
@@ -1945,10 +2111,11 @@ impl SearchDb {
                 if q.is_empty() {
                     vec![]
                 } else {
-                    let mut st = conn.prepare_cached(
+                    let mut st = conn.prepare_cached(&format!(
                         "SELECT s.* FROM term_search_fts f JOIN term_search s ON s.id = f.rowid
-                         WHERE term_search_fts MATCH ?1 ORDER BY f.rank LIMIT ?2 OFFSET ?3",
-                    )?;
+                         WHERE {}term_search_fts MATCH ?1 ORDER BY f.rank LIMIT ?2 OFFSET ?3",
+                        dict_filter("s.id", &excluded)
+                    ))?;
                     st.query_map(params![q, limit + 1, offset], map_row)?
                         .collect::<Result<_, _>>()?
                 }
@@ -1962,6 +2129,9 @@ impl SearchDb {
                 let mut ps: Vec<String> = vec![];
                 if !lang.is_empty() {
                     wh.push(format!("term_{lang} != ''"));
+                }
+                if let Some(f) = dict_filter("id", &excluded).strip_suffix(" AND ") {
+                    wh.push(f.to_string());
                 }
                 if !q_term.is_empty() {
                     ps.push(q_term);
@@ -2010,11 +2180,12 @@ impl SearchDb {
             None
         };
 
-        self.expand(&mut items)?;
+        self.expand(&mut items, &excluded)?;
         Ok(SearchResult { items, next })
     }
 
-    fn expand(&self, items: &mut [SearchItem]) -> Result<(), YomitanError> {
+    /// Read each item's entries from the zips, but those of the `excluded` dictionaries.
+    fn expand(&self, items: &mut [SearchItem], excluded: &[i64]) -> Result<(), YomitanError> {
         if items.is_empty() {
             return Ok(());
         }
@@ -2032,6 +2203,9 @@ impl SearchDb {
         };
 
         for (search_id, dict_id, bank, idx) in links {
+            if excluded.contains(&dict_id) {
+                continue;
+            }
             let Some(name) = self.names.get(&dict_id) else {
                 continue;
             };

@@ -3,26 +3,33 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryHistory, createRouter } from "vue-router";
 
+import { excludedDicts } from "../util/dicts";
 import { lang } from "../util/settings";
 import DictionaryView from "./DictionaryView.vue";
+
+/** what the `dicts` command returns */
+let dicts: { name: string; title: string }[] = [];
 
 /** the `req` of each `search` command */
 let searches: Record<string, unknown>[] = [];
 
 beforeEach(() => {
   searches = [];
+  dicts = [];
   mockIPC((cmd, args) => {
     if (cmd === "search") {
       searches.push((args as { req: Record<string, unknown> }).req);
       return { items: [], next: null };
     }
     if (cmd === "segment") return [];
+    if (cmd === "dicts") return dicts;
     throw new Error(`unexpected command: ${cmd}`);
   });
 });
 
 afterEach(() => {
   lang.value = "";
+  excludedDicts.value = [];
 });
 
 async function mountView() {
@@ -240,6 +247,7 @@ describe("DictionaryView", () => {
     ]);
     mockIPC((cmd, args) => {
       if (cmd === "dict_styles") return null;
+      if (cmd === "dicts") return [];
       if (cmd !== "search") throw new Error(`unexpected command: ${cmd}`);
       searches.push((args as { req: Record<string, unknown> }).req);
       const entry = {
@@ -270,6 +278,40 @@ describe("DictionaryView", () => {
     // the first result opens by itself
     // English definitions, but their Han characters are Chinese
     expect(wrapper.get(".gloss-list").attributes("lang")).toBe("zh");
+    wrapper.unmount();
+  });
+  it("leaves out the dictionaries unticked, and remembers them", async () => {
+    dicts = [
+      { name: "A", title: "Dict A" },
+      { name: "MyDict", title: "My Dict" },
+    ];
+    const wrapper = await mountView();
+    await flushPromises();
+    const boxes = wrapper.findAll(".dict-filter-list input");
+    expect(boxes.map((b) => (b.element as HTMLInputElement).checked)).toEqual([
+      true,
+      true,
+    ]);
+
+    await boxes[1].setValue(false);
+    await wrapper.get("input.search-input").setValue("日本");
+    expect(await lastSearch()).toMatchObject({ exclude_dicts: ["MyDict"] });
+    expect(wrapper.get(".dict-filter summary").text()).toContain("(1 of 2)");
+    expect(JSON.parse(localStorage.getItem("cjk-dict.excludedDicts")!)).toEqual(
+      ["MyDict"],
+    );
+
+    searches = [];
+    await wrapper.get(".dict-filter .link-button").trigger("click");
+    expect(await lastSearch()).toMatchObject({ exclude_dicts: [] });
+    wrapper.unmount();
+  });
+
+  it("hides the dictionary filter with one dictionary", async () => {
+    dicts = [{ name: "A", title: "Dict A" }];
+    const wrapper = await mountView();
+    await flushPromises();
+    expect(wrapper.find(".dict-filter").exists()).toBe(false);
     wrapper.unmount();
   });
 });

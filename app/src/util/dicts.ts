@@ -1,0 +1,64 @@
+import { invoke } from "@tauri-apps/api/core";
+import { ref, watch } from "vue";
+
+/** A dictionary in the downloaded library (`search.db`'s `dict` table) */
+export interface IDictInfo {
+  /** the zip's name, e.g. `jitendex`; the key */
+  name: string;
+  /** index.json's title */
+  title: string;
+  revision: string;
+  /** the terms' language, e.g. `ja-JP` */
+  lang: string | null;
+  /** the definitions' language, e.g. `en` */
+  target_lang: string | null;
+  term_count: number;
+}
+
+/**
+ * Dictionaries left out of searches, by name; persisted per device. Kept as the ones left
+ * out, so a dictionary added to the library later is searched.
+ */
+const KEY = "cjk-dict.excludedDicts";
+
+function read(): string[] {
+  try {
+    const v: unknown = JSON.parse(localStorage.getItem(KEY) ?? "[]");
+    return Array.isArray(v) ? v.filter((s) => typeof s === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+export const excludedDicts = ref<string[]>(read());
+
+watch(
+  excludedDicts,
+  (v) => {
+    try {
+      localStorage.setItem(KEY, JSON.stringify(v));
+    } catch {
+      // storage unavailable: the choice just isn't remembered
+    }
+  },
+  { deep: true },
+);
+
+/** The downloaded dictionaries, in build order; empty until some are downloaded. */
+export const dictList = ref<IDictInfo[]>([]);
+
+export async function loadDicts() {
+  try {
+    dictList.value = await invoke<IDictInfo[]>("dicts");
+  } catch (e) {
+    // e.g. "no dictionaries downloaded yet" on first launch
+    console.warn(e);
+    dictList.value = [];
+  }
+}
+
+/** Search `name`, or leave it out. */
+export function setDictIncluded(name: string, included: boolean) {
+  const rest = excludedDicts.value.filter((n) => n !== name);
+  excludedDicts.value = included ? rest : [...rest, name];
+}
