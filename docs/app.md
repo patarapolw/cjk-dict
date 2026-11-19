@@ -47,6 +47,7 @@ How the app gets the library and shows entries. The [README](../README.md#app) h
 
 - Buttons and labels explain themselves with tooltips (`v-tooltip`, [`app/src/util/tooltip.ts`](../app/src/util/tooltip.ts)), in place of `title`, which a touchscreen never shows.
 - On a device without hover (`(hover: none)`, e.g. a phone), the search hint says, before anything is typed, to long-press a button or option to see what it does.
+  - In **Words**, it leaves out "or press `{}` to search by reading only" there, to save room: a long press on `{}` explains it.
 - They follow [WCAG 2.1 SC 1.4.13](https://www.w3.org/WAI/WCAG21/Understanding/content-on-hover-or-focus.html) and the [ARIA Authoring Practices' tooltip pattern](https://www.w3.org/WAI/ARIA/apg/patterns/tooltip/).
 
 | Input        | Shows                                  | Hides                                               |

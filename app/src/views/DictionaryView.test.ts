@@ -74,11 +74,15 @@ describe("DictionaryView", () => {
     // with a mouse, hovering shows it
     expect(help(wrapper)).toBe(false);
 
+    expect(wrapper.get(".search-hint").text()).toContain("or press {}");
+
     touchScreen.value = true;
     await flushPromises();
     expect(wrapper.get(".search-hint .touch-help").text()).toBe(
       "Long-press a button or option to see what it does.",
     );
+    // which explains {} too, so the hint leaves it out, to save room
+    expect(wrapper.get(".search-hint").text()).not.toContain("or press {}");
     await wrapper.get("input.search-input").setValue("日本");
     expect(help(wrapper)).toBe(false);
     wrapper.unmount();
