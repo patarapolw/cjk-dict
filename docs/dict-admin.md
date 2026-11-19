@@ -55,7 +55,8 @@ Options and behavior:
   - It hashes the zips against the previous manifest to detect replacements.
 - `rebuild` discards the current index and rebuilds it from scratch.
 - Only terms, and where kanji entries are, are indexed. Definitions, term/kanji meta and media stay in the zips.
-- The lindera tokenizer dictionaries are downloaded to `tmp/lindera` when indexing is needed (`--lindera-dir`, `CJK_DICT_LINDERA_DIR`).
+- Terms are tokenized with [lindera](https://github.com/lindera/lindera), so that `~` finds words containing them.
+  - Its unidic, ko-dic and cc-cedict dictionaries, the same as the app's, are downloaded from [lindera's 6.2.0 release](https://github.com/lindera/lindera/releases/tag/v6.2.0) to `tmp/lindera` when indexing is needed (`--lindera-dir`, `CJK_DICT_LINDERA_DIR`).
 
 ### Characters
 

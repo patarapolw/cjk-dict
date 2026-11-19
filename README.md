@@ -16,6 +16,8 @@ app/              Tauri app (Vue 3); app/src-tauri is its own Cargo workspace
 docs/             how dict-admin, searching and the app work in detail
 ```
 
+Words are split into tokens by [lindera](https://github.com/lindera/lindera), a morphological analyzer, with its unidic (Japanese), ko-dic (Korean) and cc-cedict (Chinese) dictionaries. `dict-admin` uses them to index terms, and the app to tokenize `~` queries.
+
 More in [`docs/`](docs/):
 
 - [dict-admin.md](docs/dict-admin.md): each `dict-admin` command, dictionary languages, the default dictionaries.
@@ -173,6 +175,6 @@ How the app downloads and searches the library: [docs/app.md](docs/app.md), [doc
 
 - The code is under the [MIT License](LICENSE).
 - Dictionaries, and data built from them such as `search.db`, keep their own licenses. So do:
-  - the downloaded tokenizer dictionaries;
+  - [lindera](https://github.com/lindera/lindera)'s tokenizer dictionaries, downloaded from its releases;
   - [hanja_hangul](https://crates.io/crates/hanja_hangul)'s word tables, which `dict-admin` includes;
   - the [CJKVI IDS database](https://github.com/cjkvi/cjkvi-ids)'s `ids.txt` (derived from the CHISE project, GPLv2), which `search.db` includes.
