@@ -37,6 +37,10 @@ How the app gets the library and shows entries. The [README](../README.md#app) h
 - Images in definitions are served from the zips through a `dict://` protocol.
 - Terms and definitions are marked with their dictionary's languages (`lang`), so Han characters take the forms of their language (see [dict-admin](dict-admin.md#languages)).
 - The app follows the device's light or dark color-scheme preference.
+- Selecting text (e.g. a long press on Android):
+  - an entry's headword selects as a whole, without its reading;
+  - tags (`.tag`) and elements with a tooltip can't be selected. They sit next to text with no space between, so a word selected beside one would take its text too, e.g. `vt` + `to` as "vtto";
+  - elsewhere, the system picks the word. For Chinese and Japanese, it's often a single character.
 
 ## Tooltips
 
@@ -53,7 +57,7 @@ How the app gets the library and shows entries. The [README](../README.md#app) h
 - The pointer can move onto the tooltip (e.g. with a screen magnifier): there are 0.15 s to cross the gap.
 - 0.4 s is a convention, about as long as a browser's own `title` tooltip; no guideline sets it.
 - A long press:
-  - is the platform's own where the webview reports it (`contextmenu`): Android and Windows. It then follows the system's delay, e.g. Android's Accessibility → Touch & hold delay;
+  - is the platform's own where the webview reports it (`contextmenu`): Android and Windows. It then follows the system's delay, e.g. Android's Accessibility → Touch & hold delay, which Android's webview reads when the app starts;
   - is timed at 0.5 s elsewhere, e.g. WebKit on iOS. A webview that turns out to report long presses is then waited for instead;
   - doesn't count as a tap, and opens no system menu (text selection, "open link");
   - is not a swipe: moving the finger more than 10 px shows nothing.
