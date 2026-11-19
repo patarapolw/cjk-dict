@@ -98,7 +98,10 @@
         </template>
         <template v-else-if="examples.furigana">
           Add a reading: <code>{{ examples.furigana }}</code
-          >, or press <code>{}</code> to search by reading only
+          ><!-- on a touchscreen, the long-press line below explains {} instead,
+               in less room --><template v-if="!touchScreen"
+            >, or press <code>{}</code> to search by reading only</template
+          >
         </template>
         <span v-if="touchScreen && !q.trim()" class="touch-help">
           Long-press a button or option to see what it does.
