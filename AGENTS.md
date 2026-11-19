@@ -114,6 +114,11 @@ and don't write code that relies on a guess without saying so. Instead:
   - **By hand**, when it's a quick look: what to open and what to see, e.g. "search
     學習: the headword is in traditional forms", or a devtools (`Ctrl+Shift+I`)
     expression to run. Often this is enough; don't make a script for it.
+    - Say what to do in the app's own UI: the view (Words or Characters), what to type
+      in the search box, what to tap. The app has no address bar, so a user can't open
+      or see a route such as `#/kanji?q=口`.
+    - Give a route only as a devtools expression, e.g. `location.hash = "#/kanji?q=口"`,
+      and only when the UI can't get there.
   - **A local agent session** (Claude Code on the user's machine), when the checks are
     many, need iterating, or need the running app: it can drive the app with
     [`scripts/webview.mjs`](scripts/webview.mjs) and fix what it finds. Say what it
