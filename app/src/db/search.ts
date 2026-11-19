@@ -113,6 +113,8 @@ export interface IHanChar {
 export interface IHanList {
   items: { ch: string; uses: number }[];
   next: number | null;
+  /** how many there are in all, on every page */
+  total: number;
 }
 
 const ALL_LANGS = ["ja-JP", "zh", "ko-KR"];

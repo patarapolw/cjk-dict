@@ -1590,6 +1590,8 @@ pub struct HanBrief {
 pub struct HanList {
     pub items: Vec<HanBrief>,
     pub next: Option<u32>,
+    /// how many characters there are in all, on every page
+    pub total: u32,
 }
 
 /// characters [`SearchDb::han_chars`] looks up at once
@@ -2516,14 +2518,18 @@ impl SearchDb {
             ));
             sets.push(format!("SELECT ch FROM up{i}"));
         }
+        let (with, set) = (ctes.join(", "), sets.join(" INTERSECT "));
         let sql = format!(
-            "WITH RECURSIVE {} SELECT h.ch, h.uses FROM han_char h
-             WHERE h.ch IN ({}) ORDER BY h.uses DESC, h.ch LIMIT {} OFFSET {offset}",
-            ctes.join(", "),
-            sets.join(" INTERSECT "),
+            "WITH RECURSIVE {with} SELECT h.ch, h.uses FROM han_char h
+             WHERE h.ch IN ({set}) ORDER BY h.uses DESC, h.ch LIMIT {} OFFSET {offset}",
             limit + 1,
         );
         let conn = self.conn.lock()?;
+        let total: u32 = conn
+            .prepare(&format!(
+                "WITH RECURSIVE {with} SELECT count(*) FROM han_char h WHERE h.ch IN ({set})"
+            ))?
+            .query_row(params_from_iter(ps.iter()), |r| r.get(0))?;
         let mut items: Vec<HanBrief> = conn
             .prepare(&sql)?
             .query_map(params_from_iter(ps.iter()), |r| {
@@ -2539,7 +2545,7 @@ impl SearchDb {
         } else {
             None
         };
-        Ok(HanList { items, next })
+        Ok(HanList { items, next, total })
     }
 
     /// A media file from a dict's zip (structured-content `path`).
@@ -2896,6 +2902,17 @@ mod han_tests {
                 .unwrap()
                 .next,
             Some(4)
+        );
+        // on every page
+        assert_eq!(
+            db.han_containing("木", Some(2), Some(2), false)
+                .unwrap()
+                .total,
+            5
+        );
+        assert_eq!(
+            db.han_containing("⼝", Some(1), None, true).unwrap().total,
+            3
         );
         // only what names 口 itself: not 河, made of 可
         assert_eq!(

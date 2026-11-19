@@ -68,8 +68,9 @@ The Characters view (`#/kanji?q=<characters>`) shows, for each Han character:
 - how it breaks down: each IDS, by region, the one for the search language first;
 - every component, all the way down; components link to their own page;
 - **Used in**: up to 30 characters made directly of it (one level up), the most used first: 口 lists 可, 呆, ... but not 河, made of 可;
+  - "5 more" after them when there are more;
   - a radical also lists the characters written with its component forms: 水 lists 河;
-  - the **`*口` each in full** button below it searches `*口` (see below);
+  - **Search `*口`** below it searches `*口`, which shows them all, each in full (see below);
 - its kanji dictionary entries: readings, meanings, and stats with the dictionary's own notes;
 - Hangul readings;
 - its single-character word entries.

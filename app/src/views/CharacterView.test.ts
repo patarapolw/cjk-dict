@@ -50,12 +50,13 @@ const HAN: Record<string, IHanChar> = {
   },
 };
 
-/** the characters made directly of 木: more than a page of 20 */
+/** the characters made directly of 木: more than "Used in" shows (30), and than a page
+ * of `*木` (20) */
 const MADE_OF_MU = [
   "林",
   "森",
   "杏",
-  ...Array.from({ length: 22 }, (_, i) => String.fromCodePoint(0x4e00 + i)),
+  ...Array.from({ length: 32 }, (_, i) => String.fromCodePoint(0x4e00 + i)),
 ];
 
 let calls: { cmd: string; args: Record<string, unknown> }[] = [];
@@ -86,6 +87,7 @@ beforeEach(() => {
         return {
           items: all.slice(offset, end).map((ch) => ({ ch, uses: 1 })),
           next: end < all.length ? end : null,
+          total: all.length,
         };
       };
       if (a.components === "林木" && !a.direct) return page(["森"]);
@@ -209,7 +211,8 @@ describe("CharacterView", () => {
       wrapper
         .findAll('[data-char="木"] .used-in-list .component')
         .map((b) => b.text()),
-    ).toEqual(MADE_OF_MU);
+    ).toEqual(MADE_OF_MU.slice(0, 30));
+    expect(wrapper.get('[data-char="木"] .used-in-more').text()).toBe("5 more");
     wrapper.unmount();
   });
 
@@ -249,7 +252,7 @@ describe("CharacterView", () => {
     calls = [];
     const button = wrapper.get('[data-char="木"] .super-search');
     // as it will read in the search box
-    expect(button.get(".super-query").text()).toBe("*木");
+    expect(button.text().replace(/\s+/g, " ")).toBe("Search *木");
     await button.trigger("click");
     await vi.waitFor(() =>
       expect(calls.some((c) => c.cmd === "han_chars")).toBe(true),
