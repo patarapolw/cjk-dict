@@ -248,7 +248,8 @@ describe("CharacterView", () => {
 
     calls = [];
     const button = wrapper.get('[data-char="木"] .super-search');
-    expect(button.text()).toBe("* 木");
+    // as it will read in the search box
+    expect(button.get(".super-query").text()).toBe("*木");
     await button.trigger("click");
     await vi.waitFor(() =>
       expect(calls.some((c) => c.cmd === "han_chars")).toBe(true),

@@ -168,15 +168,21 @@
             >
               {{ it.ch }}
             </button>
-            <button
-              type="button"
-              class="link-button super-search"
-              :title="superTitle(c.ch)"
-              @click="go(`*${c.ch}`)"
-            >
-              * {{ c.ch }}
-            </button>
           </p>
+          <!-- the label says what it does, as there is no hover title on a touchscreen;
+               the query reads as it will in the search box -->
+          <button
+            v-if="usedIn[c.ch].items.length"
+            type="button"
+            class="super-search"
+            :title="superTitle(c.ch)"
+            @click="go(`*${c.ch}`)"
+          >
+            <span class="super-query" :lang="lang || undefined"
+              >*{{ c.ch }}</span
+            >
+            <span class="super-label">each in full</span>
+          </button>
         </div>
 
         <article
@@ -815,9 +821,32 @@ h3 {
 }
 
 .super-search {
-  margin-inline-start: 0.5rem;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-top: 0.375rem;
+  /* big enough to tap */
+  min-height: 2.25rem;
+  padding: 0.25rem 0.75rem;
+  border: 1px solid var(--app-input-border);
+  border-radius: 0.25rem;
+  background: var(--app-control-background);
+  color: var(--app-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.super-search:hover {
+  background: var(--app-selected-background);
+}
+
+.super-query {
+  font-size: 1.125rem;
+}
+
+.super-label {
   font-size: 0.875rem;
-  font-weight: normal;
+  color: var(--app-text-muted);
 }
 
 .super-more {
