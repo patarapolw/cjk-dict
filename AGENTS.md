@@ -119,6 +119,10 @@ and don't write code that relies on a guess without saying so. Instead:
       or see a route such as `#/kanji?q=口`.
     - Give a route only as a devtools expression, e.g. `location.hash = "#/kanji?q=口"`,
       and only when the UI can't get there.
+    - Ask only for what the unit tests can't see: layout, looks, touch, the real
+      dictionaries' data. Leave out what a test already checks, such as a hint's text.
+    - The app follows the system's light or dark theme and has no switch of its own:
+      don't ask for a check in both themes unless the change is about colors.
   - **A local agent session** (Claude Code on the user's machine), when the checks are
     many, need iterating, or need the running app: it can drive the app with
     [`scripts/webview.mjs`](scripts/webview.mjs) and fix what it finds. Say what it
