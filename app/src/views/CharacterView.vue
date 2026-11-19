@@ -28,15 +28,18 @@
         </button>
       </div>
       <p class="search-hint">
-        <template v-if="chars.length">
+        <template v-if="superQuery && chars.length">
+          Characters made directly of <code>{{ chars.join(" + ") }}</code>
+        </template>
+        <template v-else-if="chars.length">
           {{ chars.length > 1 ? "Characters" : "Character" }}
-          <code>{{ chars.join(" ") }}</code
-          >, and the characters made of
-          {{ chars.length > 1 ? "all of them" : "it" }}
+          <code>{{ chars.join(" ") }}</code>
         </template>
         <template v-else>
-          Type or paste characters, e.g. <code>語</code>, or components, e.g.
-          <code>木口</code>
+          Type or paste characters, e.g. <code>語</code>. Several, e.g.
+          <code>木口</code>, also find the characters made of all of them: 呆,
+          杏, …; <code>*口</code> shows the characters made directly of 口, each
+          in full.
         </template>
       </p>
     </header>
@@ -88,7 +91,7 @@
                 ~ {{ c.ch }}
               </button>
               <button
-                v-if="chars.length > 1"
+                v-if="found.length > 1 || superQuery"
                 type="button"
                 class="link-button"
                 v-tooltip="'This character only'"
@@ -149,6 +152,42 @@
               {{ comp }}
             </button>
           </p>
+        </div>
+
+        <div v-if="usedIn[c.ch]" class="used-in">
+          <h3>Used in</h3>
+          <p v-if="!usedIn[c.ch].items.length" class="muted">
+            Not a component of another character.
+          </p>
+          <p v-else class="used-in-list" :lang="lang || undefined">
+            <button
+              v-for="it in usedIn[c.ch].items"
+              :key="it.ch"
+              type="button"
+              class="component"
+              v-tooltip="usedInTitle(it)"
+              @click="go(it.ch)"
+            >
+              {{ it.ch }}
+            </button>
+            <span
+              v-if="usedIn[c.ch].total > usedIn[c.ch].items.length"
+              class="muted used-in-more"
+              >{{ usedIn[c.ch].total - usedIn[c.ch].items.length }} more</span
+            >
+          </p>
+          <button
+            v-if="usedIn[c.ch].items.length"
+            type="button"
+            class="super-search"
+            v-tooltip="superTitle(c.ch)"
+            @click="go(`*${c.ch}`)"
+          >
+            Search
+            <span class="super-query" :lang="lang || undefined"
+              >*{{ c.ch }}</span
+            >
+          </button>
         </div>
 
         <article
@@ -251,11 +290,25 @@
         </details>
       </section>
 
-      <section v-if="chars.length" class="containing">
+      <button
+        v-if="superQuery && superNext !== null"
+        type="button"
+        class="more-button super-more"
+        :disabled="loadingMore"
+        @click="loadSuper()"
+      >
+        More
+      </button>
+
+      <!-- one character's are under "Used in" on its card -->
+      <section v-if="!superQuery && chars.length > 1" class="containing">
         <h2>
           Characters made of
           <span :lang="lang || undefined">{{ chars.join(" + ") }}</span>
         </h2>
+        <p class="muted containing-note">
+          Each is made of all {{ chars.length }} characters, at any depth.
+        </p>
         <p v-if="!containing.length && containingNext === null" class="muted">
           None
         </p>
@@ -265,7 +318,7 @@
             :key="it.ch"
             type="button"
             class="char-button"
-            v-tooltip="it.uses ? `in ${it.uses.toLocaleString()} words` : ''"
+            v-tooltip="usedInTitle(it)"
             @click="go(it.ch)"
           >
             {{ it.ch }}
@@ -297,7 +350,7 @@ import {
 import { useRoute, useRouter } from "vue-router";
 
 import Term from "../components/yomitan/Term.vue";
-import { IHanChar, IKanjiEntry, ITerm, searchDB } from "../db/search";
+import { IHanChar, IHanList, IKanjiEntry, ITerm, searchDB } from "../db/search";
 import {
   READING_STAT_LANGS,
   REGION_NAMES,
@@ -317,15 +370,23 @@ import { vTooltip } from "../util/tooltip";
 /** characters [`han_chars`] looks up at once (MAX_HAN_CHARS in search.rs) */
 const MAX_CHARS = 20;
 const PAGE = 60;
+/** characters made directly of a character, shown on its card */
+const USED_IN_PAGE = 30;
 
 const q = ref("");
 const chars = computed(() => hanChars(q.value).slice(0, MAX_CHARS));
+/** `*木口`: the characters made directly of all of them, each shown in full */
+const superQuery = computed(() => /^\s*[*＊]/.test(q.value));
 
 const found = ref<IHanChar[]>([]);
 const error = ref("");
 const containing = ref<{ ch: string; uses: number }[]>([]);
 const containingNext = ref<number | null>(null);
 const loadingMore = ref(false);
+/** each character's characters made directly of it (super-characters) */
+const usedIn = ref<Record<string, IHanList>>({});
+/** with a `*` query, the offset of its next page of characters */
+const superNext = ref<number | null>(null);
 /** single-character word entries, loaded when their section is opened */
 const words = ref<Record<string, ITerm[]>>({});
 
@@ -344,31 +405,89 @@ async function load() {
   const text = chars.value.join("");
   words.value = {};
   if (!text) {
-    found.value = [];
-    containing.value = [];
-    containingNext.value = null;
-    error.value = "";
+    clear();
     return;
   }
   try {
-    const [cs, list] = await Promise.all([
-      searchDB.hanChars(text),
-      searchDB.hanContaining(text, PAGE, 0),
-    ]);
-    if (id !== requestId) return;
-    found.value = cs;
-    containing.value = list.items;
-    containingNext.value = list.next;
-    error.value = "";
+    if (superQuery.value) {
+      const page = await superPage(text, 0);
+      if (id !== requestId) return;
+      clear();
+      found.value = page.found;
+      usedIn.value = page.usedIn;
+      superNext.value = page.next;
+    } else {
+      const [cs, list, direct] = await Promise.all([
+        searchDB.hanChars(text),
+        chars.value.length > 1
+          ? searchDB.hanContaining(text, PAGE, 0)
+          : { items: [], next: null },
+        usedInOf(chars.value),
+      ]);
+      if (id !== requestId) return;
+      clear();
+      found.value = cs;
+      usedIn.value = direct;
+      containing.value = list.items;
+      containingNext.value = list.next;
+    }
     if (elScroller.value) scrollToStart(elScroller.value);
   } catch (e) {
     // e.g. "no dictionaries downloaded yet" on first launch
     console.error(e);
     if (id !== requestId) return;
-    found.value = [];
-    containing.value = [];
-    containingNext.value = null;
+    clear();
     error.value = String(e);
+  }
+}
+
+function clear() {
+  found.value = [];
+  usedIn.value = {};
+  superNext.value = null;
+  containing.value = [];
+  containingNext.value = null;
+  error.value = "";
+}
+
+/** Each of `chs`' characters made directly of it */
+async function usedInOf(chs: string[]): Promise<Record<string, IHanList>> {
+  const lists = await Promise.all(
+    chs.map((ch) => searchDB.hanContaining(ch, USED_IN_PAGE, 0, true)),
+  );
+  return Object.fromEntries(chs.map((ch, i) => [ch, lists[i]]));
+}
+
+/** A page of the characters made directly of all of `components`, each in full */
+async function superPage(components: string, offset: number) {
+  const list = await searchDB.hanContaining(
+    components,
+    MAX_CHARS,
+    offset,
+    true,
+  );
+  const chs = list.items.map((it) => it.ch);
+  const [cs, direct] = chs.length
+    ? await Promise.all([searchDB.hanChars(chs.join("")), usedInOf(chs)])
+    : [[], {}];
+  return { found: cs, usedIn: direct, next: list.next };
+}
+
+async function loadSuper() {
+  const offset = superNext.value;
+  if (offset === null || loadingMore.value) return;
+  const id = requestId;
+  loadingMore.value = true;
+  try {
+    const page = await superPage(chars.value.join(""), offset);
+    if (id !== requestId) return;
+    found.value = [...found.value, ...page.found];
+    usedIn.value = { ...usedIn.value, ...page.usedIn };
+    superNext.value = page.next;
+  } catch (e) {
+    console.error(e);
+  } finally {
+    loadingMore.value = false;
   }
 }
 
@@ -392,6 +511,11 @@ async function loadContaining() {
     loadingMore.value = false;
   }
 }
+
+const usedInTitle = (it: { ch: string; uses: number }) =>
+  it.uses ? `${it.ch}, in ${it.uses.toLocaleString()} words` : it.ch;
+const superTitle = (components: string) =>
+  `Every character made directly of ${components}, each in full`;
 
 async function onWordsToggle(ch: string, e: Event) {
   if (!(e.target as HTMLDetailsElement).open || words.value[ch]) return;
@@ -697,6 +821,46 @@ h3 {
   margin-inline-end: 0.25rem;
 }
 
+.used-in-list {
+  margin: 0.25rem 0 0;
+  font-size: 1.125rem;
+}
+
+.super-search {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.375rem;
+  margin-top: 0.375rem;
+  /* big enough to tap */
+  min-height: 2.25rem;
+  padding: 0.25rem 0.75rem;
+  border: 1px solid var(--app-input-border);
+  border-radius: 0.25rem;
+  background: var(--app-control-background);
+  color: var(--app-text);
+  font: inherit;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.super-search:hover {
+  background: var(--app-selected-background);
+}
+
+.super-query {
+  font-size: 1.125rem;
+}
+
+.used-in-more {
+  margin-inline-start: 0.375rem;
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+
+.super-more {
+  margin: 0 0.5rem 0.5rem;
+}
+
 .kanji-entry {
   margin-top: 0.75rem;
 }
@@ -751,6 +915,15 @@ h3 {
 
 .containing {
   padding: 0.5rem;
+}
+
+.containing h2 {
+  margin-bottom: 0;
+}
+
+.containing-note {
+  margin: 0.25rem 0 0.5rem;
+  font-size: 0.875rem;
 }
 
 .char-grid {

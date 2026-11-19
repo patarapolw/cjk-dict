@@ -465,19 +465,24 @@ pub async fn han_chars(
         .map_err(AppError::from)
 }
 
-/// Characters made of all the characters of `components`, the most used first.
+/// Characters made of all the characters of `components`, the most used first. With
+/// `direct`, only those whose IDS name the components themselves.
 #[tauri::command]
 pub async fn han_containing(
     state: State<'_, DictState>,
     components: String,
     limit: Option<u32>,
     offset: Option<u32>,
+    direct: Option<bool>,
 ) -> Result<HanList, AppError> {
     let db = state.get()?;
-    tauri::async_runtime::spawn_blocking(move || db.han_containing(&components, limit, offset))
-        .await
-        .map_err(|e| AppError::Error(e.to_string()))?
-        .map_err(AppError::from)
+    let direct = direct.unwrap_or(false);
+    tauri::async_runtime::spawn_blocking(move || {
+        db.han_containing(&components, limit, offset, direct)
+    })
+    .await
+    .map_err(|e| AppError::Error(e.to_string()))?
+    .map_err(AppError::from)
 }
 
 /// A dictionary's `styles.css`, if its zip has one. The view scopes it to that
