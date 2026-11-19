@@ -91,4 +91,17 @@ describe("StructuredContent", () => {
     ]);
     wrapper.unmount();
   });
+
+  it("shows a title as a tooltip a touchscreen shows too", () => {
+    const wrapper = render({
+      tag: "span",
+      title: "Godan verb",
+      content: "v5",
+    });
+    const span = wrapper.get("span.gloss-sc-span");
+    expect(span.attributes("title")).toBeUndefined();
+    expect(span.attributes("aria-description")).toBe("Godan verb");
+    expect(span.classes()).toContain("has-tooltip");
+    wrapper.unmount();
+  });
 });

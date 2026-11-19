@@ -1,6 +1,13 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { type PropType, type VNodeChild, defineComponent, h } from "vue";
+import {
+  type PropType,
+  type VNodeChild,
+  defineComponent,
+  h,
+  withDirectives,
+} from "vue";
 
+import { vTooltip } from "../../util/tooltip";
 import GlossaryImage, { type ImageData } from "./GlossaryImage.vue";
 
 /**
@@ -136,14 +143,16 @@ export default defineComponent({
         const attrs: Record<string, unknown> = {
           ...base,
           style: toStyle(el.style),
-          title: typeof el.title === "string" ? el.title : undefined,
         };
+        // a tooltip a touchscreen shows too, in place of the schema's `title`
+        const title = typeof el.title === "string" ? el.title : undefined;
         if (tag === "td" || tag === "th") {
           if (typeof el.colSpan === "number") attrs.colspan = el.colSpan;
           if (typeof el.rowSpan === "number") attrs.rowspan = el.rowSpan;
         }
         if (tag === "details" && el.open === true) attrs.open = true;
-        return h(tag, attrs, render(el.content) as any);
+        const vnode = h(tag, attrs, render(el.content) as any);
+        return title ? withDirectives(vnode, [[vTooltip, title]]) : vnode;
       }
       return null; // not in the schema
     }

@@ -22,7 +22,7 @@ More in [`docs/`](docs/):
 
 - [dict-admin.md](docs/dict-admin.md): each `dict-admin` command, dictionary languages, the default dictionaries.
 - [search.md](docs/search.md): search syntax, wildcards, readings, characters, Korean romanization.
-- [app.md](docs/app.md): how the app downloads the library and shows entries.
+- [app.md](docs/app.md): how the app downloads the library, shows entries, and its tooltips.
 - [yomitan-differences.md](docs/yomitan-differences.md): where rendering differs from Yomitan.
 
 ## Setup

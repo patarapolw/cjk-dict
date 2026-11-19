@@ -59,3 +59,11 @@ body {
   background: var(--app-background);
   color: var(--app-text);
 }
+
+/* v-tooltip (util/tooltip.ts): a long press shows the tooltip, not the system's
+   text selection or link menu */
+.has-tooltip {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}

@@ -78,6 +78,7 @@
       </p>
     </div>
   </aside>
+  <Tooltip />
 </template>
 
 <script setup lang="ts">
@@ -95,6 +96,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import Downloading from "./components/Downloading.vue";
+import Tooltip from "./components/Tooltip.vue";
 import {
   DownloadUrlProgress,
   DownloadingProps,

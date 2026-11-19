@@ -174,7 +174,7 @@ and don't write code that relies on a guess without saying so. Instead:
   - [`docs/dict-admin.md`](docs/dict-admin.md): `dict-admin`'s commands, dictionary
     languages, the default dictionaries;
   - [`docs/search.md`](docs/search.md): searching in the app;
-  - [`docs/app.md`](docs/app.md): how the app downloads the library and shows entries;
+  - [`docs/app.md`](docs/app.md): how the app downloads the library, shows entries, and its tooltips;
   - [`docs/yomitan-differences.md`](docs/yomitan-differences.md): where rendering
     differs from Yomitan.
 - A change to what a page describes updates the page in the same pull request. An area

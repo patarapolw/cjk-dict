@@ -18,4 +18,5 @@ These differ in how they work, not in what you see. They're listed so that a ren
 
 - **Image sizes.** Yomitan's importer stores a dictionary's `width`/`height` as `preferredWidth`/`preferredHeight`, and the image file's pixel size as `width`/`height`. The app reads dictionaries as they are, without an import step. So it treats `width`/`height` as the preferred size, and gets the pixel size from the image once it loads. Until then, an image the dictionary gives no size for takes a 100×100 px placeholder.
 - **Monochrome images** (`appearance: "monochrome"`) are drawn as a CSS mask in the text color. Yomitan draws a canvas and recolors it with CSS filters.
+- **`title`** on structured content (e.g. a tag's explanation) and on images shows as the app's own tooltip, not the browser's, so that a touchscreen shows it too: on a long press (see [app.md](app.md#tooltips)).
 - **Media** is served from the dictionary zips through the `dict:` protocol. The responses allow any origin (`Access-Control-Allow-Origin: *`), because browsers fetch CSS mask images with CORS.

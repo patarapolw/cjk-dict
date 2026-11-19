@@ -53,7 +53,7 @@ async function mountView() {
 }
 
 const readingButton = (wrapper: Awaited<ReturnType<typeof mountView>>) =>
-  wrapper.get('button[title^="Reading search"]');
+  wrapper.get('button[aria-description^="Reading search"]');
 
 /** the search sent once typing pauses */
 async function lastSearch() {
