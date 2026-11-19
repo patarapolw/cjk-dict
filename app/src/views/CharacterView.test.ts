@@ -61,13 +61,15 @@ beforeEach(() => {
       return [...String(a.text)].map((c) => HAN[c]).filter(Boolean);
     }
     if (cmd === "han_containing") {
-      if (a.components !== "木") return { items: [], next: null };
-      // 森 is made of 林, but also names 木 itself
-      if (!a.direct) return { items: [{ ch: "林", uses: 120 }], next: null };
-      // a page of one, then the rest
-      return a.offset
-        ? { items: [{ ch: "森", uses: 80 }], next: null }
-        : { items: [{ ch: "林", uses: 120 }], next: 1 };
+      const page = (items: string[], next: number | null) => ({
+        items: items.map((ch) => ({ ch, uses: 1 })),
+        next,
+      });
+      if (a.components === "林木") return page(["森"], null);
+      if (a.components !== "木") return page([], null);
+      if (a.direct) return page(["林"], null);
+      // at any depth, a page of two: 森 is made of 林
+      return a.offset ? page(["杏"], null) : page(["林", "森"], 2);
     }
     if (cmd === "search") return { items: [], next: null };
     throw new Error(`unexpected command: ${cmd}`);
@@ -158,10 +160,11 @@ describe("CharacterView", () => {
       "Stroke count",
       "Frequency",
     ]);
-    expect(calls.find((c) => c.cmd === "han_containing")?.args).toMatchObject({
-      components: "林",
-      direct: false,
-    });
+    // one character: no search for characters made of all of them
+    expect(
+      calls.filter((c) => c.cmd === "han_containing").map((c) => c.args),
+    ).toEqual([{ components: "林", limit: 30, offset: 0, direct: true }]);
+    expect(wrapper.find(".containing").exists()).toBe(false);
     wrapper.unmount();
   });
 
@@ -179,14 +182,16 @@ describe("CharacterView", () => {
     expect(wrapper.get('[data-char="木"]').text()).toContain(
       "Does not break down further",
     );
-    expect(wrapper.findAll(".char-grid button").map((b) => b.text())).toEqual([
-      "林",
-    ]);
+    expect(
+      wrapper
+        .findAll('[data-char="木"] .used-in-list .component')
+        .map((b) => b.text()),
+    ).toEqual(["林"]);
     wrapper.unmount();
   });
 
   it("lists the characters made directly of each character on its card", async () => {
-    const { wrapper, router } = await mountView("/kanji?q=林木");
+    const { wrapper } = await mountView("/kanji?q=林木");
     await loaded(wrapper);
 
     const direct = calls.filter(
@@ -196,21 +201,45 @@ describe("CharacterView", () => {
     expect(wrapper.get('[data-char="林"] .used-in').text()).toContain(
       "Not a component of another character",
     );
-    const usedIn = () =>
+    // nothing to search further
+    expect(wrapper.find('[data-char="林"] .more-used-in').exists()).toBe(false);
+    expect(
       wrapper
         .findAll('[data-char="木"] .used-in-list .component')
+        .map((b) => b.text()),
+    ).toEqual(["林"]);
+    // and below, those made of both
+    expect(wrapper.get(".containing h2").text()).toContain("林 + 木");
+    expect(wrapper.findAll(".char-grid button").map((b) => b.text())).toEqual([
+      "森",
+    ]);
+    wrapper.unmount();
+  });
+
+  it("searches the characters made of one at any depth with More", async () => {
+    const { wrapper, router } = await mountView("/kanji?q=木");
+    await loaded(wrapper);
+
+    const card = () => wrapper.get('[data-char="木"]');
+    const usedIn = () =>
+      card()
+        .findAll(".used-in-list .component")
         .map((b) => b.text());
+    expect(card().get(".used-in h3").text()).toBe("Used in");
     expect(usedIn()).toEqual(["林"]);
 
-    // the next page
-    await wrapper.get('[data-char="木"] .more-used-in').trigger("click");
+    await card().get(".more-used-in").trigger("click");
     await flushPromises();
+    expect(card().get(".used-in h3").text()).toBe("Used in, at any depth");
     expect(usedIn()).toEqual(["林", "森"]);
-    expect(wrapper.find('[data-char="木"] .more-used-in').exists()).toBe(false);
 
-    await wrapper
-      .findAll('[data-char="木"] .used-in-list .component')[1]
-      .trigger("click");
+    // then page by page
+    await card().get(".more-used-in").trigger("click");
+    await flushPromises();
+    expect(usedIn()).toEqual(["林", "森", "杏"]);
+    expect(card().find(".more-used-in").exists()).toBe(false);
+
+    await card().findAll(".used-in-list .component")[1].trigger("click");
     await flushPromises();
     expect(router.currentRoute.value.query.q).toBe("森");
     wrapper.unmount();

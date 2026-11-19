@@ -150,7 +150,7 @@
         </div>
 
         <div v-if="usedIn[c.ch]" class="used-in">
-          <h3>Used in</h3>
+          <h3>{{ usedIn[c.ch].deep ? "Used in, at any depth" : "Used in" }}</h3>
           <p v-if="!usedIn[c.ch].items.length" class="muted">
             Not a component of another character.
           </p>
@@ -166,9 +166,15 @@
               {{ it.ch }}
             </button>
             <button
-              v-if="usedIn[c.ch].next !== null"
+              v-if="!usedIn[c.ch].deep || usedIn[c.ch].next !== null"
               type="button"
               class="link-button more-used-in"
+              :disabled="loadingMore"
+              :title="
+                usedIn[c.ch].deep
+                  ? undefined
+                  : `Every character made of ${c.ch}, at any depth`
+              "
               @click="loadUsedIn(c.ch)"
             >
               More
@@ -276,11 +282,10 @@
         </details>
       </section>
 
-      <section v-if="chars.length" class="containing">
+      <!-- one character's are under "Used in" on its card -->
+      <section v-if="chars.length > 1" class="containing">
         <h2>
-          {{
-            chars.length > 1 ? "Characters made of" : "All characters made of"
-          }}
+          Characters made of
           <span :lang="lang || undefined">{{ chars.join(" + ") }}</span>
         </h2>
         <p v-if="!containing.length && containingNext === null" class="muted">
@@ -354,8 +359,15 @@ const error = ref("");
 const containing = ref<{ ch: string; uses: number }[]>([]);
 const containingNext = ref<number | null>(null);
 const loadingMore = ref(false);
+/**
+ * Characters made of a character: those whose IDS name it directly at first, then, once
+ * More is pressed, `deep`: those made of it at any depth (the super-character search).
+ */
+interface IUsedIn extends IHanList {
+  deep: boolean;
+}
 /** each character's characters made directly of it (super-characters) */
-const usedIn = ref<Record<string, IHanList>>({});
+const usedIn = ref<Record<string, IUsedIn>>({});
 /** single-character word entries, loaded when their section is opened */
 const words = ref<Record<string, ITerm[]>>({});
 
@@ -384,7 +396,9 @@ async function load() {
   try {
     const [cs, list, direct] = await Promise.all([
       searchDB.hanChars(text),
-      searchDB.hanContaining(text, PAGE, 0),
+      chars.value.length > 1
+        ? searchDB.hanContaining(text, PAGE, 0)
+        : { items: [], next: null },
       Promise.all(
         chars.value.map((ch) =>
           searchDB.hanContaining(ch, USED_IN_PAGE, 0, true),
@@ -394,7 +408,7 @@ async function load() {
     if (id !== requestId) return;
     found.value = cs;
     usedIn.value = Object.fromEntries(
-      chars.value.map((ch, i) => [ch, direct[i]]),
+      chars.value.map((ch, i) => [ch, { ...direct[i], deep: false }]),
     );
     containing.value = list.items;
     containingNext.value = list.next;
@@ -433,19 +447,28 @@ async function loadContaining() {
   }
 }
 
+/** The next page of `ch`'s characters at any depth; the first replaces the direct ones. */
 async function loadUsedIn(ch: string) {
   const list = usedIn.value[ch];
-  if (list?.next == null) return;
+  if (!list || (list.deep && list.next === null) || loadingMore.value) return;
   const id = requestId;
+  loadingMore.value = true;
   try {
-    const more = await searchDB.hanContaining(ch, PAGE, list.next, true);
+    const offset = list.deep ? list.next! : 0;
+    const more = await searchDB.hanContaining(ch, PAGE, offset);
     if (id !== requestId) return;
     usedIn.value = {
       ...usedIn.value,
-      [ch]: { items: [...list.items, ...more.items], next: more.next },
+      [ch]: {
+        items: list.deep ? [...list.items, ...more.items] : more.items,
+        next: more.next,
+        deep: true,
+      },
     };
   } catch (e) {
     console.error(e);
+  } finally {
+    loadingMore.value = false;
   }
 }
 
