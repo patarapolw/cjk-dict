@@ -288,6 +288,7 @@ describe("DictionaryView", () => {
     wrapper.unmount();
   });
   it("leaves out the dictionaries unticked, and remembers them", async () => {
+    // listed without a language first: MyDict, then A
     dicts = [dict("A", "ja-JP"), dict("MyDict", null)];
     const wrapper = await mountView();
     await flushPromises();
@@ -297,7 +298,7 @@ describe("DictionaryView", () => {
       true,
     ]);
 
-    await boxes[1].setValue(false);
+    await boxes[0].setValue(false);
     await wrapper.get("input.search-input").setValue("日本");
     expect(await lastSearch()).toMatchObject({ exclude_dicts: ["MyDict"] });
     expect(wrapper.get(".dict-filter-count").text()).toBe("(1 of 2)");
@@ -333,7 +334,7 @@ describe("DictionaryView", () => {
     const names = wrapper
       .findAll(".dict-filter-list span")
       .map((s) => s.text());
-    expect(names).toEqual(["B title", "C title", "MyDict title"]);
+    expect(names).toEqual(["MyDict title", "C title", "B title"]);
     expect(wrapper.get(".dict-filter-count").text()).toBe("(2 of 3)");
 
     // A, of another language, stays left out

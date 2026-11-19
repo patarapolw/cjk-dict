@@ -63,13 +63,18 @@ export async function loadDicts() {
  * The dictionaries with words to choose from for `lang` (the search language, "" for
  * all): kanji dictionaries (no terms) are left out, and so are those of another
  * language. A dictionary that doesn't say its language may have words of any.
+ *
+ * Ordered by language: those without one first, then by language tag (`ja-JP`, `ko-KR`,
+ * `zh`, `zh-TW`), each language's in build order.
  */
 export function wordDicts(list: IDictInfo[], lang: string): IDictInfo[] {
-  return list.filter(
-    (d) =>
-      d.term_count > 0 &&
-      (!lang || !d.lang || primaryLang(d.lang) === primaryLang(lang)),
-  );
+  return list
+    .filter(
+      (d) =>
+        d.term_count > 0 &&
+        (!lang || !d.lang || primaryLang(d.lang) === primaryLang(lang)),
+    )
+    .sort((a, b) => (a.lang ?? "").localeCompare(b.lang ?? "", "en"));
 }
 
 /** Search `name`, or leave it out. */

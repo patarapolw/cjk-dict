@@ -118,6 +118,7 @@ Optional, below the search box:
   - with a search language chosen, only that language's, and those that don't say theirs;
   - kanji dictionaries (no words) aren't listed;
   - with only one to list, there is no list.
+- They are ordered by language: those that don't say theirs first, then by language tag (`ja-JP`, `ko-KR`, `zh`, `zh-TW`), each language's in build order.
 - An unticked dictionary is left out of word searches:
   - its entries aren't shown;
   - a word only it has isn't found.
