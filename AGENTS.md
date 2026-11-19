@@ -150,12 +150,9 @@ and don't write code that relies on a guess without saying so. Instead:
   Keep only what is useful beyond the pull request, e.g. a `dict-admin` option the admin
   will run again, and say which you kept and why.
 - Keep the list in step with later commits: remove items a commit made moot.
-- Read the pull request's body before you change it, and work from what it says now:
-  - the user may have ticked items, edited them, or added notes or results under them;
-  - keep ticked items ticked and the user's edits and notes, unless a commit made an
-    item moot;
-  - rewrite only the parts your commits change, rather than replacing the whole body
-    with one written from memory.
+- Read the list before changing it (see
+  [Pull requests and issues](#pull-requests-and-issues)): keep ticked items ticked, and
+  the notes or results the user added under them, unless a commit made an item moot.
 
 ## Dictionaries
 
@@ -189,6 +186,15 @@ and don't write code that relies on a guess without saying so. Instead:
   is expanded) and file names. Remove what a change made untrue.
 - Leave migration steps (e.g. `pnpm admin defaults --langs` for a library from before a
   change) out of the README and docs: put them in the pull request's "After merging".
+
+## Pull requests and issues
+
+- Read a pull request's or issue's body right before you change it, and work from what
+  it says now, not from the version you wrote or remember:
+  - the user may have edited it since: ticked items, reworded them, or added notes,
+    results or sections;
+  - keep what the user changed, unless your change makes it untrue;
+  - rewrite only the parts your change is about, rather than replacing the whole body.
 
 ## Commit messages
 
