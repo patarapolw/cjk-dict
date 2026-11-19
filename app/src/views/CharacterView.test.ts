@@ -50,6 +50,14 @@ const HAN: Record<string, IHanChar> = {
   },
 };
 
+/** the characters made directly of 木: more than a page of 20 */
+const MADE_OF_MU = [
+  "林",
+  "森",
+  "杏",
+  ...Array.from({ length: 22 }, (_, i) => String.fromCodePoint(0x4e00 + i)),
+];
+
 let calls: { cmd: string; args: Record<string, unknown> }[] = [];
 
 beforeEach(() => {
@@ -58,18 +66,31 @@ beforeEach(() => {
     const a = args as Record<string, unknown>;
     calls.push({ cmd, args: a });
     if (cmd === "han_chars") {
-      return [...String(a.text)].map((c) => HAN[c]).filter(Boolean);
+      return [...String(a.text)].map(
+        (ch): IHanChar =>
+          HAN[ch] ?? {
+            ch,
+            ids: [],
+            components: [],
+            all_components: [],
+            hangul: [],
+            uses: 0,
+            entries: [],
+          },
+      );
     }
     if (cmd === "han_containing") {
-      const page = (items: string[], next: number | null) => ({
-        items: items.map((ch) => ({ ch, uses: 1 })),
-        next,
-      });
-      if (a.components === "林木") return page(["森"], null);
-      if (a.components !== "木") return page([], null);
-      if (a.direct) return page(["林"], null);
-      // at any depth, a page of two: 森 is made of 林
-      return a.offset ? page(["杏"], null) : page(["林", "森"], 2);
+      const page = (all: string[]) => {
+        const offset = Number(a.offset);
+        const end = offset + Number(a.limit);
+        return {
+          items: all.slice(offset, end).map((ch) => ({ ch, uses: 1 })),
+          next: end < all.length ? end : null,
+        };
+      };
+      if (a.components === "林木" && !a.direct) return page(["森"]);
+      if (a.components === "木" && a.direct) return page(MADE_OF_MU);
+      return page([]);
     }
     if (cmd === "search") return { items: [], next: null };
     throw new Error(`unexpected command: ${cmd}`);
@@ -165,7 +186,8 @@ describe("CharacterView", () => {
       calls.filter((c) => c.cmd === "han_containing").map((c) => c.args),
     ).toEqual([{ components: "林", limit: 30, offset: 0, direct: true }]);
     expect(wrapper.find(".containing").exists()).toBe(false);
-    expect(wrapper.get(".search-hint").text()).toContain("Add characters");
+    // nothing but what is shown
+    expect(wrapper.get(".search-hint").text()).toBe("Character 林");
     wrapper.unmount();
   });
 
@@ -187,7 +209,7 @@ describe("CharacterView", () => {
       wrapper
         .findAll('[data-char="木"] .used-in-list .component')
         .map((b) => b.text()),
-    ).toEqual(["林"]);
+    ).toEqual(MADE_OF_MU);
     wrapper.unmount();
   });
 
@@ -203,14 +225,15 @@ describe("CharacterView", () => {
       "Not a component of another character",
     );
     // nothing to search further
-    expect(wrapper.find('[data-char="林"] .more-used-in').exists()).toBe(false);
+    expect(wrapper.find('[data-char="林"] .super-search').exists()).toBe(false);
     expect(
       wrapper
         .findAll('[data-char="木"] .used-in-list .component')
-        .map((b) => b.text()),
-    ).toEqual(["林"]);
+        .map((b) => b.text())
+        .slice(0, 2),
+    ).toEqual(["林", "森"]);
     // and below, those made of both
-    expect(wrapper.get(".search-hint").text()).toContain("made of 林 + 木");
+    expect(wrapper.get(".search-hint").text()).toBe("Characters 林 木");
     expect(wrapper.get(".containing h2").text()).toContain("林 + 木");
     expect(wrapper.get(".containing").text()).toContain("all 2 characters");
     expect(wrapper.findAll(".char-grid button").map((b) => b.text())).toEqual([
@@ -219,32 +242,48 @@ describe("CharacterView", () => {
     wrapper.unmount();
   });
 
-  it("searches the characters made of one at any depth with More", async () => {
+  it("shows the characters made directly of one in full with *", async () => {
     const { wrapper, router } = await mountView("/kanji?q=木");
     await loaded(wrapper);
 
-    const card = () => wrapper.get('[data-char="木"]');
-    const usedIn = () =>
-      card()
-        .findAll(".used-in-list .component")
-        .map((b) => b.text());
-    expect(card().get(".used-in h3").text()).toBe("Used in");
-    expect(usedIn()).toEqual(["林"]);
-
-    await card().get(".more-used-in").trigger("click");
+    calls = [];
+    const button = wrapper.get('[data-char="木"] .super-search');
+    expect(button.text()).toBe("* 木");
+    await button.trigger("click");
+    await vi.waitFor(() =>
+      expect(calls.some((c) => c.cmd === "han_chars")).toBe(true),
+    );
     await flushPromises();
-    expect(card().get(".used-in h3").text()).toBe("Used in, at any depth");
-    expect(usedIn()).toEqual(["林", "森"]);
+    expect(router.currentRoute.value.query.q).toBe("*木");
+    expect(wrapper.get(".search-hint").text()).toBe(
+      "Characters made directly of 木",
+    );
+    expect(calls.find((c) => c.cmd === "han_containing")?.args).toEqual({
+      components: "木",
+      limit: 20,
+      offset: 0,
+      direct: true,
+    });
+    const cards = () =>
+      wrapper.findAll(".char-card").map((c) => c.attributes("data-char"));
+    expect(cards()).toEqual(MADE_OF_MU.slice(0, 20));
+    // each in full, with its own "Used in"
+    expect(wrapper.find('[data-char="林"] .used-in').exists()).toBe(true);
+    expect(wrapper.find(".containing").exists()).toBe(false);
 
-    // then page by page
-    await card().get(".more-used-in").trigger("click");
+    // the next page
+    await wrapper.get(".super-more").trigger("click");
     await flushPromises();
-    expect(usedIn()).toEqual(["林", "森", "杏"]);
-    expect(card().find(".more-used-in").exists()).toBe(false);
+    expect(cards()).toEqual(MADE_OF_MU);
+    expect(wrapper.find(".super-more").exists()).toBe(false);
 
-    await card().findAll(".used-in-list .component")[1].trigger("click");
+    // one of them alone
+    await wrapper
+      .findAll('[data-char="林"] .item-actions button')
+      .find((b) => b.text() === "字 林")!
+      .trigger("click");
     await flushPromises();
-    expect(router.currentRoute.value.query.q).toBe("森");
+    expect(router.currentRoute.value.query.q).toBe("林");
     wrapper.unmount();
   });
 

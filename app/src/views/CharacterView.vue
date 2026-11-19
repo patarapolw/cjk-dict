@@ -28,19 +28,18 @@
         </button>
       </div>
       <p class="search-hint">
-        <template v-if="chars.length > 1">
-          Characters <code>{{ chars.join(" ") }}</code
-          >, and below, the characters made of
-          <code>{{ chars.join(" + ") }}</code>
+        <template v-if="superQuery && chars.length">
+          Characters made directly of <code>{{ chars.join(" + ") }}</code>
         </template>
         <template v-else-if="chars.length">
-          Character <code>{{ chars[0] }}</code
-          >. Add characters to find the characters made of all of them.
+          {{ chars.length > 1 ? "Characters" : "Character" }}
+          <code>{{ chars.join(" ") }}</code>
         </template>
         <template v-else>
           Type or paste characters, e.g. <code>語</code>. Several, e.g.
           <code>木口</code>, also find the characters made of all of them: 呆,
-          杏, …
+          杏, …; <code>*口</code> shows the characters made directly of 口, each
+          in full.
         </template>
       </p>
     </header>
@@ -92,7 +91,7 @@
                 ~ {{ c.ch }}
               </button>
               <button
-                v-if="chars.length > 1"
+                v-if="found.length > 1 || superQuery"
                 type="button"
                 class="link-button"
                 title="This character only"
@@ -154,7 +153,7 @@
         </div>
 
         <div v-if="usedIn[c.ch]" class="used-in">
-          <h3>{{ usedIn[c.ch].deep ? "Used in, at any depth" : "Used in" }}</h3>
+          <h3>Used in</h3>
           <p v-if="!usedIn[c.ch].items.length" class="muted">
             Not a component of another character.
           </p>
@@ -170,18 +169,12 @@
               {{ it.ch }}
             </button>
             <button
-              v-if="!usedIn[c.ch].deep || usedIn[c.ch].next !== null"
               type="button"
-              class="link-button more-used-in"
-              :disabled="loadingMore"
-              :title="
-                usedIn[c.ch].deep
-                  ? undefined
-                  : `Every character made of ${c.ch}, at any depth`
-              "
-              @click="loadUsedIn(c.ch)"
+              class="link-button super-search"
+              :title="superTitle(c.ch)"
+              @click="go(`*${c.ch}`)"
             >
-              More
+              * {{ c.ch }}
             </button>
           </p>
         </div>
@@ -286,8 +279,18 @@
         </details>
       </section>
 
+      <button
+        v-if="superQuery && superNext !== null"
+        type="button"
+        class="more-button super-more"
+        :disabled="loadingMore"
+        @click="loadSuper()"
+      >
+        More
+      </button>
+
       <!-- one character's are under "Used in" on its card -->
-      <section v-if="chars.length > 1" class="containing">
+      <section v-if="!superQuery && chars.length > 1" class="containing">
         <h2>
           Characters made of
           <span :lang="lang || undefined">{{ chars.join(" + ") }}</span>
@@ -355,26 +358,23 @@ import { lang } from "../util/settings";
 /** characters [`han_chars`] looks up at once (MAX_HAN_CHARS in search.rs) */
 const MAX_CHARS = 20;
 const PAGE = 60;
-/** characters made directly of a character, shown on its card at first */
+/** characters made directly of a character, shown on its card */
 const USED_IN_PAGE = 30;
 
 const q = ref("");
 const chars = computed(() => hanChars(q.value).slice(0, MAX_CHARS));
+/** `*木口`: the characters made directly of all of them, each shown in full */
+const superQuery = computed(() => /^\s*[*＊]/.test(q.value));
 
 const found = ref<IHanChar[]>([]);
 const error = ref("");
 const containing = ref<{ ch: string; uses: number }[]>([]);
 const containingNext = ref<number | null>(null);
 const loadingMore = ref(false);
-/**
- * Characters made of a character: those whose IDS name it directly at first, then, once
- * More is pressed, `deep`: those made of it at any depth (the super-character search).
- */
-interface IUsedIn extends IHanList {
-  deep: boolean;
-}
 /** each character's characters made directly of it (super-characters) */
-const usedIn = ref<Record<string, IUsedIn>>({});
+const usedIn = ref<Record<string, IHanList>>({});
+/** with a `*` query, the offset of its next page of characters */
+const superNext = ref<number | null>(null);
 /** single-character word entries, loaded when their section is opened */
 const words = ref<Record<string, ITerm[]>>({});
 
@@ -393,43 +393,89 @@ async function load() {
   const text = chars.value.join("");
   words.value = {};
   if (!text) {
-    found.value = [];
-    usedIn.value = {};
-    containing.value = [];
-    containingNext.value = null;
-    error.value = "";
+    clear();
     return;
   }
   try {
-    const [cs, list, direct] = await Promise.all([
-      searchDB.hanChars(text),
-      chars.value.length > 1
-        ? searchDB.hanContaining(text, PAGE, 0)
-        : { items: [], next: null },
-      Promise.all(
-        chars.value.map((ch) =>
-          searchDB.hanContaining(ch, USED_IN_PAGE, 0, true),
-        ),
-      ),
-    ]);
-    if (id !== requestId) return;
-    found.value = cs;
-    usedIn.value = Object.fromEntries(
-      chars.value.map((ch, i) => [ch, { ...direct[i], deep: false }]),
-    );
-    containing.value = list.items;
-    containingNext.value = list.next;
-    error.value = "";
+    if (superQuery.value) {
+      const page = await superPage(text, 0);
+      if (id !== requestId) return;
+      clear();
+      found.value = page.found;
+      usedIn.value = page.usedIn;
+      superNext.value = page.next;
+    } else {
+      const [cs, list, direct] = await Promise.all([
+        searchDB.hanChars(text),
+        chars.value.length > 1
+          ? searchDB.hanContaining(text, PAGE, 0)
+          : { items: [], next: null },
+        usedInOf(chars.value),
+      ]);
+      if (id !== requestId) return;
+      clear();
+      found.value = cs;
+      usedIn.value = direct;
+      containing.value = list.items;
+      containingNext.value = list.next;
+    }
     if (elScroller.value) scrollToStart(elScroller.value);
   } catch (e) {
     // e.g. "no dictionaries downloaded yet" on first launch
     console.error(e);
     if (id !== requestId) return;
-    found.value = [];
-    usedIn.value = {};
-    containing.value = [];
-    containingNext.value = null;
+    clear();
     error.value = String(e);
+  }
+}
+
+function clear() {
+  found.value = [];
+  usedIn.value = {};
+  superNext.value = null;
+  containing.value = [];
+  containingNext.value = null;
+  error.value = "";
+}
+
+/** Each of `chs`' characters made directly of it */
+async function usedInOf(chs: string[]): Promise<Record<string, IHanList>> {
+  const lists = await Promise.all(
+    chs.map((ch) => searchDB.hanContaining(ch, USED_IN_PAGE, 0, true)),
+  );
+  return Object.fromEntries(chs.map((ch, i) => [ch, lists[i]]));
+}
+
+/** A page of the characters made directly of all of `components`, each in full */
+async function superPage(components: string, offset: number) {
+  const list = await searchDB.hanContaining(
+    components,
+    MAX_CHARS,
+    offset,
+    true,
+  );
+  const chs = list.items.map((it) => it.ch);
+  const [cs, direct] = chs.length
+    ? await Promise.all([searchDB.hanChars(chs.join("")), usedInOf(chs)])
+    : [[], {}];
+  return { found: cs, usedIn: direct, next: list.next };
+}
+
+async function loadSuper() {
+  const offset = superNext.value;
+  if (offset === null || loadingMore.value) return;
+  const id = requestId;
+  loadingMore.value = true;
+  try {
+    const page = await superPage(chars.value.join(""), offset);
+    if (id !== requestId) return;
+    found.value = [...found.value, ...page.found];
+    usedIn.value = { ...usedIn.value, ...page.usedIn };
+    superNext.value = page.next;
+  } catch (e) {
+    console.error(e);
+  } finally {
+    loadingMore.value = false;
   }
 }
 
@@ -454,33 +500,10 @@ async function loadContaining() {
   }
 }
 
-/** The next page of `ch`'s characters at any depth; the first replaces the direct ones. */
-async function loadUsedIn(ch: string) {
-  const list = usedIn.value[ch];
-  if (!list || (list.deep && list.next === null) || loadingMore.value) return;
-  const id = requestId;
-  loadingMore.value = true;
-  try {
-    const offset = list.deep ? list.next! : 0;
-    const more = await searchDB.hanContaining(ch, PAGE, offset);
-    if (id !== requestId) return;
-    usedIn.value = {
-      ...usedIn.value,
-      [ch]: {
-        items: list.deep ? [...list.items, ...more.items] : more.items,
-        next: more.next,
-        deep: true,
-      },
-    };
-  } catch (e) {
-    console.error(e);
-  } finally {
-    loadingMore.value = false;
-  }
-}
-
 const usedInTitle = (it: { ch: string; uses: number }) =>
   it.uses ? `${it.ch}, in ${it.uses.toLocaleString()} words` : it.ch;
+const superTitle = (components: string) =>
+  `Every character made directly of ${components}, each in full`;
 
 async function onWordsToggle(ch: string, e: Event) {
   if (!(e.target as HTMLDetailsElement).open || words.value[ch]) return;
@@ -791,9 +814,14 @@ h3 {
   font-size: 1.125rem;
 }
 
-.more-used-in {
+.super-search {
   margin-inline-start: 0.5rem;
   font-size: 0.875rem;
+  font-weight: normal;
+}
+
+.super-more {
+  margin: 0 0.5rem 0.5rem;
 }
 
 .kanji-entry {
