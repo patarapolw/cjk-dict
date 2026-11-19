@@ -1,11 +1,17 @@
+<!-- The one tooltip bubble, for v-tooltip (util/tooltip.ts). Screen readers get its text
+     from the element's aria-describedby instead, so the bubble itself is hidden from them
+     and isn't read twice. -->
 <template>
   <div
     v-if="tooltip"
     ref="bubble"
     class="tooltip"
-    role="tooltip"
+    data-tooltip-bubble
+    aria-hidden="true"
     :style="style"
     :data-placement="placement"
+    @pointerenter="onPointerEnter"
+    @pointerleave="onPointerLeave"
   >
     {{ tooltip.text }}
   </div>
@@ -14,7 +20,7 @@
 <script setup lang="ts">
 import { nextTick, ref, useTemplateRef, watch } from "vue";
 
-import { tooltip } from "../util/tooltip";
+import { keepTooltip, leaveTooltip, tooltip } from "../util/tooltip";
 
 /** space kept from the element and from the window's edges, in px */
 const GAP = 6;
@@ -23,6 +29,14 @@ const MARGIN = 8;
 const elBubble = useTemplateRef("bubble");
 const style = ref<Record<string, string>>({});
 const placement = ref<"above" | "below">("above");
+
+// hoverable (WCAG 1.4.13): the pointer may move onto the tooltip, e.g. to magnify it
+function onPointerEnter(e: PointerEvent) {
+  if (e.pointerType !== "touch") keepTooltip();
+}
+function onPointerLeave(e: PointerEvent) {
+  if (e.pointerType !== "touch") leaveTooltip();
+}
 
 // above the element, as a finger would cover what's below it; below if there's no room.
 // Centred on it, but kept within the window.
@@ -62,7 +76,7 @@ watch(tooltip, async (t) => {
   white-space: pre-line;
   overflow-wrap: anywhere;
   box-shadow: 0 2px 8px rgb(0 0 0 / 0.25);
-  /* never in the way of what's under it */
-  pointer-events: none;
+  /* its text can be selected and magnified */
+  user-select: text;
 }
 </style>

@@ -5,9 +5,11 @@ import { defineComponent, h, nextTick, ref, withDirectives } from "vue";
 import Tooltip from "../components/Tooltip.vue";
 import {
   HOVER_MS,
+  LEAVE_GRACE_MS,
   LONG_PRESS_MS,
-  TOUCH_SHOW_MS,
+  describedText,
   hideTooltip,
+  setPlatformLongPress,
   tooltip,
   vTooltip,
 } from "./tooltip";
@@ -26,6 +28,7 @@ function pointer(
   });
   Object.defineProperty(e, "pointerType", { value: pointerType });
   el.dispatchEvent(e);
+  return e;
 }
 
 const text = ref<string | undefined>("Words containing it");
@@ -39,13 +42,15 @@ function mountButton() {
     h("p", "elsewhere"),
     h(Tooltip),
   ]);
-  return mount(Comp, { attachTo: document.body });
+  const wrapper = mount(Comp, { attachTo: document.body });
+  return { wrapper, button: wrapper.get("button").element };
 }
 
 beforeEach(() => {
   vi.useFakeTimers();
   text.value = "Words containing it";
   clicks.mockClear();
+  setPlatformLongPress(false);
 });
 
 afterEach(() => {
@@ -53,44 +58,101 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("v-tooltip", () => {
-  it("shows on a mouse resting on the element, and hides when it leaves", async () => {
-    const wrapper = mountButton();
-    const button = wrapper.get("button").element;
-    expect(button.getAttribute("title")).toBeNull();
-    expect(button.getAttribute("aria-description")).toBe("Words containing it");
+const bubble = () => document.querySelector("[data-tooltip-bubble]");
 
+describe("v-tooltip", () => {
+  it("describes the element to screen readers, without a title", async () => {
+    const { wrapper, button } = mountButton();
+    expect(button.getAttribute("title")).toBeNull();
+    // at all times, not only while shown
+    expect(describedText(button)).toBe("Words containing it");
+    text.value = "Token search";
+    await nextTick();
+    expect(describedText(button)).toBe("Token search");
+    text.value = "";
+    await nextTick();
+    expect(button.getAttribute("aria-describedby")).toBeNull();
+    wrapper.unmount();
+  });
+
+  it("shows on a mouse resting on the element, and stays while it is on the tooltip", async () => {
+    const { wrapper, button } = mountButton();
     pointer(button, "pointerenter", "mouse");
     vi.advanceTimersByTime(HOVER_MS - 1);
     expect(tooltip.value).toBeNull();
     vi.advanceTimersByTime(1);
     await nextTick();
-    await nextTick();
-    expect(wrapper.get('[role="tooltip"]').text()).toBe("Words containing it");
+    expect(bubble()?.textContent?.trim()).toBe("Words containing it");
+    // hidden from screen readers, who have the description
+    expect(bubble()?.getAttribute("aria-hidden")).toBe("true");
 
+    // hoverable: onto the tooltip within the grace time
     pointer(button, "pointerleave", "mouse");
+    vi.advanceTimersByTime(LEAVE_GRACE_MS - 1);
+    pointer(bubble()!, "pointerenter", "mouse");
+    vi.advanceTimersByTime(LEAVE_GRACE_MS * 10);
+    expect(tooltip.value).not.toBeNull();
+
+    // and off it
+    pointer(bubble()!, "pointerleave", "mouse");
+    vi.advanceTimersByTime(LEAVE_GRACE_MS);
     await nextTick();
-    expect(wrapper.find('[role="tooltip"]').exists()).toBe(false);
+    expect(bubble()).toBeNull();
     wrapper.unmount();
   });
 
-  it("shows on a long press, which then isn't a tap", async () => {
-    const wrapper = mountButton();
-    const button = wrapper.get("button").element;
+  it("hides on Esc", () => {
+    const { wrapper, button } = mountButton();
+    pointer(button, "pointerenter", "mouse");
+    vi.advanceTimersByTime(HOVER_MS);
+    expect(tooltip.value).not.toBeNull();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(tooltip.value).toBeNull();
+    wrapper.unmount();
+  });
+
+  it("shows on the platform's long press, which then isn't a tap", () => {
+    setPlatformLongPress(true);
+    const { wrapper, button } = mountButton();
 
     pointer(button, "pointerdown", "touch");
-    vi.advanceTimersByTime(LONG_PRESS_MS);
-    await nextTick();
+    // no timer of its own: the system's touch-and-hold delay decides
+    vi.advanceTimersByTime(LONG_PRESS_MS * 10);
+    expect(tooltip.value).toBeNull();
+    const menu = pointer(button, "contextmenu", "touch");
+    expect(menu.defaultPrevented).toBe(true);
     expect(tooltip.value?.text).toBe("Words containing it");
     pointer(button, "pointerup", "touch");
     button.click();
     expect(clicks).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
 
-    // until a touch elsewhere
+  it("times a long press where the webview doesn't report one", () => {
+    const { wrapper, button } = mountButton();
+
+    pointer(button, "pointerdown", "touch");
+    vi.advanceTimersByTime(LONG_PRESS_MS);
+    expect(tooltip.value?.text).toBe("Words containing it");
+    pointer(button, "pointerup", "touch");
+    button.click();
+    expect(clicks).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("keeps a long press's tooltip until a touch elsewhere, and a tap is still a tap", () => {
+    const { wrapper, button } = mountButton();
+    pointer(button, "pointerdown", "touch");
+    vi.advanceTimersByTime(LONG_PRESS_MS);
+    pointer(button, "pointerup", "touch");
+    button.click();
+
+    // persistent: no timer hides it
+    vi.advanceTimersByTime(60_000);
+    expect(tooltip.value).not.toBeNull();
     pointer(wrapper.get("p").element, "pointerdown", "touch");
     expect(tooltip.value).toBeNull();
 
-    // a tap is still a tap
     pointer(button, "pointerdown", "touch");
     vi.advanceTimersByTime(100);
     pointer(button, "pointerup", "touch");
@@ -100,17 +162,8 @@ describe("v-tooltip", () => {
     wrapper.unmount();
   });
 
-  it("hides a long press's tooltip after a while, and doesn't show for a swipe", async () => {
-    const wrapper = mountButton();
-    const button = wrapper.get("button").element;
-
-    pointer(button, "pointerdown", "touch");
-    vi.advanceTimersByTime(LONG_PRESS_MS);
-    expect(tooltip.value).not.toBeNull();
-    vi.advanceTimersByTime(TOUCH_SHOW_MS);
-    expect(tooltip.value).toBeNull();
-
-    // scrolling the list, not pressing
+  it("shows nothing for a swipe", () => {
+    const { wrapper, button } = mountButton();
     pointer(button, "pointerdown", "touch", { x: 0, y: 0 });
     pointer(button, "pointermove", "touch", { x: 0, y: 30 });
     vi.advanceTimersByTime(LONG_PRESS_MS);
@@ -118,12 +171,10 @@ describe("v-tooltip", () => {
     wrapper.unmount();
   });
 
-  it("follows the text, and shows nothing for an empty one", async () => {
-    const wrapper = mountButton();
-    const button = wrapper.get("button").element;
+  it("shows nothing for an empty text", async () => {
+    const { wrapper, button } = mountButton();
     text.value = "";
     await nextTick();
-    expect(button.getAttribute("aria-description")).toBeNull();
     pointer(button, "pointerenter", "mouse");
     vi.advanceTimersByTime(HOVER_MS);
     expect(tooltip.value).toBeNull();

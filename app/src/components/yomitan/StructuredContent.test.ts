@@ -1,6 +1,7 @@
 import { mount } from "@vue/test-utils";
 import { describe, expect, it } from "vitest";
 
+import { describedText } from "../../util/tooltip";
 import StructuredContent from "./StructuredContent";
 
 function render(node: unknown) {
@@ -100,7 +101,8 @@ describe("StructuredContent", () => {
     });
     const span = wrapper.get("span.gloss-sc-span");
     expect(span.attributes("title")).toBeUndefined();
-    expect(span.attributes("aria-description")).toBe("Godan verb");
+    // for screen readers
+    expect(describedText(span.element)).toBe("Godan verb");
     expect(span.classes()).toContain("has-tooltip");
     wrapper.unmount();
   });

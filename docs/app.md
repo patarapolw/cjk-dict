@@ -25,15 +25,26 @@ How the app gets the library and shows entries. The [README](../README.md#app) h
 
 ## Tooltips
 
-- Buttons and labels explain themselves with tooltips (`v-tooltip`, [`app/src/util/tooltip.ts`](../app/src/util/tooltip.ts)), in place of `title`, which a touchscreen never shows:
-  - with a mouse or pen: after resting on it for 0.4 s;
-  - with a keyboard: while it has focus;
-  - on a touchscreen: a long press (0.5 s) shows it, and then doesn't count as a tap.
-    - It stays up for 4 s, or until the next touch, a scroll or Esc.
-    - Moving the finger more than 10 px (a swipe) shows none.
+- Buttons and labels explain themselves with tooltips (`v-tooltip`, [`app/src/util/tooltip.ts`](../app/src/util/tooltip.ts)), in place of `title`, which a touchscreen never shows.
+- They follow [WCAG 2.1 SC 1.4.13](https://www.w3.org/WAI/WCAG21/Understanding/content-on-hover-or-focus.html) and the [ARIA Authoring Practices' tooltip pattern](https://www.w3.org/WAI/ARIA/apg/patterns/tooltip/).
+
+| Input        | Shows                                  | Hides                                               |
+| ------------ | -------------------------------------- | --------------------------------------------------- |
+| Mouse or pen | after resting on the element for 0.4 s | when the pointer leaves the element and the tooltip |
+| Keyboard     | while the element has keyboard focus   | when focus moves, or on Esc                         |
+| Touch        | on a long press                        | on the next touch elsewhere, a scroll, or Esc       |
+
+- Nothing hides a tooltip on a timer: it stays until dismissed.
+- The pointer can move onto the tooltip (e.g. with a screen magnifier): there are 0.15 s to cross the gap.
+- 0.4 s is a convention, about as long as a browser's own `title` tooltip; no guideline sets it.
+- A long press:
+  - is the platform's own where the webview reports it (`contextmenu`): Android and Windows. It then follows the system's delay, e.g. Android's Accessibility → Touch & hold delay;
+  - is timed at 0.5 s elsewhere, e.g. WebKit on iOS. A webview that turns out to report long presses is then waited for instead;
+  - doesn't count as a tap, and opens no system menu (text selection, "open link");
+  - is not a swipe: moving the finger more than 10 px shows nothing.
 - The tooltip goes above what it explains, where a finger doesn't cover it, or below when there's no room.
-- Screen readers read the text as the element's description (`aria-description`).
-- So do dictionaries' own `title`s, in definitions and on images.
+- Screen readers read the text as the element's description (`aria-describedby`, to a hidden element), whether or not the tooltip is shown; the bubble itself is hidden from them, so it isn't read twice.
+- Dictionaries' own `title`s, in definitions and on images, are tooltips too.
 
 ## Security policy
 

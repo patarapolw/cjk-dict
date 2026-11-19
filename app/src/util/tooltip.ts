@@ -5,15 +5,33 @@ import { type Directive, shallowRef } from "vue";
  * which a touchscreen never shows. `v-tooltip="text"` on an element; the one bubble is
  * drawn by `components/Tooltip.vue`.
  *
- * - mouse or pen: shown after resting on the element for {@link HOVER_MS};
- * - keyboard: shown while the element has focus;
- * - touch: shown by a long press ({@link LONG_PRESS_MS}), which then doesn't count as a
- *   tap; it stays up for {@link TOUCH_SHOW_MS}, or until the next touch or scroll.
+ * Following WCAG 2.1 SC 1.4.13 (Content on Hover or Focus) and the WAI-ARIA Authoring
+ * Practices' tooltip pattern:
+ *
+ * - mouse or pen: shown after resting on the element for {@link HOVER_MS} (a convention,
+ *   about as long as a browser's own `title`; no guideline sets it). It stays while the
+ *   pointer is on the element or on the tooltip itself (hoverable), so a screen magnifier
+ *   can pan over it, with {@link LEAVE_GRACE_MS} to cross the gap between them;
+ * - keyboard: shown while the element has keyboard focus;
+ * - touch: shown by a long press, which then doesn't count as a tap. The long press is the
+ *   platform's own where the webview reports it as `contextmenu` (Android, Windows), so it
+ *   follows the system's touch-and-hold delay (Android: Accessibility > Touch & hold
+ *   delay). Elsewhere (WebKit on iOS doesn't), a timer of {@link LONG_PRESS_MS} stands in;
+ * - it stays until dismissed (persistent): the pointer leaving, focus moving, Esc, the
+ *   next touch elsewhere, or a scroll. Nothing hides it on a timer.
+ * - screen readers read the text as the element's description (`aria-describedby`), at
+ *   all times: a screen reader's cursor neither hovers nor focuses.
  */
 
+/** how long a mouse rests on an element before its tooltip shows */
 export const HOVER_MS = 400;
+/** the time to move the pointer from an element to its tooltip, or back */
+export const LEAVE_GRACE_MS = 150;
+/**
+ * a long press, where the webview doesn't report the platform's: about the default of
+ * iOS and Android
+ */
 export const LONG_PRESS_MS = 500;
-export const TOUCH_SHOW_MS = 4000;
 /** how far a finger may move during a long press, in px */
 const MOVE_TOLERANCE = 10;
 
@@ -27,21 +45,45 @@ export interface TooltipState {
 export const tooltip = shallowRef<TooltipState | null>(null);
 
 let owner: HTMLElement | null = null;
-let timer: ReturnType<typeof setTimeout> | undefined;
+let showTimer: ReturnType<typeof setTimeout> | undefined;
+let hideTimer: ReturnType<typeof setTimeout> | undefined;
 /** a long press has just shown a tooltip: the click that follows isn't a tap */
 let swallowClick: HTMLElement | null = null;
+/**
+ * The webview reports a long press as `contextmenu`: wait for it, at the system's delay,
+ * rather than time one. Android's and Windows' webviews do, from the first press; on
+ * others, a long press that brings one learns it.
+ */
+let platformLongPress =
+  typeof navigator !== "undefined" &&
+  /Android|Windows/.test(navigator.userAgent);
 
 export function showTooltip(el: HTMLElement) {
   const text = texts.get(el);
+  clearTimeout(showTimer);
+  clearTimeout(hideTimer);
   if (!text || !el.isConnected) return;
   owner = el;
   tooltip.value = { text, rect: el.getBoundingClientRect() };
 }
 
 export function hideTooltip() {
-  clearTimeout(timer);
+  clearTimeout(showTimer);
+  clearTimeout(hideTimer);
   owner = null;
   tooltip.value = null;
+}
+
+/** The pointer left the element or the tooltip: hide, unless it comes onto the other. */
+export function leaveTooltip() {
+  clearTimeout(showTimer);
+  clearTimeout(hideTimer);
+  if (owner) hideTimer = setTimeout(hideTooltip, LEAVE_GRACE_MS);
+}
+
+/** The pointer is on the tooltip (or back on its element): keep it. */
+export function keepTooltip() {
+  clearTimeout(hideTimer);
 }
 
 function focusVisible(el: HTMLElement) {
@@ -56,6 +98,65 @@ function focusVisible(el: HTMLElement) {
 const texts = new WeakMap<HTMLElement, string>();
 const cleanups = new WeakMap<HTMLElement, () => void>();
 
+// --- descriptions for screen readers: a hidden element per tooltip, which the element's
+// aria-describedby names. A hidden element still gives its text to a description.
+
+let descriptions: HTMLElement | null = null;
+let nextId = 0;
+const descIds = new WeakMap<HTMLElement, string>();
+
+function describe(el: HTMLElement, text: string | null | undefined) {
+  let id = descIds.get(el);
+  if (!text) {
+    if (id) undescribe(el);
+    return;
+  }
+  if (!descriptions || !descriptions.isConnected) {
+    descriptions = document.createElement("div");
+    descriptions.hidden = true;
+    descriptions.dataset.tooltipDescriptions = "";
+    document.body.append(descriptions);
+  }
+  let node = id ? document.getElementById(id) : null;
+  if (!id || !node) {
+    id = `tooltip-${++nextId}`;
+    descIds.set(el, id);
+    node = document.createElement("span");
+    node.id = id;
+    descriptions.append(node);
+  }
+  node.textContent = text;
+  const ids = (el.getAttribute("aria-describedby") ?? "")
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!ids.includes(id)) {
+    el.setAttribute("aria-describedby", [...ids, id].join(" "));
+  }
+}
+
+function undescribe(el: HTMLElement) {
+  const id = descIds.get(el);
+  if (!id) return;
+  descIds.delete(el);
+  document.getElementById(id)?.remove();
+  const ids = (el.getAttribute("aria-describedby") ?? "")
+    .split(/\s+/)
+    .filter((i) => i && i !== id);
+  if (ids.length) el.setAttribute("aria-describedby", ids.join(" "));
+  else el.removeAttribute("aria-describedby");
+}
+
+/** The tooltip's text, as a screen reader gets it: for tests and debugging. */
+export function describedText(el: Element): string {
+  return (el.getAttribute("aria-describedby") ?? "")
+    .split(/\s+/)
+    .map((id) => (id ? document.getElementById(id)?.textContent : ""))
+    .filter(Boolean)
+    .join(" ");
+}
+
+// ---
+
 let globalListeners = false;
 
 /** hide on the next touch elsewhere, scroll or Esc; swallow a long press's click */
@@ -65,7 +166,14 @@ function addGlobalListeners() {
   document.addEventListener(
     "pointerdown",
     (e) => {
-      if (owner && !owner.contains(e.target as Node)) hideTooltip();
+      const target = e.target as Element;
+      if (
+        owner &&
+        !owner.contains(target) &&
+        !target.closest?.("[data-tooltip-bubble]")
+      ) {
+        hideTooltip();
+      }
     },
     true,
   );
@@ -88,19 +196,22 @@ function addGlobalListeners() {
 }
 
 function bind(el: HTMLElement) {
+  /** where a touch on the element started, while it may still become a long press */
   let start: { x: number; y: number } | null = null;
+
+  const longPress = () => {
+    start = null;
+    clearTimeout(showTimer);
+    swallowClick = el;
+    showTooltip(el);
+  };
 
   const onPointerDown = (e: PointerEvent) => {
     if (e.pointerType !== "touch") return;
-    clearTimeout(timer);
+    clearTimeout(showTimer);
     swallowClick = null;
     start = { x: e.clientX, y: e.clientY };
-    timer = setTimeout(() => {
-      start = null;
-      swallowClick = el;
-      showTooltip(el);
-      timer = setTimeout(hideTooltip, TOUCH_SHOW_MS);
-    }, LONG_PRESS_MS);
+    if (!platformLongPress) showTimer = setTimeout(longPress, LONG_PRESS_MS);
   };
   const onPointerMove = (e: PointerEvent) => {
     if (!start) return;
@@ -109,23 +220,39 @@ function bind(el: HTMLElement) {
       Math.abs(e.clientY - start.y) > MOVE_TOLERANCE
     ) {
       start = null;
-      clearTimeout(timer);
+      clearTimeout(showTimer);
     }
   };
   const onPointerEnd = () => {
     if (!start) return;
     start = null;
-    clearTimeout(timer);
+    clearTimeout(showTimer);
+  };
+  // the platform's long press, at the system's touch-and-hold delay
+  const onContextMenu = (e: Event) => {
+    const fromTouch =
+      start !== null || (e as PointerEvent).pointerType === "touch";
+    if (fromTouch) {
+      platformLongPress = true;
+      e.preventDefault(); // not the system's menu (text selection, "open link")
+      if (owner !== el) longPress();
+    } else if (swallowClick === el) {
+      e.preventDefault();
+    }
   };
   const onPointerEnter = (e: PointerEvent) => {
     if (e.pointerType === "touch") return;
-    clearTimeout(timer);
-    timer = setTimeout(() => showTooltip(el), HOVER_MS);
+    if (owner === el) {
+      keepTooltip();
+      return;
+    }
+    clearTimeout(showTimer);
+    showTimer = setTimeout(() => showTooltip(el), HOVER_MS);
   };
   const onPointerLeave = (e: PointerEvent) => {
     if (e.pointerType === "touch") return;
-    if (owner === el) hideTooltip();
-    else clearTimeout(timer);
+    if (owner === el) leaveTooltip();
+    else clearTimeout(showTimer);
   };
   const onFocus = () => {
     // a keyboard's focus, not a click's
@@ -134,21 +261,17 @@ function bind(el: HTMLElement) {
   const onBlur = () => {
     if (owner === el) hideTooltip();
   };
-  // Android's long-press menu (text selection, "open link")
-  const onContextMenu = (e: Event) => {
-    if (swallowClick === el) e.preventDefault();
-  };
 
   const listeners: [string, (e: never) => void][] = [
     ["pointerdown", onPointerDown],
     ["pointermove", onPointerMove],
     ["pointerup", onPointerEnd],
     ["pointercancel", onPointerEnd],
+    ["contextmenu", onContextMenu],
     ["pointerenter", onPointerEnter],
     ["pointerleave", onPointerLeave],
     ["focus", onFocus],
     ["blur", onBlur],
-    ["contextmenu", onContextMenu],
   ];
   for (const [type, fn] of listeners) el.addEventListener(type, fn as never);
   cleanups.set(el, () => {
@@ -160,13 +283,12 @@ function bind(el: HTMLElement) {
 function setText(el: HTMLElement, text: string | null | undefined) {
   if (text) {
     texts.set(el, text);
-    el.setAttribute("aria-description", text);
     el.classList.add("has-tooltip");
   } else {
     texts.delete(el);
-    el.removeAttribute("aria-description");
     el.classList.remove("has-tooltip");
   }
+  describe(el, text);
   if (owner === el) {
     if (text) showTooltip(el);
     else hideTooltip();
@@ -185,8 +307,15 @@ export const vTooltip: Directive<HTMLElement, string | null | undefined> = {
   },
   beforeUnmount(el) {
     if (owner === el || swallowClick === el) hideTooltip();
+    if (swallowClick === el) swallowClick = null;
     cleanups.get(el)?.();
     cleanups.delete(el);
     texts.delete(el);
+    undescribe(el);
   },
 };
+
+/** for tests: as on a platform whose webview reports long presses, or not */
+export function setPlatformLongPress(value: boolean) {
+  platformLongPress = value;
+}
