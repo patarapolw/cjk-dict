@@ -131,12 +131,17 @@
           <span>Clipboard monitor</span>
         </label>
 
-        <details v-if="shownDicts.length > 1" class="dict-filter">
+        <!-- one dictionary needs no choosing, unless it's left out (from another
+             search language's list) and so must be ticked again -->
+        <details
+          v-if="shownDicts.length > 1 || excludedCount"
+          class="dict-filter"
+          :class="{ 'dict-filter-all': !excludedCount }"
+        >
           <summary>
             Dictionaries
             <span class="dict-filter-count"
-              >({{ shownDicts.length - excludedCount }} of
-              {{ shownDicts.length }})</span
+              >({{ includedCount }} of {{ shownDicts.length }})</span
             >
           </summary>
           <div class="dict-filter-list">
@@ -147,9 +152,13 @@
                 [d.name, d.lang, d.target_lang].filter(Boolean).join(' · ')
               "
             >
+              <!-- the last one ticked can't be unticked: a search needs a dictionary -->
               <input
                 type="checkbox"
                 :checked="!excludedDicts.includes(d.name)"
+                :disabled="
+                  includedCount === 1 && !excludedDicts.includes(d.name)
+                "
                 @change="
                   setDictIncluded(
                     d.name,
@@ -169,10 +178,14 @@
             Search all
           </button>
         </details>
+        <p v-if="noDicts" class="dict-filter-warning" role="alert">
+          No dictionary of this language is chosen: tick one in Dictionaries to
+          search.
+        </p>
       </nav>
     </header>
     <div class="scroller" ref="scroller">
-      <p v-if="noResults" class="no-results">No results</p>
+      <p v-if="noResults && !noDicts" class="no-results">No results</p>
       <section v-for="it in items" :key="it.id" class="accordion-item">
         <button
           type="button"
@@ -389,6 +402,18 @@ const shownDicts = computed(() => wordDicts(dictList.value, lang.value));
 const excludedCount = computed(
   () =>
     shownDicts.value.filter((d) => excludedDicts.value.includes(d.name)).length,
+);
+
+const includedCount = computed(
+  () => shownDicts.value.length - excludedCount.value,
+);
+
+/**
+ * every dictionary listed is left out, e.g. after switching the search language: say so,
+ * rather than tick one for the user
+ */
+const noDicts = computed(
+  () => shownDicts.value.length > 0 && includedCount.value === 0,
 );
 
 /** tick the dictionaries shown; those of other languages stay as they are */
@@ -947,9 +972,15 @@ onBeforeUnmount(() => {
     color: var(--app-text-muted);
   }
 
-  /* the count is for choosing: shown with the list */
-  .dict-filter:not([open]) .dict-filter-count {
+  /* collapsed, the count shows only when some are left out */
+  .dict-filter-all:not([open]) .dict-filter-count {
     display: none;
+  }
+
+  .dict-filter-warning {
+    flex-basis: 100%;
+    margin: 0;
+    color: var(--app-error);
   }
 
   .dict-filter-list {

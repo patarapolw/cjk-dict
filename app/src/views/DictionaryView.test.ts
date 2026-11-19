@@ -351,4 +351,47 @@ describe("DictionaryView", () => {
     expect(wrapper.find(".dict-filter").exists()).toBe(false);
     wrapper.unmount();
   });
+  it("keeps the last dictionary ticked", async () => {
+    dicts = [dict("A", "ja-JP"), dict("B", "ja-JP")];
+    excludedDicts.value = ["A"];
+    const wrapper = await mountView();
+    await flushPromises();
+    const boxes = wrapper.findAll(".dict-filter-list input");
+    // A is left out and can be ticked; B is the last one ticked
+    expect(boxes.map((b) => b.attributes("disabled") !== undefined)).toEqual([
+      false,
+      true,
+    ]);
+    // some are left out: the count shows even collapsed
+    expect(wrapper.get(".dict-filter").classes()).not.toContain(
+      "dict-filter-all",
+    );
+    wrapper.unmount();
+  });
+
+  it("warns when the search language's dictionaries are all left out", async () => {
+    dicts = [dict("A", "ja-JP"), dict("B", "ko-KR")];
+    excludedDicts.value = ["B"];
+    const wrapper = await mountView();
+    await flushPromises();
+    expect(wrapper.find(".dict-filter-warning").exists()).toBe(false);
+    expect(wrapper.get(".dict-filter").classes()).not.toContain(
+      "dict-filter-all",
+    );
+
+    lang.value = "ko-KR";
+    await flushPromises();
+    expect(wrapper.find(".dict-filter-warning").exists()).toBe(true);
+    // listed even alone, so that it can be ticked again; not ticked for the user
+    const box = wrapper.get(".dict-filter-list input");
+    expect((box.element as HTMLInputElement).checked).toBe(false);
+    expect(wrapper.get(".dict-filter-count").text()).toBe("(0 of 1)");
+
+    await box.setValue(true);
+    expect(excludedDicts.value).toEqual([]);
+    expect(wrapper.find(".dict-filter-warning").exists()).toBe(false);
+    // one dictionary, ticked: nothing to choose
+    expect(wrapper.find(".dict-filter").exists()).toBe(false);
+    wrapper.unmount();
+  });
 });

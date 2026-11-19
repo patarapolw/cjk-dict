@@ -117,11 +117,14 @@ Optional, below the search box:
 - Which are listed:
   - with a search language chosen, only that language's, and those that don't say theirs;
   - kanji dictionaries (no words) aren't listed;
-  - with only one to list, there is no list.
+  - with only one to list, there is no list, unless it is unticked.
 - They are ordered by language: those that don't say theirs first, then by language tag (`ja-JP`, `ko-KR`, `zh`, `zh-TW`), each language's in build order.
 - An unticked dictionary is left out of word searches:
   - its entries aren't shown;
   - a word only it has isn't found.
-- Opened, it counts the ones searched, e.g. "(3 of 5)"; **Search all** ticks those listed again.
+- It counts the ones searched, e.g. "(3 of 5)": when some are unticked, or when opened.
+- At least one stays ticked: the last one ticked can't be unticked.
+- The choice is kept as you switch the search language, so every dictionary of a language may be unticked. The app then says so, and leaves the choosing to you.
+- **Search all** ticks those listed again.
 - The choice is remembered per device, as the dictionaries left out: one added to the library later is searched.
 - The Characters view still shows every dictionary.
