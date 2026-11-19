@@ -84,6 +84,17 @@ pnpm admin upload --remote r2:cjk-dict     # rclone; or set CJK_DICT_REMOTE
    - **Object Read & Write**, for rclone on your machine.
    - **Object Read only**, scoped to the bucket, for the app.
 3. Configure rclone (`rclone config`): type `s3`, provider `Cloudflare`, the read/write token's keys, and endpoint `https://<account id>.r2.cloudflarestorage.com`. Name the remote, e.g. `r2`. The destination is then `r2:cjk-dict`, or `r2:cjk-dict/some/prefix`.
+4. Set `CJK_DICT_REMOTE` in `.env` to that destination, or pass it as `upload --remote`.
+
+`dict-admin` reads these from `.env` or the environment; command-line options override them:
+
+| Variable               | Value                                                                                                                                                                                                |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CJK_DICT_REMOTE`      | where `upload` copies the library: an rclone `<remote>:<bucket>[/<prefix>]`, e.g. `r2:cjk-dict` (`r2` being the remote's name in `rclone config`); the prefix matches the app's `CJK_DICT_R2_PREFIX` |
+| `CJK_DICT_LIBRARY`     | the library folder; default `library`                                                                                                                                                                |
+| `CJK_DICT_LINDERA_DIR` | the tokenizer dictionaries; default `tmp/lindera`                                                                                                                                                    |
+| `CJK_DICT_IDS_DIR`     | the CJKVI IDS database; default `tmp/cjkvi-ids`                                                                                                                                                      |
+| `GITHUB_TOKEN`         | optional, for `defaults` when GitHub's API rate-limits it                                                                                                                                            |
 
 ## App
 
