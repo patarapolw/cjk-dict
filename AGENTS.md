@@ -67,6 +67,27 @@ node scripts/webview.mjs screenshot shot.png [css-selector]
   devtools open with `Ctrl+Shift+I`; see also
   [Tauri's debugging guide](https://tauri.app/develop/debug/).
 
+### On Android
+
+<!-- Not yet confirmed in this repository: a local session will check these steps and
+     fix them (#22). -->
+
+Android's WebView speaks the Chrome DevTools Protocol too, over a socket that `adb` can
+forward, so [`scripts/webview.mjs`](scripts/webview.mjs) can drive the app on a phone or
+an emulator. A debug build allows WebView debugging (`setWebContentsDebuggingEnabled`).
+
+```sh
+pnpm app android                          # tauri android run; or install a debug build
+adb shell cat /proc/net/unix | grep webview_devtools_remote   # the app's socket, by pid
+adb forward tcp:9223 localabstract:webview_devtools_remote_<pid>
+PORT=9223 node scripts/webview.mjs eval "location.hash"
+adb shell input tap <x> <y>               # a real touch; `input swipe x y x y 1000` holds it
+```
+
+- Use a port other than 9222, which the Windows app may be using.
+- Touches through `adb shell input` are real touches, unlike events dispatched from
+  devtools: use them for long presses and text selection.
+
 ### On Linux
 
 The Tauri app (`app/src-tauri`) links against WebKitGTK, so building or testing it on
@@ -86,7 +107,7 @@ cargo test --manifest-path app/src-tauri/Cargo.toml --locked
 The root Rust workspace and `pnpm test` need none of these.
 
 WebKitGTK doesn't speak the Chrome DevTools Protocol, so `scripts/webview.mjs` works only
-on Windows. On Linux, run the tests above and say that the UI change wasn't checked in
+on Windows and Android. On Linux, run the tests above and say that the UI change wasn't checked in
 the running app, rather than checking it in a page made to look like it.
 
 ## What you can't check

@@ -5,6 +5,7 @@ import { createMemoryHistory, createRouter } from "vue-router";
 
 import type { IHanChar } from "../db/search";
 import { lang } from "../util/settings";
+import { touchScreen } from "../util/tooltip";
 import CharacterView from "./CharacterView.vue";
 
 const HAN: Record<string, IHanChar> = {
@@ -101,6 +102,7 @@ beforeEach(() => {
 
 afterEach(() => {
   lang.value = "";
+  touchScreen.value = false;
 });
 
 async function mountView(path: string) {
@@ -288,6 +290,16 @@ describe("CharacterView", () => {
       .trigger("click");
     await flushPromises();
     expect(router.currentRoute.value.query.q).toBe("林");
+    wrapper.unmount();
+  });
+
+  it("says on a touchscreen, before anything is typed, that a long press explains", async () => {
+    touchScreen.value = true;
+    const { wrapper } = await mountView("/kanji");
+    expect(wrapper.find(".search-hint .touch-help").exists()).toBe(true);
+    await wrapper.get("input.search-input").setValue("林");
+    await loaded(wrapper);
+    expect(wrapper.find(".search-hint .touch-help").exists()).toBe(false);
     wrapper.unmount();
   });
 

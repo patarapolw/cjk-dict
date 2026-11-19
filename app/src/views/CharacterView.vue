@@ -41,6 +41,9 @@
           杏, …; <code>*口</code> shows the characters made directly of 口, each
           in full.
         </template>
+        <span v-if="touchScreen && !chars.length" class="touch-help">
+          Long-press a button or option to see what it does.
+        </span>
       </p>
     </header>
 
@@ -365,7 +368,7 @@ import { glossLang } from "../util/lang";
 import { dictsVersion, toBeLoaded } from "../util/loading";
 import { scrollToStart } from "../util/scroll";
 import { lang } from "../util/settings";
-import { vTooltip } from "../util/tooltip";
+import { touchScreen, vTooltip } from "../util/tooltip";
 
 /** characters [`han_chars`] looks up at once (MAX_HAN_CHARS in search.rs) */
 const MAX_CHARS = 20;

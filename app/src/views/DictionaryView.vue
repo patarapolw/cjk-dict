@@ -100,6 +100,9 @@
           Add a reading: <code>{{ examples.furigana }}</code
           >, or press <code>{}</code> to search by reading only
         </template>
+        <span v-if="touchScreen && !q.trim()" class="touch-help">
+          Long-press a button or option to see what it does.
+        </span>
       </p>
       <nav>
         <label
@@ -304,7 +307,7 @@ import { declaredHeadLang, headLang, refineHeadLangs } from "../util/lang";
 import { dictsVersion, toBeLoaded } from "../util/loading";
 import { remainingScroll, scrollToStart } from "../util/scroll";
 import { lang } from "../util/settings";
-import { vTooltip } from "../util/tooltip";
+import { touchScreen, vTooltip } from "../util/tooltip";
 
 type Item = ISearchTerm & { entries: ITerm[] };
 

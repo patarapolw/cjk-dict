@@ -85,3 +85,8 @@ textarea {
   -webkit-user-select: none;
   user-select: none;
 }
+
+/* the views' search hint on a device without hover (util/tooltip.ts touchScreen) */
+.touch-help {
+  display: block;
+}

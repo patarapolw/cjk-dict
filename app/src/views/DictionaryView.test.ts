@@ -6,7 +6,7 @@ import { createMemoryHistory, createRouter } from "vue-router";
 import { type IDictInfo, excludedDicts } from "../util/dicts";
 import { lang } from "../util/settings";
 import DictionaryView from "./DictionaryView.vue";
-import { describedText } from "../util/tooltip";
+import { describedText, touchScreen } from "../util/tooltip";
 
 /** what the `dicts` command returns */
 let dicts: Partial<IDictInfo>[] = [];
@@ -38,6 +38,7 @@ beforeEach(() => {
 afterEach(() => {
   lang.value = "";
   excludedDicts.value = [];
+  touchScreen.value = false;
 });
 
 async function mountView() {
@@ -66,6 +67,23 @@ async function lastSearch() {
 }
 
 describe("DictionaryView", () => {
+  it("says on a touchscreen, before anything is typed, that a long press explains", async () => {
+    const help = (w: Awaited<ReturnType<typeof mountView>>) =>
+      w.find(".search-hint .touch-help").exists();
+    const wrapper = await mountView();
+    // with a mouse, hovering shows it
+    expect(help(wrapper)).toBe(false);
+
+    touchScreen.value = true;
+    await flushPromises();
+    expect(wrapper.get(".search-hint .touch-help").text()).toBe(
+      "Long-press a button or option to see what it does.",
+    );
+    await wrapper.get("input.search-input").setValue("日本");
+    expect(help(wrapper)).toBe(false);
+    wrapper.unmount();
+  });
+
   it("searches by reading with the {} toggle on", async () => {
     const wrapper = await mountView();
     await readingButton(wrapper).trigger("click");

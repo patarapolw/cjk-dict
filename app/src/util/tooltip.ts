@@ -1,4 +1,4 @@
-import { type Directive, shallowRef } from "vue";
+import { type Directive, ref, shallowRef } from "vue";
 
 /**
  * Tooltips that work with a mouse, a keyboard and a touchscreen, in place of `title`,
@@ -39,6 +39,19 @@ export interface TooltipState {
   text: string;
   /** the element's box, to place the bubble by */
   rect: DOMRect;
+}
+
+/**
+ * The device has no hover, e.g. a phone: tooltips need a long press, which nothing on
+ * screen shows, so the views say so in their search hint.
+ */
+export const touchScreen = ref(false);
+try {
+  const query = window.matchMedia("(hover: none)");
+  touchScreen.value = query.matches;
+  query.addEventListener("change", (e) => (touchScreen.value = e.matches));
+} catch {
+  // no matchMedia (tests): as with a mouse
 }
 
 /** the tooltip shown, if any */
