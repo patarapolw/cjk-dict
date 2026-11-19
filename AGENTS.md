@@ -114,6 +114,15 @@ and don't write code that relies on a guess without saying so. Instead:
   - **By hand**, when it's a quick look: what to open and what to see, e.g. "search
     學習: the headword is in traditional forms", or a devtools (`Ctrl+Shift+I`)
     expression to run. Often this is enough; don't make a script for it.
+    - Say what to do in the app's own UI: the view (Words or Characters), what to type
+      in the search box, what to tap. The app has no address bar, so a user can't open
+      or see a route such as `#/kanji?q=口`.
+    - Give a route only as a devtools expression, e.g. `location.hash = "#/kanji?q=口"`,
+      and only when the UI can't get there.
+    - Ask only for what the unit tests can't see: layout, looks, touch, the real
+      dictionaries' data. Leave out what a test already checks, such as a hint's text.
+    - The app follows the system's light or dark theme and has no switch of its own:
+      don't ask for a check in both themes unless the change is about colors.
   - **A local agent session** (Claude Code on the user's machine), when the checks are
     many, need iterating, or need the running app: it can drive the app with
     [`scripts/webview.mjs`](scripts/webview.mjs) and fix what it finds. Say what it
@@ -195,6 +204,13 @@ and don't write code that relies on a guess without saying so. Instead:
     results or sections;
   - keep what the user changed, unless your change makes it untrue;
   - rewrite only the parts your change is about, rather than replacing the whole body.
+- Reply to every comment on a pull request you work on: conversation comments and
+  review comments alike.
+  - Reply once the comment is dealt with: say what changed and in which commits, or why
+    nothing changed.
+  - Answer a review comment in its own thread, and resolve the thread once it's
+    addressed. Answer a conversation comment with a new comment that quotes it.
+  - A question gets an answer even when it needs no change.
 
 ## Commit messages
 

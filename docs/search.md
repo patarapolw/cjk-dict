@@ -67,6 +67,10 @@ The Characters view (`#/kanji?q=<characters>`) shows, for each Han character:
 
 - how it breaks down: each IDS, by region, the one for the search language first;
 - every component, all the way down; components link to their own page;
+- **Used in**: up to 30 characters made directly of it (one level up), the most used first: 口 lists 可, 呆, ... but not 河, made of 可;
+  - "5 more" after them when there are more;
+  - a radical also lists the characters written with its component forms: 水 lists 河;
+  - **Search `*口`** below it searches `*口`, which shows them all, each in full (see below);
 - its kanji dictionary entries: readings, meanings, and stats with the dictionary's own notes;
 - Hangul readings;
 - its single-character word entries.
@@ -80,7 +84,14 @@ Each reading searches the words with the character read so, anywhere in the word
 
 A Chinese or Korean reading switches the search language to its own, unless it is Auto-detect.
 
-Below, the characters made of all the typed characters, the most used first: `木口` lists 呆, 杏, ...
+Below, with several characters typed, the characters made of all of them, at any depth, the most used first: `木口` lists 呆, 杏, ...
+
+`*` before the characters lists the characters made directly of them instead, each in full, as a card: `*口` shows 可, 呆, ..., 20 at a time, and **More** shows the next 20.
+
+- `*木口`: made directly of both 木 and 口.
+- A full-width `＊` works too.
+
+In both:
 
 - A radical also matches the forms it takes as a component: 水 finds 河, written with 氵.
 - Kangxi radicals (`⼝`) are read as the ideograph.

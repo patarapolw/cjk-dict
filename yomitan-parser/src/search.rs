@@ -1590,6 +1590,8 @@ pub struct HanBrief {
 pub struct HanList {
     pub items: Vec<HanBrief>,
     pub next: Option<u32>,
+    /// how many characters there are in all, on every page
+    pub total: u32,
 }
 
 /// characters [`SearchDb::han_chars`] looks up at once
@@ -2471,11 +2473,15 @@ impl SearchDb {
     /// following each component up through the characters built from it. A radical also
     /// matches its forms as a component (水: 氵), see [`ids::component_forms`]. The
     /// characters the dictionaries use most come first.
+    ///
+    /// With `direct`, only the characters whose IDS name every component itself (口: 可, 呆,
+    /// but not 河, which is made of 可), as [`HanChar::components`] does the other way.
     pub fn han_containing(
         &self,
         components: &str,
         limit: Option<u32>,
         offset: Option<u32>,
+        direct: bool,
     ) -> Result<HanList, YomitanError> {
         let limit = limit.unwrap_or(60).clamp(1, MAX_HAN_LIST);
         let offset = offset.unwrap_or(0);
@@ -2497,22 +2503,33 @@ impl SearchDb {
                 .map(|n| format!("?{n}"))
                 .collect::<Vec<_>>()
                 .join(", ");
+            let recurse = if direct {
+                String::new()
+            } else {
+                format!(
+                    "UNION SELECT h.ch FROM han_component h JOIN up{i} ON h.component = up{i}.ch"
+                )
+            };
             ctes.push(format!(
                 "up{i}(ch) AS (
                    SELECT ch FROM han_component WHERE component IN ({seeds})
-                   UNION SELECT h.ch FROM han_component h JOIN up{i} ON h.component = up{i}.ch
+                   {recurse}
                  )"
             ));
             sets.push(format!("SELECT ch FROM up{i}"));
         }
+        let (with, set) = (ctes.join(", "), sets.join(" INTERSECT "));
         let sql = format!(
-            "WITH RECURSIVE {} SELECT h.ch, h.uses FROM han_char h
-             WHERE h.ch IN ({}) ORDER BY h.uses DESC, h.ch LIMIT {} OFFSET {offset}",
-            ctes.join(", "),
-            sets.join(" INTERSECT "),
+            "WITH RECURSIVE {with} SELECT h.ch, h.uses FROM han_char h
+             WHERE h.ch IN ({set}) ORDER BY h.uses DESC, h.ch LIMIT {} OFFSET {offset}",
             limit + 1,
         );
         let conn = self.conn.lock()?;
+        let total: u32 = conn
+            .prepare(&format!(
+                "WITH RECURSIVE {with} SELECT count(*) FROM han_char h WHERE h.ch IN ({set})"
+            ))?
+            .query_row(params_from_iter(ps.iter()), |r| r.get(0))?;
         let mut items: Vec<HanBrief> = conn
             .prepare(&sql)?
             .query_map(params_from_iter(ps.iter()), |r| {
@@ -2528,7 +2545,7 @@ impl SearchDb {
         } else {
             None
         };
-        Ok(HanList { items, next })
+        Ok(HanList { items, next, total })
     }
 
     /// A media file from a dict's zip (structured-content `path`).
@@ -2861,28 +2878,61 @@ mod han_tests {
 
         // the most used first, then by code point
         assert_eq!(
-            chars(db.han_containing("木", None, None).unwrap()),
+            chars(db.han_containing("木", None, None, false).unwrap()),
             ["林", "森", "呆", "李", "杏"]
         );
         assert_eq!(
-            chars(db.han_containing("木口", None, None).unwrap()),
+            chars(db.han_containing("木口", None, None, false).unwrap()),
             ["呆", "杏"]
         );
         // through 可; ⼝ is the Kangxi radical
         assert_eq!(
-            chars(db.han_containing("⼝", None, None).unwrap()),
+            chars(db.han_containing("⼝", None, None, false).unwrap()),
             ["河", "可", "呆", "杏"]
         );
         // 河 is written with 氵
-        assert_eq!(chars(db.han_containing("水", None, None).unwrap()), ["河"]);
-        let page = db.han_containing("木", Some(2), Some(2)).unwrap();
+        assert_eq!(
+            chars(db.han_containing("水", None, None, false).unwrap()),
+            ["河"]
+        );
+        let page = db.han_containing("木", Some(2), Some(2), false).unwrap();
         assert_eq!(chars(page), ["呆", "李"]);
         assert_eq!(
-            db.han_containing("木", Some(2), Some(2)).unwrap().next,
+            db.han_containing("木", Some(2), Some(2), false)
+                .unwrap()
+                .next,
             Some(4)
         );
+        // on every page
+        assert_eq!(
+            db.han_containing("木", Some(2), Some(2), false)
+                .unwrap()
+                .total,
+            5
+        );
+        assert_eq!(
+            db.han_containing("⼝", Some(1), None, true).unwrap().total,
+            3
+        );
+        // only what names 口 itself: not 河, made of 可
+        assert_eq!(
+            chars(db.han_containing("⼝", None, None, true).unwrap()),
+            ["可", "呆", "杏"]
+        );
+        assert_eq!(
+            chars(db.han_containing("木口", None, None, true).unwrap()),
+            ["呆", "杏"]
+        );
+        assert_eq!(
+            chars(db.han_containing("林", None, None, true).unwrap()),
+            ["森"]
+        );
+        assert_eq!(
+            chars(db.han_containing("水", None, None, true).unwrap()),
+            ["河"]
+        );
         assert!(
-            db.han_containing("か", None, None)
+            db.han_containing("か", None, None, false)
                 .unwrap()
                 .items
                 .is_empty()
@@ -3020,7 +3070,7 @@ mod han_tests {
         let db = SearchDb::open(&db_path, &dir).unwrap();
         assert!(db.han_chars("林").unwrap()[0].entries.is_empty());
         assert!(
-            db.han_containing("木", None, None)
+            db.han_containing("木", None, None, false)
                 .unwrap()
                 .items
                 .is_empty()

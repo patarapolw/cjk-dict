@@ -50,6 +50,15 @@ const HAN: Record<string, IHanChar> = {
   },
 };
 
+/** the characters made directly of 木: more than "Used in" shows (30), and than a page
+ * of `*木` (20) */
+const MADE_OF_MU = [
+  "林",
+  "森",
+  "杏",
+  ...Array.from({ length: 32 }, (_, i) => String.fromCodePoint(0x4e00 + i)),
+];
+
 let calls: { cmd: string; args: Record<string, unknown> }[] = [];
 
 beforeEach(() => {
@@ -58,12 +67,32 @@ beforeEach(() => {
     const a = args as Record<string, unknown>;
     calls.push({ cmd, args: a });
     if (cmd === "han_chars") {
-      return [...String(a.text)].map((c) => HAN[c]).filter(Boolean);
+      return [...String(a.text)].map(
+        (ch): IHanChar =>
+          HAN[ch] ?? {
+            ch,
+            ids: [],
+            components: [],
+            all_components: [],
+            hangul: [],
+            uses: 0,
+            entries: [],
+          },
+      );
     }
     if (cmd === "han_containing") {
-      return a.components === "木"
-        ? { items: [{ ch: "林", uses: 120 }], next: null }
-        : { items: [], next: null };
+      const page = (all: string[]) => {
+        const offset = Number(a.offset);
+        const end = offset + Number(a.limit);
+        return {
+          items: all.slice(offset, end).map((ch) => ({ ch, uses: 1 })),
+          next: end < all.length ? end : null,
+          total: all.length,
+        };
+      };
+      if (a.components === "林木" && !a.direct) return page(["森"]);
+      if (a.components === "木" && a.direct) return page(MADE_OF_MU);
+      return page([]);
     }
     if (cmd === "search") return { items: [], next: null };
     throw new Error(`unexpected command: ${cmd}`);
@@ -154,9 +183,13 @@ describe("CharacterView", () => {
       "Stroke count",
       "Frequency",
     ]);
-    expect(calls.find((c) => c.cmd === "han_containing")?.args).toMatchObject({
-      components: "林",
-    });
+    // one character: no search for characters made of all of them
+    expect(
+      calls.filter((c) => c.cmd === "han_containing").map((c) => c.args),
+    ).toEqual([{ components: "林", limit: 30, offset: 0, direct: true }]);
+    expect(wrapper.find(".containing").exists()).toBe(false);
+    // nothing but what is shown
+    expect(wrapper.get(".search-hint").text()).toBe("Character 林");
     wrapper.unmount();
   });
 
@@ -174,9 +207,87 @@ describe("CharacterView", () => {
     expect(wrapper.get('[data-char="木"]').text()).toContain(
       "Does not break down further",
     );
+    expect(
+      wrapper
+        .findAll('[data-char="木"] .used-in-list .component')
+        .map((b) => b.text()),
+    ).toEqual(MADE_OF_MU.slice(0, 30));
+    expect(wrapper.get('[data-char="木"] .used-in-more').text()).toBe("5 more");
+    wrapper.unmount();
+  });
+
+  it("lists the characters made directly of each character on its card", async () => {
+    const { wrapper } = await mountView("/kanji?q=林木");
+    await loaded(wrapper);
+
+    const direct = calls.filter(
+      (c) => c.cmd === "han_containing" && c.args.direct,
+    );
+    expect(direct.map((c) => c.args.components)).toEqual(["林", "木"]);
+    expect(wrapper.get('[data-char="林"] .used-in').text()).toContain(
+      "Not a component of another character",
+    );
+    // nothing to search further
+    expect(wrapper.find('[data-char="林"] .super-search').exists()).toBe(false);
+    expect(
+      wrapper
+        .findAll('[data-char="木"] .used-in-list .component')
+        .map((b) => b.text())
+        .slice(0, 2),
+    ).toEqual(["林", "森"]);
+    // and below, those made of both
+    expect(wrapper.get(".search-hint").text()).toBe("Characters 林 木");
+    expect(wrapper.get(".containing h2").text()).toContain("林 + 木");
+    expect(wrapper.get(".containing").text()).toContain("all 2 characters");
     expect(wrapper.findAll(".char-grid button").map((b) => b.text())).toEqual([
-      "林",
+      "森",
     ]);
+    wrapper.unmount();
+  });
+
+  it("shows the characters made directly of one in full with *", async () => {
+    const { wrapper, router } = await mountView("/kanji?q=木");
+    await loaded(wrapper);
+
+    calls = [];
+    const button = wrapper.get('[data-char="木"] .super-search');
+    // as it will read in the search box
+    expect(button.text().replace(/\s+/g, " ")).toBe("Search *木");
+    await button.trigger("click");
+    await vi.waitFor(() =>
+      expect(calls.some((c) => c.cmd === "han_chars")).toBe(true),
+    );
+    await flushPromises();
+    expect(router.currentRoute.value.query.q).toBe("*木");
+    expect(wrapper.get(".search-hint").text()).toBe(
+      "Characters made directly of 木",
+    );
+    expect(calls.find((c) => c.cmd === "han_containing")?.args).toEqual({
+      components: "木",
+      limit: 20,
+      offset: 0,
+      direct: true,
+    });
+    const cards = () =>
+      wrapper.findAll(".char-card").map((c) => c.attributes("data-char"));
+    expect(cards()).toEqual(MADE_OF_MU.slice(0, 20));
+    // each in full, with its own "Used in"
+    expect(wrapper.find('[data-char="林"] .used-in').exists()).toBe(true);
+    expect(wrapper.find(".containing").exists()).toBe(false);
+
+    // the next page
+    await wrapper.get(".super-more").trigger("click");
+    await flushPromises();
+    expect(cards()).toEqual(MADE_OF_MU);
+    expect(wrapper.find(".super-more").exists()).toBe(false);
+
+    // one of them alone
+    await wrapper
+      .findAll('[data-char="林"] .item-actions button')
+      .find((b) => b.text() === "字 林")!
+      .trigger("click");
+    await flushPromises();
+    expect(router.currentRoute.value.query.q).toBe("林");
     wrapper.unmount();
   });
 
