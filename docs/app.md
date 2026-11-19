@@ -11,6 +11,21 @@ How the app gets the library and shows entries. The [README](../README.md#app) h
 - On first launch, it also downloads the [lindera](https://github.com/lindera/lindera) tokenizer dictionaries in the background, used to tokenize `~` queries:
   - unidic (Japanese), ko-dic (Korean) and cc-cedict (Chinese), from [lindera's 6.2.0 release](https://github.com/lindera/lindera/releases/tag/v6.2.0);
   - \~73 MB to download, \~310 MB unpacked.
+- It also downloads fonts for the Han characters the system's fonts lack, such as rare components in a character's breakdown:
+  - [HanaMinAFDKO](https://github.com/cjkvi/HanaMinAFDKO) 8.030 (Hanazono Mincho, [GlyphWiki license](https://glyphwiki.org/wiki/GlyphWiki:License)), as the [CJKVI IDS](https://github.com/cjkvi/cjkvi-ids#description) data recommends;
+  - three files to `fonts/` in the app data folder, \~77 MB:
+
+| File           | Size    | Covers                                                                                               |
+| -------------- | ------- | ---------------------------------------------------------------------------------------------------- |
+| `HanaMinA.otf` | 31.6 MB | the main CJK block, Extension A, compatibility ideographs, radicals, strokes, Hangzhou numerals (〢) |
+| `HanaMinB.otf` | 32.2 MB | Extension B (𠀀)                                                                                     |
+| `HanaMinC.otf` | 13.0 MB | Extensions C to F (𬄋), the compatibility supplement                                                 |
+
+- The fonts come after the system's own (`font-family: sans-serif, "HanaMin"`):
+  - they only draw what the system's fonts lack, so other characters keep their language's forms;
+  - each file is read only for the characters it covers (`unicode-range`), and only once one is shown;
+  - each is used as soon as it's downloaded, without a restart.
+- They cover every character the IDS data uses: it goes up to Extension F, as the fonts do. Characters of later extensions (G and up) in a dictionary are drawn only if the system has a font for them.
 
 ## Showing entries
 
@@ -47,6 +62,8 @@ How the app gets the library and shows entries. The [README](../README.md#app) h
 - Dictionaries' own `title`s, in definitions and on images, are tooltips too.
 
 ## Security policy
+
+- The CSP allows fonts from the `font:` protocol (`font-src`), which serves only font files from `fonts/` in the app data folder.
 
 The CSP allows inline styles (`style-src 'unsafe-inline'`), used for:
 

@@ -5,6 +5,7 @@ mod clipboard;
 mod dicts;
 mod download;
 mod error;
+mod fonts;
 mod sync_service;
 mod tokenize;
 
@@ -23,6 +24,13 @@ pub fn run() {
             let app = ctx.app_handle().clone();
             tauri::async_runtime::spawn_blocking(move || {
                 responder.respond(dicts::asset_protocol(&app, request));
+            });
+        })
+        // fonts downloaded for the Han characters the system's fonts lack (util/fonts.ts)
+        .register_asynchronous_uri_scheme_protocol("font", |ctx, request, responder| {
+            let app = ctx.app_handle().clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                responder.respond(fonts::font_protocol(&app, request));
             });
         })
         .setup(|app| {

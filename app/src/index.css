@@ -7,7 +7,9 @@ body {
 }
 
 :root {
-  font-family: sans-serif;
+  /* HanaMin (util/fonts.ts) after the system's fonts: only for the Han characters they
+     lack, such as rare IDS components */
+  font-family: sans-serif, "HanaMin";
   color-scheme: light;
 
   --app-background: #fff;
@@ -58,6 +60,14 @@ body {
 body {
   background: var(--app-background);
   color: var(--app-text);
+}
+
+/* form controls don't inherit the font: give them the fallback fonts too */
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
 }
 
 /* v-tooltip (util/tooltip.ts): a long press shows the tooltip, not the system's

@@ -109,6 +109,7 @@ import {
   verifying,
 } from "./util/loading.ts";
 import { lang } from "./util/settings.ts";
+import { installFonts, makeFontDownloadList } from "./util/fonts";
 import { makeLinderaDownloadList } from "./util/tokenize";
 
 // Download components by filename. Not a `ref` in `v-for`: that array's order
@@ -239,6 +240,7 @@ async function runQueue() {
       if (current.dict && !toBeLoaded.value.some((d) => d.dict)) {
         await commitDicts();
       }
+      if (current.font) await installFonts();
     }
   } finally {
     queueRunning = false;
@@ -292,6 +294,14 @@ async function loadAll() {
     ...toBeLoaded.value,
     ...(await makeLinderaDownloadList(["unidic", "ko-dic", "cc-cedict"])),
   ];
+
+  // fonts for the Han characters the system's fonts lack: those already here first
+  try {
+    await installFonts();
+    toBeLoaded.value = [...toBeLoaded.value, ...(await makeFontDownloadList())];
+  } catch (e) {
+    console.error(e);
+  }
 }
 </script>
 
