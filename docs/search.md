@@ -112,11 +112,15 @@ Optional, below the search box:
 
 ## Choosing dictionaries
 
-With more than one dictionary downloaded, **Dictionaries** below the search box lists them, each with a checkbox:
+**Dictionaries** below the search box lists the word dictionaries, each with a checkbox:
 
+- Which are listed:
+  - with a search language chosen, only that language's, and those that don't say theirs;
+  - kanji dictionaries (no words) aren't listed;
+  - with only one to list, there is no list.
 - An unticked dictionary is left out of word searches:
   - its entries aren't shown;
   - a word only it has isn't found.
-- The summary counts the ones searched, e.g. "Dictionaries (3 of 5)"; **Search all** ticks them all again.
+- Opened, it counts the ones searched, e.g. "(3 of 5)"; **Search all** ticks those listed again.
 - The choice is remembered per device, as the dictionaries left out: one added to the library later is searched.
 - The Characters view still shows every dictionary.

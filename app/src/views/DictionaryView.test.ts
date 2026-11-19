@@ -3,12 +3,19 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryHistory, createRouter } from "vue-router";
 
-import { excludedDicts } from "../util/dicts";
+import { type IDictInfo, excludedDicts } from "../util/dicts";
 import { lang } from "../util/settings";
 import DictionaryView from "./DictionaryView.vue";
 
 /** what the `dicts` command returns */
-let dicts: { name: string; title: string }[] = [];
+let dicts: Partial<IDictInfo>[] = [];
+
+const dict = (name: string, lang: string | null, term_count = 10) => ({
+  name,
+  title: `${name} title`,
+  lang,
+  term_count,
+});
 
 /** the `req` of each `search` command */
 let searches: Record<string, unknown>[] = [];
@@ -281,10 +288,7 @@ describe("DictionaryView", () => {
     wrapper.unmount();
   });
   it("leaves out the dictionaries unticked, and remembers them", async () => {
-    dicts = [
-      { name: "A", title: "Dict A" },
-      { name: "MyDict", title: "My Dict" },
-    ];
+    dicts = [dict("A", "ja-JP"), dict("MyDict", null)];
     const wrapper = await mountView();
     await flushPromises();
     const boxes = wrapper.findAll(".dict-filter-list input");
@@ -296,7 +300,7 @@ describe("DictionaryView", () => {
     await boxes[1].setValue(false);
     await wrapper.get("input.search-input").setValue("日本");
     expect(await lastSearch()).toMatchObject({ exclude_dicts: ["MyDict"] });
-    expect(wrapper.get(".dict-filter summary").text()).toContain("(1 of 2)");
+    expect(wrapper.get(".dict-filter-count").text()).toBe("(1 of 2)");
     expect(JSON.parse(localStorage.getItem("cjk-dict.excludedDicts")!)).toEqual(
       ["MyDict"],
     );
@@ -308,7 +312,39 @@ describe("DictionaryView", () => {
   });
 
   it("hides the dictionary filter with one dictionary", async () => {
-    dicts = [{ name: "A", title: "Dict A" }];
+    // a kanji dictionary has no words to choose
+    dicts = [dict("A", "ja-JP"), dict("Kanji", "ja-JP", 0)];
+    const wrapper = await mountView();
+    await flushPromises();
+    expect(wrapper.find(".dict-filter").exists()).toBe(false);
+    wrapper.unmount();
+  });
+  it("lists the dictionaries of the search language only", async () => {
+    lang.value = "zh";
+    dicts = [
+      dict("A", "ja-JP"),
+      dict("B", "zh-TW"),
+      dict("C", "zh"),
+      dict("MyDict", null),
+    ];
+    excludedDicts.value = ["A", "B"];
+    const wrapper = await mountView();
+    await flushPromises();
+    const names = wrapper
+      .findAll(".dict-filter-list span")
+      .map((s) => s.text());
+    expect(names).toEqual(["B title", "C title", "MyDict title"]);
+    expect(wrapper.get(".dict-filter-count").text()).toBe("(2 of 3)");
+
+    // A, of another language, stays left out
+    await wrapper.get(".dict-filter .link-button").trigger("click");
+    expect(excludedDicts.value).toEqual(["A"]);
+    wrapper.unmount();
+  });
+
+  it("hides the dictionary filter with one dictionary of the language", async () => {
+    lang.value = "ko-KR";
+    dicts = [dict("A", "ja-JP"), dict("B", "ko-KR")];
     const wrapper = await mountView();
     await flushPromises();
     expect(wrapper.find(".dict-filter").exists()).toBe(false);

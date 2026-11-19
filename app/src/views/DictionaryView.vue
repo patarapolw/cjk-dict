@@ -131,17 +131,17 @@
           <span>Clipboard monitor</span>
         </label>
 
-        <details v-if="dictList.length > 1" class="dict-filter">
+        <details v-if="shownDicts.length > 1" class="dict-filter">
           <summary>
             Dictionaries
-            <span v-if="excludedCount" class="dict-filter-count"
-              >({{ dictList.length - excludedCount }} of
-              {{ dictList.length }})</span
+            <span class="dict-filter-count"
+              >({{ shownDicts.length - excludedCount }} of
+              {{ shownDicts.length }})</span
             >
           </summary>
           <div class="dict-filter-list">
             <label
-              v-for="d in dictList"
+              v-for="d in shownDicts"
               :key="d.name"
               :title="
                 [d.name, d.lang, d.target_lang].filter(Boolean).join(' · ')
@@ -280,6 +280,7 @@ import {
   excludedDicts,
   loadDicts,
   setDictIncluded,
+  wordDicts,
 } from "../util/dicts";
 import { hanChars } from "../util/han";
 import { declaredHeadLang, headLang, refineHeadLangs } from "../util/lang";
@@ -381,14 +382,19 @@ const placeholder = computed(() =>
       "Search"),
 );
 
-/** dictionaries left out that are in the library: a name may be of one since removed */
+/** the word dictionaries of the search language, to choose from */
+const shownDicts = computed(() => wordDicts(dictList.value, lang.value));
+
+/** of those, the ones left out: a name may also be of one not shown, or since removed */
 const excludedCount = computed(
   () =>
-    dictList.value.filter((d) => excludedDicts.value.includes(d.name)).length,
+    shownDicts.value.filter((d) => excludedDicts.value.includes(d.name)).length,
 );
 
+/** tick the dictionaries shown; those of other languages stay as they are */
 function searchAllDicts() {
-  excludedDicts.value = [];
+  const shown = new Set(shownDicts.value.map((d) => d.name));
+  excludedDicts.value = excludedDicts.value.filter((n) => !shown.has(n));
 }
 
 watch(dictsVersion, () => loadDicts());
@@ -939,6 +945,11 @@ onBeforeUnmount(() => {
 
   .dict-filter-count {
     color: var(--app-text-muted);
+  }
+
+  /* the count is for choosing: shown with the list */
+  .dict-filter:not([open]) .dict-filter-count {
+    display: none;
   }
 
   .dict-filter-list {

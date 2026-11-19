@@ -1,9 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { ref, watch } from "vue";
 
+import { primaryLang } from "./lang";
+
 /** A dictionary in the downloaded library (`search.db`'s `dict` table) */
 export interface IDictInfo {
-  /** the zip's name, e.g. `jitendex`; the key */
+  /** the zip's name, e.g. `CC-CEDICT`; the key */
   name: string;
   /** index.json's title */
   title: string;
@@ -55,6 +57,19 @@ export async function loadDicts() {
     console.warn(e);
     dictList.value = [];
   }
+}
+
+/**
+ * The dictionaries with words to choose from for `lang` (the search language, "" for
+ * all): kanji dictionaries (no terms) are left out, and so are those of another
+ * language. A dictionary that doesn't say its language may have words of any.
+ */
+export function wordDicts(list: IDictInfo[], lang: string): IDictInfo[] {
+  return list.filter(
+    (d) =>
+      d.term_count > 0 &&
+      (!lang || !d.lang || primaryLang(d.lang) === primaryLang(lang)),
+  );
 }
 
 /** Search `name`, or leave it out. */
