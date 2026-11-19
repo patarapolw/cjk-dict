@@ -69,24 +69,44 @@ node scripts/webview.mjs screenshot shot.png [css-selector]
 
 ### On Android
 
-<!-- Not yet confirmed in this repository: a local session will check these steps and
-     fix them (#22). -->
-
 Android's WebView speaks the Chrome DevTools Protocol too, over a socket that `adb` can
 forward, so [`scripts/webview.mjs`](scripts/webview.mjs) can drive the app on a phone or
 an emulator. A debug build allows WebView debugging (`setWebContentsDebuggingEnabled`).
 
 ```sh
-pnpm app android                          # tauri android run; or install a debug build
-adb shell cat /proc/net/unix | grep webview_devtools_remote   # the app's socket, by pid
-adb forward tcp:9223 localabstract:webview_devtools_remote_<pid>
+pnpm app android                          # tauri android run: installs and starts a debug build
+adb shell monkey -p cc.polv.cjk_dict -c android.intent.category.LAUNCHER 1   # bring it to the front
+adb forward tcp:9223 localabstract:webview_devtools_remote_$(adb shell pidof cc.polv.cjk_dict)
 PORT=9223 node scripts/webview.mjs eval "location.hash"
+PORT=9223 node scripts/webview.mjs open "#/dictionary?q=逆数&qState=exact"
 adb shell input tap <x> <y>               # a real touch; `input swipe x y x y 1000` holds it
+adb forward --remove tcp:9223             # when done
 ```
 
+- The debug build serves its own frontend (`http://tauri.localhost`): no Vite, so no
+  firewall setup, unlike `pnpm app tauri android dev`.
+- The socket is named by the app's process id: forward again after the app restarts.
+- Bring the app to the front first, with the screen on and unlocked: in the background
+  or behind the lock screen, its webview doesn't answer (`/json/list` and
+  `webview.mjs` hang). Ask the user to unlock the phone; don't unlock it yourself.
 - Use a port other than 9222, which the Windows app may be using.
-- Touches through `adb shell input` are real touches, unlike events dispatched from
-  devtools: use them for long presses and text selection.
+- Touches:
+  - `adb shell input` gives real touches, unlike events dispatched from devtools: use
+    them for long presses, scrolling and text selection.
+  - They take screen pixels: CSS pixels × `devicePixelRatio`, plus the webview's top
+    (`screenY` in the `description` of `/json/list`, below the status bar).
+  - `adb shell "input motionevent DOWN x y; input motionevent MOVE x y2; input motionevent UP x y2"`
+    rests a finger before moving it.
+- Screenshots: `webview.mjs screenshot` hangs on Android. Use
+  `adb exec-out screencap -p > shot.png`; on a phone with two screens (a foldable), add
+  `-d <id>` from `adb shell dumpsys SurfaceFlinger --display-id`.
+- Android settings the app follows, e.g. the touch-and-hold delay
+  (`adb shell settings put secure long_press_timeout 1500`; the default is 500), are read
+  when the app starts: restart it (`adb shell am force-stop cc.polv.cjk_dict`, then start
+  it again), and put the setting back when done.
+- In Git Bash, an argument that looks like a path, such as `"#/dictionary"`, may be
+  rewritten into a Windows path: set `MSYS_NO_PATHCONV=1` for that command.
+- For debugging by hand, see the README's "Debugging on Android".
 
 ### On Linux
 
