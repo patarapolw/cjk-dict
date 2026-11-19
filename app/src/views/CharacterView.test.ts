@@ -165,6 +165,7 @@ describe("CharacterView", () => {
       calls.filter((c) => c.cmd === "han_containing").map((c) => c.args),
     ).toEqual([{ components: "林", limit: 30, offset: 0, direct: true }]);
     expect(wrapper.find(".containing").exists()).toBe(false);
+    expect(wrapper.get(".search-hint").text()).toContain("Add characters");
     wrapper.unmount();
   });
 
@@ -209,7 +210,9 @@ describe("CharacterView", () => {
         .map((b) => b.text()),
     ).toEqual(["林"]);
     // and below, those made of both
+    expect(wrapper.get(".search-hint").text()).toContain("made of 林 + 木");
     expect(wrapper.get(".containing h2").text()).toContain("林 + 木");
+    expect(wrapper.get(".containing").text()).toContain("all 2 characters");
     expect(wrapper.findAll(".char-grid button").map((b) => b.text())).toEqual([
       "森",
     ]);

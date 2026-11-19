@@ -83,7 +83,10 @@ Each reading searches the words with the character read so, anywhere in the word
 
 A Chinese or Korean reading switches the search language to its own, unless it is Auto-detect.
 
-With more than one character typed, the characters made of all of them, at any depth, are listed below, the most used first: `木口` lists 呆, 杏, ...
+Several characters typed together also search for the characters made of all of them: `ABCD` lists, below the cards, the characters made of A + B + C + D.
+
+- At any depth, the most used first: `木口` lists 呆, 杏, ...
+- The search hint says so: with one character typed, it suggests adding more.
 
 - A radical also matches the forms it takes as a component: 水 finds 河, written with 氵.
 - Kangxi radicals (`⼝`) are read as the ideograph.

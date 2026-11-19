@@ -28,15 +28,19 @@
         </button>
       </div>
       <p class="search-hint">
-        <template v-if="chars.length">
-          {{ chars.length > 1 ? "Characters" : "Character" }}
-          <code>{{ chars.join(" ") }}</code
-          >, and the characters made of
-          {{ chars.length > 1 ? "all of them" : "it" }}
+        <template v-if="chars.length > 1">
+          Characters <code>{{ chars.join(" ") }}</code
+          >, and below, the characters made of
+          <code>{{ chars.join(" + ") }}</code>
+        </template>
+        <template v-else-if="chars.length">
+          Character <code>{{ chars[0] }}</code
+          >. Add characters to find the characters made of all of them.
         </template>
         <template v-else>
-          Type or paste characters, e.g. <code>語</code>, or components, e.g.
-          <code>木口</code>
+          Type or paste characters, e.g. <code>語</code>. Several, e.g.
+          <code>木口</code>, also find the characters made of all of them: 呆,
+          杏, …
         </template>
       </p>
     </header>
@@ -288,6 +292,9 @@
           Characters made of
           <span :lang="lang || undefined">{{ chars.join(" + ") }}</span>
         </h2>
+        <p class="muted containing-note">
+          Each is made of all {{ chars.length }} characters, at any depth.
+        </p>
         <p v-if="!containing.length && containingNext === null" class="muted">
           None
         </p>
@@ -843,6 +850,15 @@ h3 {
 
 .containing {
   padding: 0.5rem;
+}
+
+.containing h2 {
+  margin-bottom: 0;
+}
+
+.containing-note {
+  margin: 0.25rem 0 0.5rem;
+  font-size: 0.875rem;
 }
 
 .char-grid {
