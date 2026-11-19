@@ -306,6 +306,10 @@ describe("DictionaryView", () => {
     // the first result opens by itself
     // English definitions, but their Han characters are Chinese
     expect(wrapper.get(".gloss-list").attributes("lang")).toBe("zh");
+    // and the dictionary's name, in case it has Han characters
+    expect(
+      wrapper.get('.tag[data-category="dictionary"]').attributes("lang"),
+    ).toBe("zh");
     wrapper.unmount();
   });
   it("leaves out the dictionaries unticked, and remembers them", async () => {
@@ -356,6 +360,12 @@ describe("DictionaryView", () => {
       .findAll(".dict-filter-list span")
       .map((s) => s.text());
     expect(names).toEqual(["MyDict title", "C title", "B title"]);
+    // each in its dictionary's language, so Han characters take its forms
+    expect(
+      wrapper
+        .findAll(".dict-filter-list span")
+        .map((s) => s.attributes("lang") ?? null),
+    ).toEqual([null, "zh", "zh-TW"]);
     expect(wrapper.get(".dict-filter-count").text()).toBe("(2 of 3)");
 
     // A, of another language, stays left out

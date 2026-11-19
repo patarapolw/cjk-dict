@@ -199,9 +199,12 @@
           class="kanji-entry"
         >
           <header>
-            <span class="tag" data-category="dictionary">{{
-              e.dict_path
-            }}</span>
+            <span
+              class="tag"
+              data-category="dictionary"
+              :lang="e.lang || undefined"
+              >{{ e.dict_path }}</span
+            >
             <span
               v-for="t in splitTags(e.tags)"
               :key="t"
