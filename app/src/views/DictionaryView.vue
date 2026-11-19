@@ -173,7 +173,8 @@
                   )
                 "
               />
-              <span>{{ d.title || d.name }}</span>
+              <!-- a name in Han characters takes its dictionary's forms -->
+              <span :lang="d.lang || undefined">{{ d.title || d.name }}</span>
             </label>
           </div>
           <button

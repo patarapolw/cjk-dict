@@ -13,7 +13,12 @@
         :lang="termLang(row, lang)"
         >{{ row.term }}</span
       >
-      <span class="tag" data-category="dictionary">{{ row.dict_path }}</span>
+      <span
+        class="tag"
+        data-category="dictionary"
+        :lang="row.lang || undefined"
+        >{{ row.dict_path }}</span
+      >
       <span v-for="t in tags" :key="t" class="tag">{{ t }}</span>
     </header>
 

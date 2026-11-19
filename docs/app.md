@@ -36,6 +36,7 @@ How the app gets the library and shows entries. The [README](../README.md#app) h
 - Where the app differs from Yomitan, for example showing images that dictionaries mark collapsed, is listed in [yomitan-differences.md](yomitan-differences.md).
 - Images in definitions are served from the zips through a `dict://` protocol.
 - Terms and definitions are marked with their dictionary's languages (`lang`), so Han characters take the forms of their language (see [dict-admin](dict-admin.md#languages)).
+  - So are dictionary names, in the **Dictionaries** list and on entries: with the terms' language.
 - The app follows the device's light or dark color-scheme preference.
 - Selecting text (e.g. a long press on Android):
   - an entry's headword selects as a whole, without its reading;
