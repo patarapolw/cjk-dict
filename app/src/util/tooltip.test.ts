@@ -101,6 +101,27 @@ describe("v-tooltip", () => {
     wrapper.unmount();
   });
 
+  it("shows the next element's tooltip when the mouse moves straight onto it", () => {
+    const Comp = defineComponent(() => () => [
+      withDirectives(h("button", "~"), [[vTooltip, "Token search"]]),
+      withDirectives(h("button", "="), [[vTooltip, "Exact match"]]),
+    ]);
+    const wrapper = mount(Comp, { attachTo: document.body });
+    const [first, second] = wrapper.findAll("button").map((b) => b.element);
+    pointer(first, "pointerenter", "mouse");
+    vi.advanceTimersByTime(HOVER_MS);
+    expect(tooltip.value?.text).toBe("Token search");
+
+    pointer(first, "pointerleave", "mouse");
+    pointer(second, "pointerenter", "mouse");
+    vi.advanceTimersByTime(LEAVE_GRACE_MS);
+    // the first one's is gone after the grace time, not the second one's to come
+    expect(tooltip.value).toBeNull();
+    vi.advanceTimersByTime(HOVER_MS - LEAVE_GRACE_MS);
+    expect(tooltip.value?.text).toBe("Exact match");
+    wrapper.unmount();
+  });
+
   it("hides on Esc", () => {
     const { wrapper, button } = mountButton();
     pointer(button, "pointerenter", "mouse");

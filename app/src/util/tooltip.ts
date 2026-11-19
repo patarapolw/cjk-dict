@@ -69,6 +69,11 @@ export function showTooltip(el: HTMLElement) {
 
 export function hideTooltip() {
   clearTimeout(showTimer);
+  removeTooltip();
+}
+
+/** hide the tooltip shown, but not one about to show */
+function removeTooltip() {
   clearTimeout(hideTimer);
   owner = null;
   tooltip.value = null;
@@ -76,9 +81,10 @@ export function hideTooltip() {
 
 /** The pointer left the element or the tooltip: hide, unless it comes onto the other. */
 export function leaveTooltip() {
-  clearTimeout(showTimer);
   clearTimeout(hideTimer);
-  if (owner) hideTimer = setTimeout(hideTooltip, LEAVE_GRACE_MS);
+  // not hideTooltip: the pointer may have moved onto another element, whose tooltip is
+  // still to show
+  if (owner) hideTimer = setTimeout(removeTooltip, LEAVE_GRACE_MS);
 }
 
 /** The pointer is on the tooltip (or back on its element): keep it. */
