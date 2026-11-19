@@ -156,6 +156,14 @@ On Windows, use the launch configurations in [`.vscode/launch.json`](.vscode/lau
 
 They start the app without the Tauri CLI, running Vite and `cargo build` as tasks instead.
 
+### Debugging on Android
+
+- Turn on USB debugging on the phone, connect it, and run `pnpm app android` (a debug build).
+- A debug build allows WebView debugging: open `chrome://inspect/#devices` in Chrome (or `edge://inspect` in Edge) on the computer, and inspect the app's WebView.
+- It serves its own frontend, so it needs no firewall setup, unlike `pnpm app tauri android dev`.
+- Some Android settings, e.g. Accessibility → Touch & hold delay, take effect when the app restarts.
+- For driving the app from scripts (`adb forward`, `scripts/webview.mjs`), see [AGENTS.md](AGENTS.md#on-android).
+
 ### Where the app downloads from
 
 Set in `.env` or by environment variables. They are read when the app is built (compiled in), and can be overridden at runtime:
