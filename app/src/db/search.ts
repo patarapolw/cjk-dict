@@ -166,16 +166,22 @@ class SearchDatabase {
     return await invoke<IHanChar[]>("han_chars", { text });
   }
 
-  /** Characters made of every character of `components`, the most used first. */
+  /**
+   * Characters made of every character of `components`, the most used first. With
+   * `direct`, only those whose IDS name the components themselves: 口 gives 可 but not 河,
+   * which is made of 可.
+   */
   async hanContaining(
     components: string,
     limit: number,
     offset: number,
+    direct = false,
   ): Promise<IHanList> {
     return await invoke<IHanList>("han_containing", {
       components,
       limit,
       offset,
+      direct,
     });
   }
 

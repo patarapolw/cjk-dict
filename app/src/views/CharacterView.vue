@@ -149,6 +149,33 @@
           </p>
         </div>
 
+        <div v-if="usedIn[c.ch]" class="used-in">
+          <h3>Used in</h3>
+          <p v-if="!usedIn[c.ch].items.length" class="muted">
+            Not a component of another character.
+          </p>
+          <p v-else class="used-in-list" :lang="lang || undefined">
+            <button
+              v-for="it in usedIn[c.ch].items"
+              :key="it.ch"
+              type="button"
+              class="component"
+              :title="usedInTitle(it)"
+              @click="go(it.ch)"
+            >
+              {{ it.ch }}
+            </button>
+            <button
+              v-if="usedIn[c.ch].next !== null"
+              type="button"
+              class="link-button more-used-in"
+              @click="loadUsedIn(c.ch)"
+            >
+              More
+            </button>
+          </p>
+        </div>
+
         <article
           v-for="(e, i) in sortByLang(c.entries, lang)"
           :key="i"
@@ -251,7 +278,9 @@
 
       <section v-if="chars.length" class="containing">
         <h2>
-          Characters made of
+          {{
+            chars.length > 1 ? "Characters made of" : "All characters made of"
+          }}
           <span :lang="lang || undefined">{{ chars.join(" + ") }}</span>
         </h2>
         <p v-if="!containing.length && containingNext === null" class="muted">
@@ -263,7 +292,7 @@
             :key="it.ch"
             type="button"
             class="char-button"
-            :title="it.uses ? `in ${it.uses.toLocaleString()} words` : ''"
+            :title="usedInTitle(it)"
             @click="go(it.ch)"
           >
             {{ it.ch }}
@@ -295,7 +324,7 @@ import {
 import { useRoute, useRouter } from "vue-router";
 
 import Term from "../components/yomitan/Term.vue";
-import { IHanChar, IKanjiEntry, ITerm, searchDB } from "../db/search";
+import { IHanChar, IHanList, IKanjiEntry, ITerm, searchDB } from "../db/search";
 import {
   READING_STAT_LANGS,
   REGION_NAMES,
@@ -314,6 +343,8 @@ import { lang } from "../util/settings";
 /** characters [`han_chars`] looks up at once (MAX_HAN_CHARS in search.rs) */
 const MAX_CHARS = 20;
 const PAGE = 60;
+/** characters made directly of a character, shown on its card at first */
+const USED_IN_PAGE = 30;
 
 const q = ref("");
 const chars = computed(() => hanChars(q.value).slice(0, MAX_CHARS));
@@ -323,6 +354,8 @@ const error = ref("");
 const containing = ref<{ ch: string; uses: number }[]>([]);
 const containingNext = ref<number | null>(null);
 const loadingMore = ref(false);
+/** each character's characters made directly of it (super-characters) */
+const usedIn = ref<Record<string, IHanList>>({});
 /** single-character word entries, loaded when their section is opened */
 const words = ref<Record<string, ITerm[]>>({});
 
@@ -342,18 +375,27 @@ async function load() {
   words.value = {};
   if (!text) {
     found.value = [];
+    usedIn.value = {};
     containing.value = [];
     containingNext.value = null;
     error.value = "";
     return;
   }
   try {
-    const [cs, list] = await Promise.all([
+    const [cs, list, direct] = await Promise.all([
       searchDB.hanChars(text),
       searchDB.hanContaining(text, PAGE, 0),
+      Promise.all(
+        chars.value.map((ch) =>
+          searchDB.hanContaining(ch, USED_IN_PAGE, 0, true),
+        ),
+      ),
     ]);
     if (id !== requestId) return;
     found.value = cs;
+    usedIn.value = Object.fromEntries(
+      chars.value.map((ch, i) => [ch, direct[i]]),
+    );
     containing.value = list.items;
     containingNext.value = list.next;
     error.value = "";
@@ -363,6 +405,7 @@ async function load() {
     console.error(e);
     if (id !== requestId) return;
     found.value = [];
+    usedIn.value = {};
     containing.value = [];
     containingNext.value = null;
     error.value = String(e);
@@ -389,6 +432,25 @@ async function loadContaining() {
     loadingMore.value = false;
   }
 }
+
+async function loadUsedIn(ch: string) {
+  const list = usedIn.value[ch];
+  if (list?.next == null) return;
+  const id = requestId;
+  try {
+    const more = await searchDB.hanContaining(ch, PAGE, list.next, true);
+    if (id !== requestId) return;
+    usedIn.value = {
+      ...usedIn.value,
+      [ch]: { items: [...list.items, ...more.items], next: more.next },
+    };
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+const usedInTitle = (it: { ch: string; uses: number }) =>
+  it.uses ? `${it.ch}, in ${it.uses.toLocaleString()} words` : it.ch;
 
 async function onWordsToggle(ch: string, e: Event) {
   if (!(e.target as HTMLDetailsElement).open || words.value[ch]) return;
@@ -692,6 +754,16 @@ h3 {
 .all-components .muted {
   font-size: 0.875rem;
   margin-inline-end: 0.25rem;
+}
+
+.used-in-list {
+  margin: 0.25rem 0 0;
+  font-size: 1.125rem;
+}
+
+.more-used-in {
+  margin-inline-start: 0.5rem;
+  font-size: 0.875rem;
 }
 
 .kanji-entry {
