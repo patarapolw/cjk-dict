@@ -68,8 +68,9 @@ watch(tooltip, async (t) => {
   max-width: min(20rem, calc(100vw - 16px));
   padding: 0.375rem 0.625rem;
   border-radius: 0.375rem;
-  background: var(--app-text);
-  color: var(--app-background);
+  border: 1px solid var(--app-tooltip-border);
+  background: var(--app-tooltip-background);
+  color: var(--app-tooltip-text);
   font-size: 0.875rem;
   font-weight: normal;
   line-height: 1.35;

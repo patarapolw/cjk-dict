@@ -58,6 +58,7 @@ How the app gets the library and shows entries. The [README](../README.md#app) h
   - doesn't count as a tap, and opens no system menu (text selection, "open link");
   - is not a swipe: moving the finger more than 10 px shows nothing.
 - The tooltip goes above what it explains, where a finger doesn't cover it, or below when there's no room.
+- It's dark in both themes: in the dark theme, lighter than the page and with a border, so it stands out from it.
 - Screen readers read the text as the element's description (`aria-describedby`, to a hidden element), whether or not the tooltip is shown; the bubble itself is hidden from them, so it isn't read twice.
 - Dictionaries' own `title`s, in definitions and on images, are tooltips too.
 
