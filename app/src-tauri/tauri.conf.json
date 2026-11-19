@@ -18,7 +18,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' dict: http://dict.localhost"
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' dict: http://dict.localhost; font-src 'self' font: http://font.localhost"
     }
   },
   "bundle": {
