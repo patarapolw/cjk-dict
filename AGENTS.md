@@ -150,6 +150,12 @@ and don't write code that relies on a guess without saying so. Instead:
   Keep only what is useful beyond the pull request, e.g. a `dict-admin` option the admin
   will run again, and say which you kept and why.
 - Keep the list in step with later commits: remove items a commit made moot.
+- Read the pull request's body before you change it, and work from what it says now:
+  - the user may have ticked items, edited them, or added notes or results under them;
+  - keep ticked items ticked and the user's edits and notes, unless a commit made an
+    item moot;
+  - rewrite only the parts your commits change, rather than replacing the whole body
+    with one written from memory.
 
 ## Dictionaries
 
