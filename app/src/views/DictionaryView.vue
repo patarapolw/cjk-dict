@@ -26,7 +26,7 @@
             type="button"
             class="clear-button"
             aria-label="Clear"
-            title="Clear (Esc)"
+            v-tooltip="'Clear (Esc)'"
             @click="clearQuery"
           >
             ×
@@ -37,7 +37,7 @@
             type="button"
             :aria-pressed="qState === 'fts'"
             :disabled="tokenizerPending"
-            :title="
+            v-tooltip="
               tokenizerPending
                 ? '~ (token search) is available once the tokenizer download finishes'
                 : 'Token search: words containing it'
@@ -49,7 +49,7 @@
           <button
             type="button"
             :aria-pressed="qState === 'exact'"
-            title="Exact match"
+            v-tooltip="'Exact match'"
             @click="toggleQueryState('exact')"
           >
             =
@@ -57,7 +57,7 @@
           <button
             type="button"
             :aria-pressed="readingMode"
-            title="Reading search: type only the reading, no {} needed"
+            v-tooltip="'Reading search: type only the reading, no {} needed'"
             @click="toggleReadingMode"
           >
             {}
@@ -104,7 +104,7 @@
       <nav>
         <label
           v-if="isJapanese"
-          title="Convert romaji to kana as you type: nihongo → にほんご"
+          v-tooltip="'Convert romaji to kana as you type: nihongo → にほんご'"
         >
           <input type="checkbox" name="autokana" v-model="autoKana" />
           <span>Auto-convert to Kana</span>
@@ -112,7 +112,9 @@
 
         <label
           v-if="isJapanese"
-          title="When a Japanese IME converts にほんご to 日本語, also match the reading you typed: <日本>{にほん}語"
+          v-tooltip="
+            'When a Japanese IME converts にほんご to 日本語, also match the reading you typed: <日本>{にほん}語'
+          "
         >
           <input type="checkbox" name="imefurigana" v-model="imeFurigana" />
           <span>Get reading from IME</span>
@@ -120,7 +122,9 @@
 
         <label
           v-if="isKorean"
-          title="Type Revised Romanization to find Hangul: hangugeo → 한국어"
+          v-tooltip="
+            'Type Revised Romanization to find Hangul: hangugeo → 한국어'
+          "
         >
           <input type="checkbox" name="romanko" v-model="romanKo" />
           <span>Search by romanization</span>
@@ -148,7 +152,7 @@
             <label
               v-for="d in shownDicts"
               :key="d.name"
-              :title="
+              v-tooltip="
                 [d.name, d.lang, d.target_lang].filter(Boolean).join(' · ')
               "
             >
@@ -205,7 +209,7 @@
             <button
               type="button"
               class="link-button"
-              title="Search this word only"
+              v-tooltip="'Search this word only'"
               @click="searchFor(furiganaOf(it), 'exact')"
             >
               = {{ headTerm(it) }}
@@ -214,7 +218,7 @@
               type="button"
               class="link-button"
               :disabled="tokenizerPending"
-              title="Words containing it"
+              v-tooltip="'Words containing it'"
               @click="searchFor(headTerm(it), 'fts')"
             >
               ~ {{ headTerm(it) }}
@@ -223,7 +227,7 @@
               v-if="headReading(it)"
               type="button"
               class="link-button"
-              title="Words with this reading"
+              v-tooltip="'Words with this reading'"
               @click="searchFor(braced(headReading(it)), 'exact')"
             >
               {{ braced(headReading(it)) }}
@@ -232,7 +236,7 @@
               v-if="hanChars(headTerm(it)).length"
               type="button"
               class="link-button"
-              title="Its characters: components, readings and meanings"
+              v-tooltip="'Its characters: components, readings and meanings'"
               @click="toCharacters(headTerm(it))"
             >
               字 {{ hanChars(headTerm(it)).join("") }}
@@ -300,6 +304,7 @@ import { declaredHeadLang, headLang, refineHeadLangs } from "../util/lang";
 import { dictsVersion, toBeLoaded } from "../util/loading";
 import { remainingScroll, scrollToStart } from "../util/scroll";
 import { lang } from "../util/settings";
+import { vTooltip } from "../util/tooltip";
 
 type Item = ISearchTerm & { entries: ITerm[] };
 

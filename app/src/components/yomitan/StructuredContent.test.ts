@@ -1,6 +1,7 @@
 import { mount } from "@vue/test-utils";
 import { describe, expect, it } from "vitest";
 
+import { describedText } from "../../util/tooltip";
 import StructuredContent from "./StructuredContent";
 
 function render(node: unknown) {
@@ -89,6 +90,20 @@ describe("StructuredContent", () => {
       "https://example.com",
       undefined,
     ]);
+    wrapper.unmount();
+  });
+
+  it("shows a title as a tooltip a touchscreen shows too", () => {
+    const wrapper = render({
+      tag: "span",
+      title: "Godan verb",
+      content: "v5",
+    });
+    const span = wrapper.get("span.gloss-sc-span");
+    expect(span.attributes("title")).toBeUndefined();
+    // for screen readers
+    expect(describedText(span.element)).toBe("Godan verb");
+    expect(span.classes()).toContain("has-tooltip");
     wrapper.unmount();
   });
 });

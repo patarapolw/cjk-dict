@@ -21,7 +21,7 @@
           type="button"
           class="clear-button"
           aria-label="Clear"
-          title="Clear (Esc)"
+          v-tooltip="'Clear (Esc)'"
           @click="clearQuery"
         >
           ×
@@ -62,7 +62,7 @@
                 <button
                   type="button"
                   class="link-button reading"
-                  :title="readingTitle(c.ch, r)"
+                  v-tooltip="readingTitle(c.ch, r)"
                   @click="toReading(c.ch, r, 'ko-KR')"
                 >
                   {{ r }}
@@ -76,7 +76,7 @@
               <button
                 type="button"
                 class="link-button"
-                title="Search this character as a word"
+                v-tooltip="'Search this character as a word'"
                 @click="toWords(c.ch, 'exact')"
               >
                 = {{ c.ch }}
@@ -85,7 +85,7 @@
                 type="button"
                 class="link-button"
                 :disabled="tokenizerPending"
-                title="Words containing it"
+                v-tooltip="'Words containing it'"
                 @click="toWords(c.ch, 'fts')"
               >
                 ~ {{ c.ch }}
@@ -94,7 +94,7 @@
                 v-if="found.length > 1 || superQuery"
                 type="button"
                 class="link-button"
-                title="This character only"
+                v-tooltip="'This character only'"
                 @click="go(c.ch)"
               >
                 字 {{ c.ch }}
@@ -113,19 +113,21 @@
                     v-if="t.kind === 'component' && t.text !== c.ch"
                     type="button"
                     class="component"
-                    :title="`Look up ${t.text}`"
+                    v-tooltip="`Look up ${t.text}`"
                     @click="go(t.text)"
                   >
                     {{ t.text }}
                   </button>
                   <span v-else-if="t.kind === 'component'">{{ t.text }}</span>
-                  <span v-else class="idc" :title="t.title">{{ t.text }}</span>
+                  <span v-else class="idc" v-tooltip="t.title">{{
+                    t.text
+                  }}</span>
                 </template>
               </span>
               <span
                 v-if="ids.regions"
                 class="regions"
-                :title="regionTitle(ids.regions)"
+                v-tooltip="regionTitle(ids.regions)"
                 >{{ ids.regions }}</span
               >
             </li>
@@ -144,7 +146,7 @@
               type="button"
               class="component"
               :lang="lang || undefined"
-              :title="`Look up ${comp}`"
+              v-tooltip="`Look up ${comp}`"
               @click="go(comp)"
             >
               {{ comp }}
@@ -163,7 +165,7 @@
               :key="it.ch"
               type="button"
               class="component"
-              :title="usedInTitle(it)"
+              v-tooltip="usedInTitle(it)"
               @click="go(it.ch)"
             >
               {{ it.ch }}
@@ -178,7 +180,7 @@
             v-if="usedIn[c.ch].items.length"
             type="button"
             class="super-search"
-            :title="superTitle(c.ch)"
+            v-tooltip="superTitle(c.ch)"
             @click="go(`*${c.ch}`)"
           >
             Search
@@ -201,7 +203,7 @@
               v-for="t in splitTags(e.tags)"
               :key="t"
               class="tag"
-              :title="e.tag_meta[t]?.notes || undefined"
+              v-tooltip="e.tag_meta[t]?.notes || undefined"
               >{{ t }}</span
             >
           </header>
@@ -214,7 +216,7 @@
                   <button
                     type="button"
                     class="link-button reading"
-                    :title="readingTitle(c.ch, r)"
+                    v-tooltip="readingTitle(c.ch, r)"
                     @click="toReading(c.ch, r)"
                   >
                     {{ r }}
@@ -230,7 +232,7 @@
                   <button
                     type="button"
                     class="link-button reading"
-                    :title="readingTitle(c.ch, r)"
+                    v-tooltip="readingTitle(c.ch, r)"
                     @click="toReading(c.ch, r)"
                   >
                     {{ r }}
@@ -240,7 +242,7 @@
             </template>
             <!-- other languages' readings, e.g. KANJIDIC's pinyin and Korean -->
             <template v-for="[name, value] in readingStats(e)" :key="name">
-              <dt :title="name">{{ e.tag_meta[name].notes || name }}</dt>
+              <dt v-tooltip="name">{{ e.tag_meta[name].notes || name }}</dt>
               <dd :lang="STAT_LANGS[name]">
                 <template v-if="READING_STAT_LANGS[name]">
                   <template v-for="(r, k) in value.split(/,\s*/)" :key="k">
@@ -248,7 +250,7 @@
                     <button
                       type="button"
                       class="link-button reading"
-                      :title="readingTitle(c.ch, r)"
+                      v-tooltip="readingTitle(c.ch, r)"
                       @click="toReading(c.ch, r, READING_STAT_LANGS[name])"
                     >
                       {{ r }}
@@ -266,7 +268,7 @@
             <summary>Details</summary>
             <table>
               <tr v-for="[name, value] in sortedStats(e)" :key="name">
-                <th :title="name">{{ e.tag_meta[name]?.notes || name }}</th>
+                <th v-tooltip="name">{{ e.tag_meta[name]?.notes || name }}</th>
                 <td>{{ value }}</td>
               </tr>
             </table>
@@ -316,7 +318,7 @@
             :key="it.ch"
             type="button"
             class="char-button"
-            :title="usedInTitle(it)"
+            v-tooltip="usedInTitle(it)"
             @click="go(it.ch)"
           >
             {{ it.ch }}
@@ -363,6 +365,7 @@ import { glossLang } from "../util/lang";
 import { dictsVersion, toBeLoaded } from "../util/loading";
 import { scrollToStart } from "../util/scroll";
 import { lang } from "../util/settings";
+import { vTooltip } from "../util/tooltip";
 
 /** characters [`han_chars`] looks up at once (MAX_HAN_CHARS in search.rs) */
 const MAX_CHARS = 20;

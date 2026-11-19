@@ -81,5 +81,14 @@ const tags = computed(() => [
 
 .entry-term {
   margin-inline-end: 0.5em;
+  /* a long press selects the whole headword, not the word the system finds in it
+     (for Chinese and Japanese, often a single character) */
+  -webkit-user-select: all;
+  user-select: all;
+}
+
+.entry-term rt {
+  -webkit-user-select: none;
+  user-select: none;
 }
 </style>

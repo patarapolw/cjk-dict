@@ -9,7 +9,11 @@
     :data-load-state="loadState"
     @click.prevent="toggle"
   >
-    <span class="gloss-image-container" :style="containerStyle" :title="title">
+    <span
+      class="gloss-image-container"
+      :style="containerStyle"
+      v-tooltip="title"
+    >
       <span
         v-if="appearance === 'monochrome'"
         class="gloss-image-background"
@@ -33,6 +37,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import { vTooltip } from "../../util/tooltip";
 
 /** Yomitan `img` structured content / `image` glossary, as the dictionary has it */
 export interface ImageData {

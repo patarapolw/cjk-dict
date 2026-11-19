@@ -6,6 +6,7 @@ import { createMemoryHistory, createRouter } from "vue-router";
 import { type IDictInfo, excludedDicts } from "../util/dicts";
 import { lang } from "../util/settings";
 import DictionaryView from "./DictionaryView.vue";
+import { describedText } from "../util/tooltip";
 
 /** what the `dicts` command returns */
 let dicts: Partial<IDictInfo>[] = [];
@@ -53,7 +54,9 @@ async function mountView() {
 }
 
 const readingButton = (wrapper: Awaited<ReturnType<typeof mountView>>) =>
-  wrapper.get('button[title^="Reading search"]');
+  wrapper
+    .findAll("button")
+    .find((b) => describedText(b.element).startsWith("Reading search"))!;
 
 /** the search sent once typing pauses */
 async function lastSearch() {

@@ -41,6 +41,10 @@
   font-weight: bold;
   line-height: 1.4;
   vertical-align: middle;
+  /* labels, not text: with no space between them and the text beside them, a word
+     selected (e.g. by a long press) would take their text too */
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .tag[data-category="dictionary"] {

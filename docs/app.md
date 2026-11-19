@@ -37,6 +37,34 @@ How the app gets the library and shows entries. The [README](../README.md#app) h
 - Images in definitions are served from the zips through a `dict://` protocol.
 - Terms and definitions are marked with their dictionary's languages (`lang`), so Han characters take the forms of their language (see [dict-admin](dict-admin.md#languages)).
 - The app follows the device's light or dark color-scheme preference.
+- Selecting text (e.g. a long press on Android):
+  - an entry's headword selects as a whole, without its reading;
+  - tags (`.tag`) and elements with a tooltip can't be selected. They sit next to text with no space between, so a word selected beside one would take its text too, e.g. `vt` + `to` as "vtto";
+  - elsewhere, the system picks the word. For Chinese and Japanese, it's often a single character.
+
+## Tooltips
+
+- Buttons and labels explain themselves with tooltips (`v-tooltip`, [`app/src/util/tooltip.ts`](../app/src/util/tooltip.ts)), in place of `title`, which a touchscreen never shows.
+- They follow [WCAG 2.1 SC 1.4.13](https://www.w3.org/WAI/WCAG21/Understanding/content-on-hover-or-focus.html) and the [ARIA Authoring Practices' tooltip pattern](https://www.w3.org/WAI/ARIA/apg/patterns/tooltip/).
+
+| Input        | Shows                                  | Hides                                               |
+| ------------ | -------------------------------------- | --------------------------------------------------- |
+| Mouse or pen | after resting on the element for 0.4 s | when the pointer leaves the element and the tooltip |
+| Keyboard     | while the element has keyboard focus   | when focus moves, or on Esc                         |
+| Touch        | on a long press                        | on the next touch elsewhere, a scroll, or Esc       |
+
+- Nothing hides a tooltip on a timer: it stays until dismissed.
+- The pointer can move onto the tooltip (e.g. with a screen magnifier): there are 0.15 s to cross the gap.
+- 0.4 s is a convention, about as long as a browser's own `title` tooltip; no guideline sets it.
+- A long press:
+  - is the platform's own where the webview reports it (`contextmenu`): Android and Windows. It then follows the system's delay, e.g. Android's Accessibility → Touch & hold delay, which Android's webview reads when the app starts;
+  - is timed at 0.5 s elsewhere, e.g. WebKit on iOS. A webview that turns out to report long presses is then waited for instead;
+  - doesn't count as a tap, and opens no system menu (text selection, "open link");
+  - is not a swipe: moving the finger more than 10 px shows nothing.
+- The tooltip goes above what it explains, where a finger doesn't cover it, or below when there's no room.
+- It's dark in both themes: in the dark theme, lighter than the page and with a border, so it stands out from it.
+- Screen readers read the text as the element's description (`aria-describedby`, to a hidden element), whether or not the tooltip is shown; the bubble itself is hidden from them, so it isn't read twice.
+- Dictionaries' own `title`s, in definitions and on images, are tooltips too.
 
 ## Security policy
 
