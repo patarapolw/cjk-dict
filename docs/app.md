@@ -8,8 +8,8 @@ How the app gets the library and shows entries. The [README](../README.md#app) h
 - Downloads run in the background and resume where they stopped.
 - Files go to a staging folder, and replace the old ones only when all of them have arrived and their checksums match. Until then, the app keeps searching the previous version.
 - It signs its R2 requests itself, with presigned URLs.
-- On first launch, it also downloads the lindera tokenizer dictionaries in the background, used to tokenize `~` queries:
-  - unidic (Japanese), ko-dic (Korean) and cc-cedict (Chinese), from lindera's 6.2.0 release;
+- On first launch, it also downloads the [lindera](https://github.com/lindera/lindera) tokenizer dictionaries in the background, used to tokenize `~` queries:
+  - unidic (Japanese), ko-dic (Korean) and cc-cedict (Chinese), from [lindera's 6.2.0 release](https://github.com/lindera/lindera/releases/tag/v6.2.0);
   - \~73 MB to download, \~310 MB unpacked.
 
 ## Showing entries
