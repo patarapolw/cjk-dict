@@ -6,6 +6,8 @@ export interface DownloadingProps {
   url: string;
   /** part of a dictionary sync: committed once all such files are downloaded */
   dict?: boolean;
+  /** a font (util/fonts.ts): used as soon as it is downloaded */
+  font?: boolean;
 }
 
 export interface DownloadUrlProgress {
