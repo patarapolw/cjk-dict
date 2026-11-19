@@ -4,11 +4,12 @@ How the app's search works. The [README](../README.md#app) has how to run the ap
 
 ## The search box
 
-- One search box. The search language in the header is the only setting, remembered per device.
+- One search box. The search language in the header narrows the search to one language; it is the only setting remembered, per device.
 - Search modes:
   - prefix (default);
   - `=` exact;
   - `~` token search. It needs the tokenizer; until that has downloaded, `~` is disabled and falls back to prefix search.
+- The `{}` button searches by reading only: type the reading, no `{}` needed.
 - A space marks a word boundary: only the first word is looked up, and "Next" moves on to the rest.
 - When nothing matches a longer text (e.g. a copied sentence), it is split into words with the tokenizer.
 - Each result links to:
@@ -21,7 +22,8 @@ How the app's search works. The [README](../README.md#app) has how to run the ap
 ## Readings
 
 - Readings use furigana syntax: `<日本>{にほん}語` matches 日本語 read にほん…
-- `{reading}` alone searches by reading, e.g. `{zhong1 guo2}`. Pinyin is expanded to all tones.
+- `{reading}` alone searches by reading, e.g. `{zhong1 guo2}`.
+- Pinyin without tones (`{zhong guo}`) is expanded to every tone, for readings of up to four syllables; a longer one matches as typed.
 - Katakana and hiragana find each other: `こーひー` finds コーヒー, and `<興>{キョウ}` finds 興味 (きょうみ).
   - `search.db` stores terms, tokens and readings with katakana as hiragana.
   - `dict-admin build` rebuilds a `search.db` from before this from scratch; the app searches one as before until then.
@@ -37,7 +39,7 @@ In a term and in a term's reading:
 - `[...]` one of the characters:
   - in a term, `[...]` and `[^...]` (none of them): `[日月]曜日`;
   - in a term's reading and in a reading alone, `[...]`: `{にほ[んっ]`.
-- Full-width `＊？［］` work too.
+- Full-width brackets and wildcards, as a Japanese IME types them, work too: `＜＞｛｝＊？［］＾`.
 
 Not supported:
 
@@ -106,4 +108,4 @@ Optional, below the search box:
   - `{にほn` is `{にほ[なにぬねのん]`;
   - `<食>{たb}べる` is `<食>{た[っばびぶべぼ]}べる`.
 - **Get reading from IME**: a Japanese IME's reading is kept as `<漢字>{かんじ}` when you convert.
-- **Clipboard monitor**: searches whatever CJK text you copy.
+- **Clipboard monitor**: checks the clipboard every second, and searches copied text that starts with Chinese, Japanese or Korean.

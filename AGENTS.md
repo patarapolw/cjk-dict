@@ -163,6 +163,27 @@ and don't write code that relies on a guess without saying so. Instead:
 - Squash merges keep only the pull request's title and body: put what matters there,
   not only in commit messages.
 
+## Documentation
+
+- [`README.md`](README.md) is what the project is, setup, and the commands at a glance.
+  How things work in detail goes in [`docs/`](docs/), one page per area, listed near the
+  top of the README:
+  - [`docs/dict-admin.md`](docs/dict-admin.md): `dict-admin`'s commands, dictionary
+    languages, the default dictionaries;
+  - [`docs/search.md`](docs/search.md): searching in the app;
+  - [`docs/app.md`](docs/app.md): how the app downloads the library and shows entries;
+  - [`docs/yomitan-differences.md`](docs/yomitan-differences.md): where rendering
+    differs from Yomitan.
+- A change to what a page describes updates the page in the same pull request. An area
+  without a page gets a new one, added to the README's list and the list above.
+- Write in short bullets, one point each, nesting details under them, rather than long
+  paragraphs or sentences strung together with semicolons. Use a table for settings and
+  their values, and give an example value for each.
+- Check what you write against the code: options, defaults, limits (e.g. how far pinyin
+  is expanded) and file names. Remove what a change made untrue.
+- Leave migration steps (e.g. `pnpm admin defaults --langs` for a library from before a
+  change) out of the README and docs: put them in the pull request's "After merging".
+
 ## Commit messages
 
 Use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/):

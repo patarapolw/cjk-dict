@@ -31,7 +31,7 @@ More in [`docs/`](docs/):
   - `pnpm dev` runs the app against it;
   - `dict-admin` defaults to `library/` and `tmp/lindera`.
 - Production settings (R2 keys and the rclone upload destination) go in `.env` at the repo root (gitignored); copy `.env.example`.
-  - The one file is read by the app's Rust build, by Vite (`VITE_*`) and by `dict-admin`.
+  - The one file is read by the app's Rust build and by `dict-admin`. Vite reads it too, though the frontend uses no `VITE_*` variables yet.
   - Variables already set in the environment take precedence.
 - `pnpm format` runs Prettier, and `pnpm typecheck` checks the app.
 

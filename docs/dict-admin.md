@@ -12,10 +12,11 @@
 
 - `--lang` overrides the zip's `sourceLanguage`: the terms' language (L1).
 - `--target-lang` overrides its `targetLanguage`: the definitions' language (L2).
-- The app marks terms and definitions with them, so Han characters take the forms of their language: Japanese, Korean, or Chinese as the dictionary has it (`zh`, `zh-TW`, ...; Mandarin isn't always `zh-CN`).
-  - Terms take L1.
-  - Definitions take L2 when it is Japanese, Chinese or Korean, else L1, so Han characters in English definitions take the terms' forms.
-- `--target-lang` is needed only for definitions in another of those languages than the terms, e.g. `ja` for Pixiv, which gives neither.
+- The app marks terms and definitions with these, so Han characters take their language's forms:
+  - terms take L1;
+  - definitions take L2 if it is Japanese, Chinese or Korean, else L1, so Han characters in English definitions take the terms' forms.
+- Chinese keeps the tag the dictionary gives (`zh`, `zh-TW`, ...): Mandarin isn't always `zh-CN`.
+- `--target-lang` matters only when the definitions are in a different one of Japanese, Chinese and Korean than the terms, e.g. `ja` for Pixiv, whose `index.json` gives no languages.
 - To change a dictionary's languages without adding it again, edit `lang` / `target_lang` in `dicts.json`, then `build`.
 
 ### KANJIDIC2
@@ -33,14 +34,19 @@ KANJIDIC2 JSON from jmdict-simplified (`kanjidic2-en-*.json.zip`, or the `.json`
 
 The default dictionaries (the list the app used to download itself):
 
-- KANJIDIC: kanji, from [jmdict-simplified](https://github.com/scriptin/jmdict-simplified)'s JSON of the JMdict project's KANJIDIC2. No language, as it has Japanese, Chinese and Korean readings.
+- KANJIDIC: kanji, from [jmdict-simplified](https://github.com/scriptin/jmdict-simplified)'s JSON of the JMdict project's KANJIDIC2. No source language, as it has Japanese, Chinese and Korean readings; its meanings are English.
 - Pixiv.
 - `ja`/`zh`/`ko.Wikipedia` (MarvNC).
 - CC-CEDICT.
 - KO-EN.KRDICT.
 - `wty-ja-en`/`wty-ko-en`/`wty-zh-en` (Wiktionary).
 
-GitHub-hosted ones resolve to the asset of the repo's latest release. Set `GITHUB_TOKEN` if you hit the API's unauthenticated rate limit.
+Options and behavior:
+
+- `defaults` adds those not in the library yet, skipping the rest; `--replace` downloads them again, e.g. to update to the latest release.
+- `--only <name>` (repeatable) picks some of them; `--list` prints them with their language overrides and download URLs.
+- It records each one's language overrides in `dicts.json`, where the dictionary's own `index.json` falls short.
+- GitHub-hosted ones resolve to the asset of the repo's latest release. Set `GITHUB_TOKEN` if you hit the API's unauthenticated rate limit.
 
 ## `build` and `rebuild`
 
@@ -79,6 +85,15 @@ Korean headwords written in Hanja get Hangul readings when `search.db` is built 
 - Of a character's several readings (樂: 락, 낙, 악, 요), the one that is also a Hangul headword is kept.
 - `build` fills in the readings of an existing `search.db` too.
 - hanja_hangul's word tables are CC BY-SA 2.0 KR (derived from the National Institute of Korean Language's dictionaries). Only `dict-admin` uses it (yomitan-parser's `hangul-readings` feature), not the app.
+
+## `remove` and `list`
+
+- `remove <name>` takes a dictionary out of `dicts.json` and deletes its zip. Run `build` and `upload` to publish that.
+- `list` shows each dictionary:
+  - its source and target languages (L1, L2): as built, or as `dicts.json` sets them before a build; `*` marks those set in `dicts.json`;
+  - its zip's size;
+  - its terms and characters, or `not built`;
+  - where it came from.
 
 ## `size`
 
