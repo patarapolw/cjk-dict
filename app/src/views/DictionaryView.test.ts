@@ -113,43 +113,50 @@ describe("DictionaryView", () => {
     wrapper.unmount();
   });
 
-  it("searches copied text in the normal mode, not by reading or token search", async () => {
-    mockIPC((cmd, args) => {
-      if (cmd === "search") {
-        searches.push((args as { req: Record<string, unknown> }).req);
-        return { items: [], next: null };
-      }
-      if (cmd === "read_clipboard_text") return "日本語";
-      if (cmd === "segment") return [];
-      if (cmd === "dicts") return dicts;
-      throw new Error(`unexpected command: ${cmd}`);
-    });
-    const wrapper = await mountView();
-    const ftsButton = wrapper
-      .findAll("button")
-      .find((b) => describedText(b.element).startsWith("Token search"))!;
-    await ftsButton.trigger("click");
-    await readingButton(wrapper).trigger("click");
-    expect(ftsButton.attributes("aria-pressed")).toBe("true");
+  it.each([
+    ["Token search", "~"],
+    ["Exact match", "="],
+  ])(
+    "searches copied text in the normal mode, not by reading or %s",
+    async (mode) => {
+      mockIPC((cmd, args) => {
+        if (cmd === "search") {
+          searches.push((args as { req: Record<string, unknown> }).req);
+          return { items: [], next: null };
+        }
+        if (cmd === "read_clipboard_text") return "日本語";
+        if (cmd === "segment") return [];
+        if (cmd === "dicts") return dicts;
+        throw new Error(`unexpected command: ${cmd}`);
+      });
+      const wrapper = await mountView();
+      const modeButton = wrapper
+        .findAll("button")
+        .find((b) => describedText(b.element).startsWith(mode))!;
+      await modeButton.trigger("click");
+      await readingButton(wrapper).trigger("click");
+      expect(modeButton.attributes("aria-pressed")).toBe("true");
 
-    await wrapper.get("input[name=clipboard]").setValue(true);
-    await vi.waitFor(
-      () =>
-        expect(
-          (wrapper.get("input.search-input").element as HTMLInputElement).value,
-        ).toBe("日本語"),
-      { timeout: 3000 },
-    );
-    expect(ftsButton.attributes("aria-pressed")).toBe("false");
-    expect(readingButton(wrapper).attributes("aria-pressed")).toBe("false");
-    expect(await lastSearch()).toMatchObject({
-      term: "日本語",
-      reading: "",
-      type: null,
-    });
-    await wrapper.get("input[name=clipboard]").setValue(false);
-    wrapper.unmount();
-  });
+      await wrapper.get("input[name=clipboard]").setValue(true);
+      await vi.waitFor(
+        () =>
+          expect(
+            (wrapper.get("input.search-input").element as HTMLInputElement)
+              .value,
+          ).toBe("日本語"),
+        { timeout: 3000 },
+      );
+      expect(modeButton.attributes("aria-pressed")).toBe("false");
+      expect(readingButton(wrapper).attributes("aria-pressed")).toBe("false");
+      expect(await lastSearch()).toMatchObject({
+        term: "日本語",
+        reading: "",
+        type: null,
+      });
+      await wrapper.get("input[name=clipboard]").setValue(false);
+      wrapper.unmount();
+    },
+  );
 
   it("lets furigana syntax typed by hand win over the {} toggle", async () => {
     const wrapper = await mountView();
