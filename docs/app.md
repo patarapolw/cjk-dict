@@ -15,14 +15,15 @@ How the app gets the library and shows entries. The [README](../README.md#app) h
   - [HanaMinAFDKO](https://github.com/cjkvi/HanaMinAFDKO) 8.030 (Hanazono Mincho, [GlyphWiki license](https://glyphwiki.org/wiki/GlyphWiki:License)), as the [CJKVI IDS](https://github.com/cjkvi/cjkvi-ids#description) data recommends;
   - three files to `fonts/` in the app data folder, \~77 MB:
 
-| File           | Size    | Covers                                                                                               |
-| -------------- | ------- | ---------------------------------------------------------------------------------------------------- |
-| `HanaMinA.otf` | 31.6 MB | the main CJK block, Extension A, compatibility ideographs, radicals, strokes, Hangzhou numerals (〢) |
-| `HanaMinB.otf` | 32.2 MB | Extension B (𠀀)                                                                                     |
-| `HanaMinC.otf` | 13.0 MB | Extensions C to F (𬄋), the compatibility supplement                                                 |
+| File           | Size    | Covers                                                                                                                             |
+| -------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `HanaMinA.otf` | 31.6 MB | Extension A, the main CJK block's additions after U+9FA5 (鿐), compatibility ideographs, radicals, strokes, Hangzhou numerals (〢) |
+| `HanaMinB.otf` | 32.2 MB | Extension B (𠀀)                                                                                                                   |
+| `HanaMinC.otf` | 13.0 MB | Extensions C to F (𬄋), the compatibility supplement                                                                               |
 
 - The fonts come after the system's own (`font-family: sans-serif, "HanaMin"`):
-  - they only draw what the system's fonts lack, so other characters keep their language's forms;
+  - a listed font is tried before the system's own fallback: where the first font has no Han characters (e.g. Segoe UI, with no CJK `lang`), HanaMin would draw every one, in a serif style;
+  - so they leave out what every system CJK font has, the main CJK block up to U+9FA5 and 々〆〇: those keep the system's sans-serif fonts and their language's forms;
   - each file is read only for the characters it covers (`unicode-range`), and only once one is shown;
   - each is used as soon as it's downloaded, without a restart.
 - They cover every character the IDS data uses: it goes up to Extension F, as the fonts do. Characters of later extensions (G and up) in a dictionary are drawn only if the system has a font for them.
