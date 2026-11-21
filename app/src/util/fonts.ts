@@ -9,8 +9,11 @@ import { DownloadingProps } from "./loading";
  * Hanazono Mincho, here as HanaMinAFDKO (GlyphWiki license), downloaded on first launch
  * to `<app data>/fonts/` and served by the `font://` protocol (src-tauri/src/fonts.rs).
  *
- * They come after the system's fonts (`font-family` in index.css), so they only draw
- * what those don't have, and each file is only read for the ranges it covers.
+ * They come after the system's fonts (`font-family` in index.css), and each file is only
+ * read for the ranges it covers. A listed font is tried before the system's own fallback,
+ * so a Han character the first font lacks (Segoe UI, Roboto: all of them, with no CJK
+ * `lang`) would be drawn in HanaMin, not the system's CJK font. So the ranges leave out
+ * what every system CJK font has: the URO up to U+9FA5 (Unicode 1.1) and 々〆〇.
  *
  * @see https://github.com/cjkvi/cjkvi-ids#description
  * @see https://github.com/cjkvi/HanaMinAFDKO
@@ -32,10 +35,10 @@ export const HAN_FONTS: HanFont[] = [
     file: "HanaMinA.otf",
     unicodeRange: [
       "U+2E80-2FDF", // radicals
-      "U+3005-3007, U+3021-3029, U+3038-303B", // 々〆〇, Hangzhou numerals (〢 in IDS)
+      "U+3021-3029, U+3038-303B", // Hangzhou numerals (〢 in IDS)
       "U+31C0-31EF", // strokes
       "U+3400-4DBF", // Extension A
-      "U+4E00-9FFF",
+      "U+9FA6-9FFF", // the URO's later additions
       "U+F900-FAFF", // compatibility ideographs
     ].join(", "),
   },

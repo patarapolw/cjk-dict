@@ -53,6 +53,18 @@ describe("fonts", () => {
     expect(css).toContain('src: url("font://localhost/HanaMinC.otf")');
     // 〢 U+3022, a component in IDS, is in HanaMinA
     expect(HAN_FONTS[0].unicodeRange).toContain("U+3021-3029");
+    // common characters are left to the system's CJK fonts, in a sans-serif style
+    const covered = (cp: number) =>
+      HAN_FONTS.some((f) =>
+        f.unicodeRange.split(",").some((r) => {
+          const [a, b = a] = r.trim().slice(2).split("-");
+          return parseInt(a, 16) <= cp && cp <= parseInt(b, 16);
+        }),
+      );
+    for (const ch of "学學々〇")
+      expect(covered(ch.codePointAt(0)!)).toBe(false);
+    // 鿐 U+9FD0 (Unicode 9) and 㐀 U+3400 (Extension A) are
+    for (const ch of "鿐㐀") expect(covered(ch.codePointAt(0)!)).toBe(true);
     // 𬄋 U+2C10B (Extension E) is in HanaMinC
     expect(
       HAN_FONTS.find((f) => f.file === "HanaMinC.otf")?.unicodeRange,
