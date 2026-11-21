@@ -120,6 +120,7 @@ Optional, below the search box:
   - `<食>{たb}べる` is `<食>{た[っばびぶべぼ]}べる`.
 - **Get reading from IME**: a Japanese IME's reading is kept as `<漢字>{かんじ}` when you convert.
 - **Clipboard monitor**: checks the clipboard every second, and searches copied text that starts with Chinese, Japanese or Korean.
+  - It searches in the normal mode: it turns off `~`, `=` and `{}`.
 
 ## Choosing dictionaries
 

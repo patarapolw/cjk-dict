@@ -821,7 +821,9 @@ function toggleClipboardMonitor() {
       if (clipboardText.value === newText) return;
 
       clipboardText.value = newText;
-      readingMode.value = false; // copied text is a term, not a reading
+      // copied text is a term: search it in the normal mode, not by reading, ~ or =
+      readingMode.value = false;
+      qState.value = null;
       q.value = newText;
     }, 1000);
   }
