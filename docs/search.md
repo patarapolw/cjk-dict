@@ -121,6 +121,9 @@ Optional, below the search box:
 - **Get reading from IME**: a Japanese IME's reading is kept as `<漢字>{かんじ}` when you convert.
 - **Clipboard monitor**: checks the clipboard every second, and searches copied text that starts with Chinese, Japanese or Korean.
   - It searches in the normal mode: it turns off `~`, `=` and `{}`.
+  - It stays on when you go to Characters and back to Words, until the app closes.
+    - It doesn't check the clipboard while Characters is shown.
+    - Back in Words, it doesn't search again the text it last searched, only a new copy.
 
 ## Choosing dictionaries
 

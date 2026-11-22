@@ -3,6 +3,7 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryHistory, createRouter } from "vue-router";
 
+import { clipboardMonitorOn, lastClipboardText } from "../util/clipboard";
 import { type IDictInfo, excludedDicts } from "../util/dicts";
 import { lang } from "../util/settings";
 import DictionaryView from "./DictionaryView.vue";
@@ -39,6 +40,8 @@ afterEach(() => {
   lang.value = "";
   excludedDicts.value = [];
   touchScreen.value = false;
+  clipboardMonitorOn.value = false;
+  lastClipboardText.value = "";
 });
 
 async function mountView() {
@@ -157,6 +160,44 @@ describe("DictionaryView", () => {
       wrapper.unmount();
     },
   );
+
+  it("keeps the clipboard monitor on after the view is left and shown again", async () => {
+    let clip = "日本語";
+    mockIPC((cmd, args) => {
+      if (cmd === "search") {
+        searches.push((args as { req: Record<string, unknown> }).req);
+        return { items: [], next: null };
+      }
+      if (cmd === "read_clipboard_text") return clip;
+      if (cmd === "segment") return [];
+      if (cmd === "dicts") return dicts;
+      throw new Error(`unexpected command: ${cmd}`);
+    });
+    const searchInput = (w: Awaited<ReturnType<typeof mountView>>) =>
+      w.get("input.search-input").element as HTMLInputElement;
+
+    let wrapper = await mountView();
+    await wrapper.get("input[name=clipboard]").setValue(true);
+    await vi.waitFor(() => expect(searchInput(wrapper).value).toBe("日本語"), {
+      timeout: 3000,
+    });
+    wrapper.unmount(); // e.g. to the Characters view
+
+    wrapper = await mountView();
+    const box = wrapper.get("input[name=clipboard]")
+      .element as HTMLInputElement;
+    expect(box.checked).toBe(true);
+    // the clip already searched isn't searched again over the view's own search
+    await wrapper.get("input.search-input").setValue("中国");
+    await new Promise((r) => setTimeout(r, 1500));
+    expect(searchInput(wrapper).value).toBe("中国");
+    // but a new clip is
+    clip = "한국어";
+    await vi.waitFor(() => expect(searchInput(wrapper).value).toBe("한국어"), {
+      timeout: 3000,
+    });
+    wrapper.unmount();
+  });
 
   it("lets furigana syntax typed by hand win over the {} toggle", async () => {
     const wrapper = await mountView();

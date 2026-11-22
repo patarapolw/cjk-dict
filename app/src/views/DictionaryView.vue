@@ -137,7 +137,11 @@
         </label>
 
         <label>
-          <input type="checkbox" name="clipboard" v-model="clipboardMonitor" />
+          <input
+            type="checkbox"
+            name="clipboard"
+            v-model="clipboardMonitorOn"
+          />
           <span>Clipboard monitor</span>
         </label>
 
@@ -292,6 +296,7 @@ import { toKana } from "wanakana";
 import { useRoute, useRouter } from "vue-router";
 import Term from "../components/yomitan/Term.vue";
 import { ISearchTerm, ITerm, searchDB } from "../db/search";
+import { clipboardMonitorOn, lastClipboardText } from "../util/clipboard";
 import {
   isImeReading,
   isRomanization,
@@ -439,8 +444,8 @@ watch(dictsVersion, () => loadDicts());
 const loading = ref(false);
 const nextOffset = ref<number | null>(0);
 
-const clipboardInterval = ref(0);
-const clipboardText = ref("");
+/** the monitor's timer while this view is shown; 0 when off */
+let clipboardInterval = 0;
 
 const elScroller = useTemplateRef("scroller");
 const elSearchInput = useTemplateRef("searchInput");
@@ -786,48 +791,46 @@ async function onAnchorClicked(href: string) {
   await searchFor(query, "exact");
 }
 
-// A checkbox click must not be preventDefault()ed: the browser then reverts the
-// box after Vue has already re-rendered it, so it never shows as toggled.
-const clipboardMonitor = computed({
-  get: () => clipboardInterval.value !== 0,
-  set: (on) => {
-    if (on !== (clipboardInterval.value !== 0)) toggleClipboardMonitor();
-  },
-});
-
-function toggleClipboardMonitor() {
-  if (clipboardInterval.value) {
-    clearInterval(clipboardInterval.value);
-    clipboardInterval.value = 0;
-  } else {
-    clipboardInterval.value = setInterval(async () => {
-      let newText: string;
-      try {
-        // also converts HTML clips to text (on Android, the clipboard plugin rejects them)
-        newText =
-          (await invoke<string | null>("read_clipboard_text"))?.trim() ?? "";
-      } catch {
-        return;
-      }
-      if (!newText) return; // clipboard is empty or holds something other than text
-      if (
-        !/[\p{sc=Han}\p{scx=Hiragana}\p{scx=Katakana}\p{sc=Hangul}]/u.test(
-          newText.slice(0, 10),
-        )
-      ) {
-        return;
-      }
-
-      if (clipboardText.value === newText) return;
-
-      clipboardText.value = newText;
-      // copied text is a term: search it in the normal mode, not by reading, ~ or =
-      readingMode.value = false;
-      qState.value = null;
-      q.value = newText;
-    }, 1000);
-  }
+function stopClipboardMonitor() {
+  clearInterval(clipboardInterval);
+  clipboardInterval = 0;
 }
+
+function startClipboardMonitor() {
+  if (clipboardInterval) return;
+  clipboardInterval = setInterval(async () => {
+    let newText: string;
+    try {
+      // also converts HTML clips to text (on Android, the clipboard plugin rejects them)
+      newText =
+        (await invoke<string | null>("read_clipboard_text"))?.trim() ?? "";
+    } catch {
+      return;
+    }
+    if (!newText) return; // clipboard is empty or holds something other than text
+    if (
+      !/[\p{sc=Han}\p{scx=Hiragana}\p{scx=Katakana}\p{sc=Hangul}]/u.test(
+        newText.slice(0, 10),
+      )
+    ) {
+      return;
+    }
+
+    if (lastClipboardText.value === newText) return;
+
+    lastClipboardText.value = newText;
+    // copied text is a term: search it in the normal mode, not by reading, ~ or =
+    readingMode.value = false;
+    qState.value = null;
+    q.value = newText;
+  }, 1000);
+}
+
+// The setting outlives this view (see clipboardMonitorOn); the timer runs only while
+// the view is shown.
+watch(clipboardMonitorOn, (on) =>
+  on ? startClipboardMonitor() : stopClipboardMonitor(),
+);
 
 const routerListener = ref<() => void>();
 
@@ -837,6 +840,7 @@ let resizeObserver: ResizeObserver | undefined;
 onMounted(() => {
   loadFromRouteQuery();
   loadDicts();
+  if (clipboardMonitorOn.value) startClipboardMonitor();
 
   if (typeof ResizeObserver !== "undefined" && elScroller.value) {
     resizeObserver = new ResizeObserver(() => onScroll());
@@ -858,10 +862,7 @@ onBeforeUnmount(() => {
   resizeObserver?.disconnect();
   window.removeEventListener("scroll", onScroll, { capture: true });
   window.removeEventListener("resize", onScroll);
-  if (clipboardInterval.value) {
-    clearInterval(clipboardInterval.value);
-    clipboardInterval.value = 0;
-  }
+  stopClipboardMonitor();
 
   routerListener.value?.();
 });
