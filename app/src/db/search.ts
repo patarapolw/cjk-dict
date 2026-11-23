@@ -1,5 +1,6 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 
+import { IPitchEntry } from "../util/pitch";
 import { lang as langSetting } from "../util/settings";
 
 /**
@@ -33,6 +34,11 @@ export interface ISearchTerm {
   term: string;
   /** space-padded; for Korean, generated from Hanja (光速: ` 광속 `) */
   reading: string;
+  /**
+   * the pitch accent dictionaries' entries for its entries' terms and readings, as Yomitan
+   * finds them: the same term and reading (the term, for an entry without one)
+   */
+  pitches?: IPitchEntry[];
 }
 
 export interface ITerm {

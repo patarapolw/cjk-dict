@@ -402,6 +402,84 @@ describe("DictionaryView", () => {
     ).toBe("zh");
     wrapper.unmount();
   });
+  it("shows a word's pitch accents", async () => {
+    mockIPC((cmd, args) => {
+      if (cmd === "dict_styles") return null;
+      if (cmd === "dicts") return [];
+      if (cmd !== "search") throw new Error(`unexpected command: ${cmd}`);
+      searches.push((args as { req: Record<string, unknown> }).req);
+      const entry = {
+        dict_id: 1,
+        dict_path: "MyDict",
+        lang: "ja-JP",
+        target_lang: "en",
+        term_id: 1,
+        term: "橋",
+        reading: "はし",
+        def_tags: "",
+        rules: "",
+        score: 0,
+        glossary: JSON.stringify(["bridge"]),
+        sequence: null,
+        tags: "",
+      };
+      const pitches = [
+        {
+          dict_id: 2,
+          dict_path: "Kanjium",
+          term: "橋",
+          reading: "はし",
+          pitches: [{ position: 2 }, { position: 0, tags: ["名"] }],
+          tag_meta: {
+            名: { category: "partOfSpeech", order: 0, notes: "noun" },
+          },
+        },
+      ];
+      return {
+        items: [
+          { id: 1, term: "橋", reading: " はし ", entries: [entry], pitches },
+        ],
+        next: null,
+      };
+    });
+    const wrapper = await mountView();
+    await wrapper.get("input.search-input").setValue("橋");
+    await lastSearch();
+    await flushPromises();
+    const shown = wrapper.findAll(".pronunciation").map((p) => ({
+      high: p
+        .findAll('.pronunciation-mora[data-pitch="high"]')
+        .map((m) => m.text()),
+      drop: p
+        .findAll('.pronunciation-mora[data-pitch-next="low"]')
+        .map((m) => m.text()),
+      text: p.text(),
+    }));
+    expect(shown).toEqual([
+      // odaka: drops after し
+      { high: ["し"], drop: ["し"], text: "はし[2]" },
+      { high: ["し"], drop: [], text: "名はし[0]" },
+    ]);
+    // the dictionary first, as in Yomitan
+    expect(
+      wrapper
+        .get(
+          '.pronunciation-group .tag[data-category="pronunciation-dictionary"]',
+        )
+        .text(),
+    ).toBe("Kanjium");
+    // the tag, with what the tag bank says
+    const tag = wrapper.get(
+      '.pronunciation .tag[data-category="partOfSpeech"]',
+    );
+    expect(describedText(tag.element)).toBe("noun");
+    // the headword's patterns, for custom CSS, as Yomitan puts them
+    expect(
+      wrapper.get(".headword").attributes("data-pronunciation-categories"),
+    ).toBe("odaka heiban");
+    wrapper.unmount();
+  });
+
   it("leaves out the dictionaries unticked, and remembers them", async () => {
     // listed without a language first: MyDict, then A
     dicts = [dict("A", "ja-JP"), dict("MyDict", null)];

@@ -1,7 +1,8 @@
 //! Default dictionaries (ported from cjk-explainer's old `src/util/dicts.ts`).
 //!
 //! GitHub sources resolve to the matching asset of the repo's latest release;
-//! the wty dictionaries have fixed URLs. KANJIDIC comes as JSON, which `add` converts.
+//! the wty dictionaries and Kanjium have fixed URLs. KANJIDIC comes as JSON and Kanjium as
+//! a text file, which `add` converts.
 
 use anyhow::{Context, Result, bail};
 use regex::Regex;
@@ -87,6 +88,12 @@ const GITHUB: &[(&str, &[GhSource])] = &[
     ),
 ];
 
+/// Sources with a fixed URL: (name, source language, target language, URL)
+const FIXED: &[(&str, Option<&str>, Option<&str>, &str)] = &[
+    // Kanjium's pitch accents (accents.txt; the repo has no releases), which `add` converts
+    ("Kanjium", Some("ja-JP"), None, crate::kanjium::URL),
+];
+
 /// wty (Wiktionary) dictionaries, L1 -> English. Chinese is `zh`: Wiktionary has both
 /// scripts, and more than Mandarin of the mainland.
 const WTY_LANGS: &[&str] = &["ja-JP", "ko-KR", "zh"];
@@ -105,6 +112,7 @@ pub fn langs() -> Vec<(&'static str, Option<&'static str>, Option<&'static str>)
         .iter()
         .flat_map(|(_, srcs)| srcs.iter().map(|s| (s.name, s.lang, s.target_lang)))
         .collect();
+    out.extend(FIXED.iter().map(|&(n, l, t, _)| (n, l, t)));
     out.extend(WTY_LANGS.iter().map(|&l| (wty_name(l), Some(l), None)));
     out
 }
@@ -115,6 +123,7 @@ pub fn names() -> Vec<&'static str> {
         .iter()
         .flat_map(|(_, srcs)| srcs.iter().map(|s| s.name))
         .collect();
+    out.extend(FIXED.iter().map(|&(n, ..)| n));
     out.extend(WTY_LANGS.iter().map(|l| wty_name(l)));
     out
 }
@@ -204,6 +213,17 @@ pub fn resolve(only: &[String]) -> Result<Vec<DefaultDict>> {
         }
     }
 
+    for &(name, lang, target_lang, url) in FIXED {
+        if wanted(name) {
+            out.push(DefaultDict {
+                name,
+                lang,
+                target_lang,
+                url: url.to_string(),
+            });
+        }
+    }
+
     for lang in WTY_LANGS {
         let name = wty_name(lang);
         if !wanted(name) {
@@ -277,6 +297,9 @@ mod tests {
         assert_eq!(r[0].lang, Some("zh"));
         assert!(r[0].url.ends_with("/dict/zh/en/wty-zh-en.zip"));
         assert!(resolve(&["Nope".to_string()]).is_err());
-        assert_eq!(names().len(), 10);
+        let r = resolve(&["Kanjium".to_string()]).unwrap();
+        assert_eq!(r[0].lang, Some("ja-JP"));
+        assert!(r[0].url.ends_with("/accents.txt"));
+        assert_eq!(names().len(), 11);
     }
 }

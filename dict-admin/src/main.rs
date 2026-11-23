@@ -10,6 +10,7 @@ mod defaults;
 mod download;
 mod ids;
 mod kanjidic;
+mod kanjium;
 mod library;
 mod lindera;
 
@@ -23,7 +24,8 @@ use std::{
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use yomitan_parser::{
-    parser::{self, BankKind, YomitanZip},
+    error::YomitanError,
+    parser::{self, BankEntries, BankKind, YomitanZip},
     search::{self, DictSource, lang_tag, parse_lang},
     tokenize::TokenizerMapper,
 };
@@ -63,7 +65,8 @@ enum Cmd {
     },
 
     /// Add a Yomitan dictionary zip (local path or http(s) URL) to the library. KANJIDIC2
-    /// JSON from jmdict-simplified (or a zip of it) is converted to one.
+    /// JSON from jmdict-simplified (or a zip of it), and Kanjium's accents.txt, are
+    /// converted to one.
     Add {
         source: String,
 
@@ -380,16 +383,27 @@ fn add(
             }
         }
     }
+    // Kanjium's accents.txt: converted to a Yomitan dictionary of pitch accents
+    if kanjium::is_kanjium(&tmp) {
+        let converted = lib.dir.join(format!(".{name}.zip.converted"));
+        let done = kanjium::convert(&tmp, &converted)
+            .and_then(|n| Ok(std::fs::rename(&converted, &tmp).map(|_| n)?));
+        match done {
+            Ok(n) => eprintln!("converted Kanjium's accents.txt: {n} words"),
+            Err(e) => {
+                let _ = std::fs::remove_file(&converted);
+                let _ = std::fs::remove_file(&tmp);
+                return Err(e);
+            }
+        }
+    }
     let index = YomitanZip::open(&tmp)
-        .and_then(|mut z| Ok((z.index()?, z.banks())))
+        .and_then(|mut z| Ok((z.index()?, has_entries(&mut z)?)))
         .with_context(|| format!("{source} is not a Yomitan dictionary zip"))
-        .and_then(|(index, banks)| {
+        .and_then(|(index, has_entries)| {
             // e.g. a release whose conversion failed, with only index.json and tags
-            if !banks
-                .iter()
-                .any(|b| matches!(b.kind, BankKind::Term | BankKind::Kanji))
-            {
-                bail!("{source} has no term or kanji entries");
+            if !has_entries {
+                bail!("{source} has no term, kanji or pitch accent entries");
             }
             Ok(index)
         });
@@ -423,6 +437,26 @@ fn add(
     lib.save_dicts(&dicts)?;
     eprintln!("added {name}: {} ({})", index.title, index.revision);
     Ok(())
+}
+
+/// Whether the zip has entries search.db indexes: terms, kanji, or pitch accents (in term
+/// meta banks, which may also have only frequencies, which it doesn't index)
+fn has_entries(z: &mut YomitanZip) -> Result<bool, YomitanError> {
+    let banks = z.banks();
+    if banks
+        .iter()
+        .any(|b| matches!(b.kind, BankKind::Term | BankKind::Kanji))
+    {
+        return Ok(true);
+    }
+    for b in banks.iter().filter(|b| b.kind == BankKind::TermMeta) {
+        if let BankEntries::TermMeta(rows) = z.read_bank(b)?
+            && rows.iter().any(|r| r.r#type == "pitch")
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Re-split the zip's term banks into small ones (in place), so the app inflates little to
@@ -587,6 +621,7 @@ async fn build(lib: &Library, lindera_dir: &Path, ids_dir: &Path, rebuild: bool)
         .collect();
     // from search.db: dictionaries indexed in an earlier build count too
     let char_counts = search::char_counts(&db)?;
+    let pitch_counts = search::pitch_counts(&db)?;
     // also from search.db: manifests from before had no target language
     let dict_langs = search::dict_langs(&db)?;
     let mut out = vec![];
@@ -625,6 +660,7 @@ async fn build(lib: &Library, lindera_dir: &Path, ids_dir: &Path, rebuild: bool)
             target_lang,
             term_count,
             char_count: char_counts.get(&d.name).copied().unwrap_or(0),
+            pitch_count: pitch_counts.get(&d.name).copied().unwrap_or(0),
             file,
         });
     }
@@ -813,6 +849,7 @@ mod tests {
             target_lang: None,
             term_count: 0,
             char_count: 0,
+            pitch_count: 0,
             file: FileInfo {
                 file: format!("{name}.zip"),
                 size,
@@ -830,6 +867,11 @@ mod tests {
         assert_eq!(d.counts(), "528000 terms, 10384 characters");
         d.term_count = 0;
         assert_eq!(d.counts(), "10384 characters");
+        d.char_count = 0;
+        d.pitch_count = 124134;
+        assert_eq!(d.counts(), "124134 pitch accents");
+        d.pitch_count = 0;
+        assert_eq!(d.counts(), "0 terms");
         // manifests from before char_count
         let old: ManifestDict = serde_json::from_str(
             r#"{"name":"x","title":"x","revision":"1","lang":null,"term_count":5,"file":"x.zip","size":1,"sha256":""}"#,

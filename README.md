@@ -53,7 +53,7 @@ library/
   <name>.zip      Yomitan zips, rebanked (default + custom dictionaries)
   dicts.json      [{ name, lang?, target_lang?, source? }]: build order and language overrides
   search.db       written by `build`: terms, tokens, readings, tags, and where each entry is in its zip;
-                  character decomposition, and where each kanji entry is
+                  character decomposition, and where each kanji entry is; pitch accents
   manifest.json   written by `build`: file sizes and sha256; the app compares these to download only what changed
 ```
 
@@ -186,4 +186,5 @@ How the app downloads and searches the library: [docs/app.md](docs/app.md), [doc
   - [lindera](https://github.com/lindera/lindera)'s tokenizer dictionaries, downloaded from its releases;
   - [hanja_hangul](https://crates.io/crates/hanja_hangul)'s word tables, which `dict-admin` includes;
   - [libhangul](https://github.com/libhangul/libhangul)'s Hanja readings (BSD-3-Clause), which `dict-admin` includes;
-  - the [CJKVI IDS database](https://github.com/cjkvi/cjkvi-ids)'s `ids.txt` (derived from the CHISE project, GPLv2), which `search.db` includes.
+  - the [CJKVI IDS database](https://github.com/cjkvi/cjkvi-ids)'s `ids.txt` (derived from the CHISE project, GPLv2), which `search.db` includes;
+  - pitch accent dictionaries' entries, e.g. [Kanjium](https://github.com/mifunetoshiro/kanjium)'s (CC BY-SA 4.0), which `search.db` includes.
