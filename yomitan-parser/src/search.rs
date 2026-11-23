@@ -116,20 +116,35 @@ CREATE TABLE IF NOT EXISTS kanji_link (
 ) WITHOUT ROWID;
 "#;
 
-/// Pitch accents (Yomitan term meta of mode `pitch`, e.g. Kanjium's), whole, so a search
-/// shows them with the words without reading the zips. Kept compact, as the app downloads
-/// search.db ([`pack_pitches`]). Created on an existing search.db too, which an update then
-/// backfills.
+/// Pitch accents (Yomitan term meta of mode `pitch`, e.g. Kanjium's), every entry whole, so
+/// a search shows them with the words without reading the zips. As in Yomitan, an entry is
+/// found by its term and reading exactly as the dictionary has them. Kept compact, as the
+/// app downloads search.db ([`pack_pitches`]). Created on an existing search.db too, which
+/// an update then backfills.
 const PITCH_SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS term_pitch (
-  term        TEXT NOT NULL,            -- as term_search.term ([`normalize_term`])
-  reading     TEXT NOT NULL,            -- normalized alike, without term_search's spaces
+  term        TEXT NOT NULL,            -- as the dictionary has it
   dict_id     INTEGER NOT NULL,
-  shown       TEXT,                     -- the reading as the dictionary has it, if not `reading`
+  n           INTEGER NOT NULL,         -- the entry's place in the dictionary
+  reading     TEXT NOT NULL,            -- as the dictionary has it
   pitches     TEXT NOT NULL,            -- downsteps, e.g. 0,2; else the JSON array
-  PRIMARY KEY (term, reading, dict_id)
+  PRIMARY KEY (term, dict_id, n)
 ) WITHOUT ROWID;
 "#;
+
+/// Whether `term_pitch` is there and as [`PITCH_SCHEMA`] has it: an earlier version keyed it
+/// by normalized terms, one entry per term and reading
+fn has_term_pitch(conn: &Connection) -> rusqlite::Result<bool> {
+    Ok(has_table(conn, "term_pitch")?
+        && conn
+            .query_row(
+                "SELECT 1 FROM pragma_table_info('term_pitch') WHERE name = 'n'",
+                [],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some())
+}
 
 /// A pitch entry's `pitches` as `term_pitch` stores them: `0,2` when they are downsteps and
 /// nothing more (most are), else the JSON array as is
@@ -311,6 +326,8 @@ pub struct DictInfo {
     pub lang: Option<String>,
     pub target_lang: Option<String>,
     pub term_count: usize,
+    /// pitch accent entries (Yomitan term meta of mode `pitch`)
+    pub pitch_count: usize,
 }
 
 /// The tag a dictionary's source language is stored as: `ja`/`ko` become `ja-JP`/`ko-KR`,
@@ -380,7 +397,10 @@ async fn build_inner(
     conn.execute_batch(ROMAN_SCHEMA)?;
     let backfill_kanji = has_existing && !has_table(&conn, "kanji_link")?;
     conn.execute_batch(KANJI_SCHEMA)?;
-    let backfill_pitch = has_existing && !has_table(&conn, "term_pitch")?;
+    let backfill_pitch = has_existing && !has_term_pitch(&conn)?;
+    if backfill_pitch {
+        conn.execute_batch("DROP TABLE IF EXISTS term_pitch")?;
+    }
     conn.execute_batch(PITCH_SCHEMA)?;
     let kana_folded = !has_existing || meta(&conn, "kana")?.is_some();
     conn.execute_batch(META_SCHEMA)?;
@@ -620,6 +640,7 @@ async fn build_inner(
             lang: l1,
             target_lang,
             term_count: count,
+            pitch_count,
         });
     }
 
@@ -686,7 +707,7 @@ fn index_pitch(
         .filter(|b| b.kind == BankKind::TermMeta)
         .collect();
     let mut ins = tx.prepare(
-        "INSERT OR IGNORE INTO term_pitch (term, reading, dict_id, shown, pitches) VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT INTO term_pitch (term, dict_id, n, reading, pitches) VALUES (?1, ?2, ?3, ?4, ?5)",
     )?;
     let mut count = 0;
     for bank in banks {
@@ -695,32 +716,26 @@ fn index_pitch(
             if row.get(1).and_then(Value::as_str) != Some("pitch") {
                 continue;
             }
-            let term = row.get(0).and_then(Value::as_str).unwrap_or("").trim();
+            let term = row.get(0).and_then(Value::as_str).unwrap_or("");
             let Some(data) = row.get(2) else { continue };
-            let shown = data
-                .get("reading")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .trim();
+            let reading = data.get("reading").and_then(Value::as_str).unwrap_or("");
             let Some(pitches) = data
                 .get("pitches")
                 .filter(|p| p.as_array().is_some_and(|a| !a.is_empty()))
             else {
                 continue;
             };
-            if term.is_empty() || shown.is_empty() {
+            if term.is_empty() || reading.is_empty() {
                 continue;
             }
-            let term = normalize_term(term);
-            let reading = normalize_term(shown).trim().to_string();
-            let shown = (shown != reading).then_some(shown);
-            count += ins.execute(params![
+            ins.execute(params![
                 term,
-                reading,
                 dict_id,
-                shown,
+                count as i64,
+                reading,
                 pack_pitches(pitches)
             ])?;
+            count += 1;
         }
     }
     Ok(count)
@@ -729,7 +744,7 @@ fn index_pitch(
 /// Words with pitch accents indexed per dictionary name, from `term_pitch`
 pub fn pitch_counts(db: &Path) -> Result<HashMap<String, usize>, YomitanError> {
     let conn = Connection::open_with_flags(db, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-    if !has_table(&conn, "term_pitch")? {
+    if !has_term_pitch(&conn)? {
         return Ok(HashMap::new());
     }
     let mut st = conn.prepare(
@@ -1639,8 +1654,8 @@ pub struct SearchItem {
     pub score: Option<i64>,
     pub tags: Option<String>,
     pub entries: Vec<TermEntryOut>,
-    /// the pitch accent dictionaries' entries for the term and its reading (all its readings
-    /// if it has none)
+    /// the pitch accent dictionaries' entries for its entries' terms and readings, as
+    /// Yomitan finds them: the same term, and the same reading (the term if it has none)
     pub pitches: Vec<PitchOut>,
 }
 
@@ -1650,11 +1665,13 @@ pub struct PitchOut {
     pub dict_id: i64,
     /// dictionary name
     pub dict_path: String,
-    /// the reading, as the dictionary has it
+    pub term: String,
     pub reading: String,
     /// `{position, nasal?, devoice?, tags?}` each: `position` is the mora after which the
     /// pitch drops (0: it doesn't), or a pattern of H and L
     pub pitches: Value,
+    /// what the dictionary's tag banks say about the pitches' tags
+    pub tag_meta: HashMap<String, TagMeta>,
 }
 
 /// One dictionary entry, read from the zip (same shape the Vue components render).
@@ -2012,7 +2029,7 @@ impl SearchDb {
         let kana_folded = meta(&conn, "kana")?.is_some();
         let has_term_char = meta(&conn, "term_char")?.is_some();
         let has_kanji = has_table(&conn, "kanji_link")?;
-        let has_pitch = has_table(&conn, "term_pitch")?;
+        let has_pitch = has_term_pitch(&conn)?;
         let has_han = has_table(&conn, "han_char")?;
         Ok(Self {
             has_roman,
@@ -2412,30 +2429,46 @@ impl SearchDb {
         self.add_pitches(items, excluded)
     }
 
-    /// Each item's pitch accents, from `term_pitch`: those of its reading, or of every
-    /// reading if it has none.
+    /// Each item's pitch accents, from `term_pitch`, as Yomitan finds them: an entry of the
+    /// same term and reading as one of the item's entries, whose reading is the term if it
+    /// has none.
     fn add_pitches(&self, items: &mut [SearchItem], excluded: &[i64]) -> Result<(), YomitanError> {
         if !self.has_pitch || items.is_empty() {
             return Ok(());
         }
-        let mut terms: Vec<&str> = items.iter().map(|i| i.term.as_str()).collect();
+        /// an entry's term and reading
+        fn headword(e: &TermEntryOut) -> (&str, &str) {
+            let reading = if e.reading.is_empty() {
+                &e.term
+            } else {
+                &e.reading
+            };
+            (&e.term, reading)
+        }
+        let mut terms: Vec<String> = items
+            .iter()
+            .flat_map(|i| i.entries.iter().map(|e| e.term.clone()))
+            .collect();
         terms.sort_unstable();
         terms.dedup();
-        /// term, reading, dict_id, shown, pitches
-        type Row = (String, String, i64, Option<String>, String);
+        if terms.is_empty() {
+            return Ok(());
+        }
+        /// term, dict_id, reading, pitches
+        type Row = (String, i64, String, String);
         let rows: Vec<Row> = {
             let conn = self.conn.lock()?;
             let sql = format!(
-                "SELECT term, reading, dict_id, shown, pitches FROM term_pitch WHERE term IN ({}) ORDER BY dict_id, reading",
+                "SELECT term, dict_id, reading, pitches FROM term_pitch WHERE term IN ({}) ORDER BY dict_id, n",
                 terms.iter().map(|_| "?").collect::<Vec<_>>().join(",")
             );
             let mut st = conn.prepare(&sql)?;
             st.query_map(params_from_iter(terms.iter()), |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
             })?
             .collect::<Result<_, _>>()?
         };
-        for (term, reading, dict_id, shown, pitches) in rows {
+        for (term, dict_id, reading, pitches) in rows {
             if excluded.contains(&dict_id) {
                 continue;
             }
@@ -2449,16 +2482,40 @@ impl SearchDb {
                     continue;
                 }
             };
-            for item in items.iter_mut().filter(|i| i.term == term) {
-                let own = item.reading.trim();
-                if !own.is_empty() && own != reading {
+            // what the dictionary's tag banks say about the tags; without its zip, nothing
+            let tag_meta: HashMap<String, TagMeta> = {
+                let tags: Vec<&str> = pitches
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|p| p.get("tags")?.as_array())
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .collect();
+                if tags.is_empty() {
+                    HashMap::new()
+                } else {
+                    let all = self.tag_meta(dict_id, name).unwrap_or_default();
+                    tags.into_iter()
+                        .filter_map(|t| Some((t.to_string(), all.get(t)?.clone())))
+                        .collect()
+                }
+            };
+            for item in items.iter_mut() {
+                if !item
+                    .entries
+                    .iter()
+                    .any(|e| headword(e) == (term.as_str(), reading.as_str()))
+                {
                     continue;
                 }
                 item.pitches.push(PitchOut {
                     dict_id,
                     dict_path: name.clone(),
-                    reading: shown.clone().unwrap_or_else(|| reading.clone()),
+                    term: term.clone(),
+                    reading: reading.clone(),
                     pitches: pitches.clone(),
+                    tag_meta: tag_meta.clone(),
                 });
             }
         }
@@ -2770,17 +2827,28 @@ impl SearchDb {
     /// Dict info rows, e.g. for a settings/about view.
     pub fn dicts(&self) -> Result<Vec<DictInfo>, YomitanError> {
         let conn = self.conn.lock()?;
-        let mut st =
-            conn.prepare("SELECT name, title, revision, L1, L2, term_count FROM dict ORDER BY id")?;
+        // one pass over term_pitch, which is keyed by term
+        let pitch_counts: HashMap<i64, usize> = if self.has_pitch {
+            let mut st =
+                conn.prepare("SELECT dict_id, count(*) FROM term_pitch GROUP BY dict_id")?;
+            st.query_map([], |r| Ok((r.get(0)?, r.get::<_, i64>(1)? as usize)))?
+                .collect::<Result<_, _>>()?
+        } else {
+            HashMap::new()
+        };
+        let mut st = conn.prepare(
+            "SELECT id, name, title, revision, L1, L2, term_count FROM dict ORDER BY id",
+        )?;
         let rows = st
             .query_map([], |r| {
                 Ok(DictInfo {
-                    name: r.get(0)?,
-                    title: r.get(1)?,
-                    revision: r.get::<_, Option<String>>(2)?.unwrap_or_default(),
-                    lang: r.get(3)?,
-                    target_lang: r.get(4)?,
-                    term_count: r.get::<_, i64>(5)? as usize,
+                    name: r.get(1)?,
+                    title: r.get(2)?,
+                    revision: r.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                    lang: r.get(4)?,
+                    target_lang: r.get(5)?,
+                    term_count: r.get::<_, i64>(6)? as usize,
+                    pitch_count: pitch_counts.get(&r.get::<_, i64>(0)?).copied().unwrap_or(0),
                 })
             })?
             .collect::<Result<_, _>>()?;
@@ -3570,34 +3638,67 @@ mod pitch_tests {
         dir
     }
 
-    /// a Kanjium-like dictionary: pitch accents only, and a frequency to leave out
-    fn write_pitch_zip(path: &Path) {
+    fn write_zip(path: &Path, files: &[(&str, &str)]) {
         let mut w = ZipWriter::new(std::fs::File::create(path).unwrap());
-        let opts = SimpleFileOptions::default();
-        for (name, json) in [
-            (
-                "index.json",
-                r#"{"title":"Pitch","revision":"1","format":3,"sourceLanguage":"ja"}"#,
-            ),
-            (
-                "term_meta_bank_1.json",
-                r#"[["箸","pitch",{"reading":"はし","pitches":[{"position":1}]}],
-                    ["橋","pitch",{"reading":"はし","pitches":[{"position":2}]}],
-                    ["端","pitch",{"reading":"はし","pitches":[{"position":0}]}],
-                    ["端","pitch",{"reading":"はた","pitches":[{"position":0},{"position":1,"tags":["名"]}]}],
-                    ["コーヒー","pitch",{"reading":"コーヒー","pitches":[{"position":3}]}],
-                    ["箸","freq",5],
-                    ["空","pitch",{"reading":"そら","pitches":[]}]]"#,
-            ),
-        ] {
-            w.start_file(name, opts).unwrap();
+        for (name, json) in files {
+            w.start_file(*name, SimpleFileOptions::default()).unwrap();
             w.write_all(json.as_bytes()).unwrap();
         }
         w.finish().unwrap();
     }
 
+    /// (term, reading) of the word dictionary's entries, in its term bank's order
+    const WORDS: &[(&str, &str)] = &[
+        ("箸", "はし"),
+        ("橋", "はし"),
+        // no reading: its reading is the term, as in Yomitan
+        ("端", ""),
+        ("コーヒー", ""),
+        ("空", "そら"),
+        // the same word in hiragana: a separate headword
+        ("こーひー", ""),
+    ];
+
+    /// a Kanjium-like dictionary: pitch accents only, a tag bank, and a frequency to leave
+    /// out
+    const PITCH_BANK: &str = r#"[["箸","pitch",{"reading":"はし","pitches":[{"position":1}]}],
+        ["橋","pitch",{"reading":"はし","pitches":[{"position":2}]}],
+        ["端","pitch",{"reading":"はし","pitches":[{"position":0}]}],
+        ["端","pitch",{"reading":"はた","pitches":[{"position":0},{"position":1,"tags":["名"]}]}],
+        ["コーヒー","pitch",{"reading":"コーヒー","pitches":[{"position":3}]}],
+        ["箸","freq",5],
+        ["箸","pitch",{"reading":"はし","pitches":[{"position":0}]}],
+        ["空","pitch",{"reading":"そら","pitches":[]}]]"#;
+
+    /// search.db as a build gives it, of the word dictionary (indexed by hand, as the
+    /// tokenizer dictionaries aren't there), and the zips next to it
     fn fixture() -> (PathBuf, PathBuf) {
         let dir = temp_dir();
+        let rows: Vec<String> = WORDS
+            .iter()
+            .map(|(t, r)| format!(r#"["{t}","{r}","","",0,["gloss"],0,""]"#))
+            .collect();
+        write_zip(
+            &dir.join("words.zip"),
+            &[
+                (
+                    "index.json",
+                    r#"{"title":"Words","revision":"1","format":3,"sourceLanguage":"ja"}"#,
+                ),
+                ("term_bank_1.json", &format!("[{}]", rows.join(","))),
+            ],
+        );
+        write_zip(
+            &dir.join("Pitch.zip"),
+            &[
+                (
+                    "index.json",
+                    r#"{"title":"Pitch","revision":"1","format":3,"sourceLanguage":"ja"}"#,
+                ),
+                ("term_meta_bank_1.json", PITCH_BANK),
+                ("tag_bank_1.json", r#"[["名","partOfSpeech",0,"noun",0]]"#),
+            ],
+        );
         let db_path = dir.join("search.db");
         let conn = Connection::open(&db_path).unwrap();
         conn.execute_batch(SCHEMA).unwrap();
@@ -3610,32 +3711,44 @@ mod pitch_tests {
             [],
         )
         .unwrap();
-        for (term, reading) in [
-            ("箸", " はし "),
-            ("橋", " はし "),
-            // no reading: every reading's pitch
-            ("端", ""),
-            ("こーひー", ""),
-            ("空", " そら "),
-        ] {
+        for (idx, (term, reading)) in WORDS.iter().enumerate() {
+            let reading = normalize_term(reading)
+                .non_empty_trimmed()
+                .map(|r| format!(" {r} "))
+                .unwrap_or_default();
+            let id: i64 = conn
+                .query_row(
+                    "INSERT INTO term_search (term, term_ja, reading) VALUES (?1, ?1, ?2)
+                     ON CONFLICT DO UPDATE SET term = term RETURNING id",
+                    params![normalize_term(term), reading],
+                    |r| r.get(0),
+                )
+                .unwrap();
             conn.execute(
-                "INSERT INTO term_search (term, term_ja, reading) VALUES (?1, ?1, ?2)",
-                params![term, reading],
+                "INSERT INTO term_link (search_id, dict_id, bank, idx) VALUES (?1, 1, 1, ?2)",
+                params![id, idx as i64],
             )
             .unwrap();
         }
-        conn.execute(
-            "INSERT INTO term_link (search_id, dict_id, bank, idx) SELECT id, 1, 1, id FROM term_search",
-            [],
-        )
-        .unwrap();
         drop(conn);
-        write_pitch_zip(&dir.join("Pitch.zip"));
         (dir, db_path)
     }
 
-    /// (term, [(dictionary, reading, positions)]) of each item found for `term`
-    fn pitches(db: &SearchDb, term: &str, exclude: &[&str]) -> Vec<(String, String, String)> {
+    fn pitch_source(dir: &Path) -> DictSource {
+        DictSource {
+            name: "Pitch".into(),
+            zip: dir.join("Pitch.zip"),
+            lang: None,
+            target_lang: None,
+        }
+    }
+
+    /// (dictionary, term, reading, pitches) of the items found for `term`
+    fn pitches(
+        db: &SearchDb,
+        term: &str,
+        exclude: &[&str],
+    ) -> Vec<(String, String, String, String)> {
         let res = db
             .search(&SearchRequest {
                 kind: Some("exact".into()),
@@ -3647,8 +3760,12 @@ mod pitch_tests {
         res.items
             .into_iter()
             .flat_map(|i| i.pitches)
-            .map(|p| (p.dict_path, p.reading, p.pitches.to_string()))
+            .map(|p| (p.dict_path, p.term, p.reading, p.pitches.to_string()))
             .collect()
+    }
+
+    fn p(term: &str, reading: &str, pitches: &str) -> (String, String, String, String) {
+        ("Pitch".into(), term.into(), reading.into(), pitches.into())
     }
 
     #[test]
@@ -3672,54 +3789,44 @@ mod pitch_tests {
     }
 
     #[tokio::test]
-    async fn pitch_accents_are_indexed_and_found_with_words() {
+    async fn pitch_accents_are_found_as_yomitan_finds_them() {
         let (dir, db_path) = fixture();
         let tok = TokenizerMapper::new(dir.clone());
-        let infos = build_incremental(
-            &db_path,
-            &[DictSource {
-                name: "Pitch".into(),
-                zip: dir.join("Pitch.zip"),
-                lang: None,
-                target_lang: None,
-            }],
-            &[],
-            &tok,
-            |_, _, _| {},
-        )
-        .await
-        .unwrap();
+        let infos = build_incremental(&db_path, &[pitch_source(&dir)], &[], &tok, |_, _, _| {})
+            .await
+            .unwrap();
         assert_eq!(infos[0].term_count, 0);
         // the frequency and the entry without pitches are left out
-        assert_eq!(pitch_counts(&db_path).unwrap()["Pitch"], 5);
+        assert_eq!(infos[0].pitch_count, 6);
+        assert_eq!(pitch_counts(&db_path).unwrap()["Pitch"], 6);
 
         let db = SearchDb::open(&db_path, &dir).unwrap();
-        let p = |dict: &str, reading: &str, positions: &str| {
-            (dict.to_string(), reading.to_string(), positions.to_string())
-        };
+        let dicts = db.dicts().unwrap();
+        assert_eq!(
+            dicts
+                .iter()
+                .map(|d| (d.name.as_str(), d.term_count, d.pitch_count))
+                .collect::<Vec<_>>(),
+            [("words", 0, 0), ("Pitch", 0, 6)]
+        );
+        // every entry of the term and reading, in the dictionary's order
         assert_eq!(
             pitches(&db, "箸", &[]),
-            [p("Pitch", "はし", r#"[{"position":1}]"#)]
+            [
+                p("箸", "はし", r#"[{"position":1}]"#),
+                p("箸", "はし", r#"[{"position":0}]"#),
+            ]
         );
         assert_eq!(
             pitches(&db, "橋", &[]),
-            [p("Pitch", "はし", r#"[{"position":2}]"#)]
+            [p("橋", "はし", r#"[{"position":2}]"#)]
         );
-        assert_eq!(
-            pitches(&db, "端", &[]),
-            [
-                p("Pitch", "はし", r#"[{"position":0}]"#),
-                p(
-                    "Pitch",
-                    "はた",
-                    r#"[{"position":0},{"position":1,"tags":["名"]}]"#
-                ),
-            ]
-        );
-        // katakana is matched as hiragana, and shown as the dictionary has it
+        // a word without a reading is read as written: 端 has none of its readings' pitches
+        assert!(pitches(&db, "端", &[]).is_empty());
+        // the term exactly: コーヒー's pitch is not こーひー's, though both are one result
         assert_eq!(
             pitches(&db, "コーヒー", &[]),
-            [p("Pitch", "コーヒー", r#"[{"position":3}]"#)]
+            [p("コーヒー", "コーヒー", r#"[{"position":3}]"#)]
         );
         assert!(pitches(&db, "空", &[]).is_empty());
         assert!(pitches(&db, "箸", &["Pitch"]).is_empty());
@@ -3737,6 +3844,49 @@ mod pitch_tests {
     }
 
     #[tokio::test]
+    async fn tags_come_with_what_the_tag_bank_says() {
+        let (dir, db_path) = fixture();
+        let tok = TokenizerMapper::new(dir.clone());
+        build_incremental(&db_path, &[pitch_source(&dir)], &[], &tok, |_, _, _| {})
+            .await
+            .unwrap();
+        let db = SearchDb::open(&db_path, &dir).unwrap();
+        // an entry of 端 read はた, whose pitch has a tag
+        let mut items = vec![SearchItem {
+            id: 0,
+            term: "端".into(),
+            reading: " はた ".into(),
+            def_tags: None,
+            rules: None,
+            score: None,
+            tags: None,
+            entries: vec![TermEntryOut {
+                dict_id: 1,
+                dict_path: "words".into(),
+                lang: None,
+                target_lang: None,
+                term_id: 0,
+                term: "端".into(),
+                reading: "はた".into(),
+                def_tags: String::new(),
+                rules: String::new(),
+                score: None,
+                glossary: "[]".into(),
+                sequence: None,
+                tags: String::new(),
+            }],
+            pitches: vec![],
+        }];
+        db.add_pitches(&mut items, &[]).unwrap();
+        let pitch = &items[0].pitches[0];
+        assert_eq!(pitch.reading, "はた");
+        assert_eq!(pitch.tag_meta["名"].category, "partOfSpeech");
+        assert_eq!(pitch.tag_meta["名"].notes, "noun");
+        drop(db);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
     async fn an_older_search_db_gets_pitch_accents() {
         let (dir, db_path) = fixture();
         {
@@ -3744,6 +3894,13 @@ mod pitch_tests {
             conn.execute(
                 "INSERT INTO dict (name, title, L1) VALUES ('Pitch', 'Pitch', 'ja-JP')",
                 [],
+            )
+            .unwrap();
+            // term_pitch as an earlier version of this change built it
+            conn.execute_batch(
+                "CREATE TABLE term_pitch (term TEXT NOT NULL, reading TEXT NOT NULL,
+                   dict_id INTEGER NOT NULL, shown TEXT, pitches TEXT NOT NULL,
+                   PRIMARY KEY (term, reading, dict_id)) WITHOUT ROWID;",
             )
             .unwrap();
         }
@@ -3757,7 +3914,7 @@ mod pitch_tests {
             .await
             .unwrap();
         let db = SearchDb::open(&db_path, &dir).unwrap();
-        assert_eq!(pitches(&db, "箸", &[]).len(), 1);
+        assert_eq!(pitches(&db, "箸", &[]).len(), 2);
         drop(db);
         std::fs::remove_dir_all(dir).unwrap();
     }

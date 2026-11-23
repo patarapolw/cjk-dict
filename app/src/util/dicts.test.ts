@@ -36,6 +36,17 @@ describe("wordDicts", () => {
     ]);
   });
 
+  it("lists pitch accent dictionaries, to be left out as in Yomitan", () => {
+    const pitch = { ...dict("Pitch", "ja-JP", 0), pitch_count: 5 };
+    expect(names(wordDicts([...list, pitch], "ja-JP"))).toEqual([
+      "MyDict",
+      "JaA",
+      "JaB",
+      "Pitch",
+    ]);
+    expect(names(wordDicts([...list, pitch], "zh"))).not.toContain("Pitch");
+  });
+
   it("lists the search language's, and those without a language", () => {
     expect(names(wordDicts(list, "zh"))).toEqual(["MyDict", "ZhWiki", "ZhTw"]);
     expect(names(wordDicts(list, "ja-JP"))).toEqual(["MyDict", "JaA", "JaB"]);

@@ -427,8 +427,12 @@ describe("DictionaryView", () => {
         {
           dict_id: 2,
           dict_path: "Kanjium",
+          term: "橋",
           reading: "はし",
           pitches: [{ position: 2 }, { position: 0, tags: ["名"] }],
+          tag_meta: {
+            名: { category: "partOfSpeech", order: 0, notes: "noun" },
+          },
         },
       ];
       return {
@@ -464,9 +468,15 @@ describe("DictionaryView", () => {
         )
         .text(),
     ).toBe("Kanjium");
-    expect(describedText(wrapper.get(".pronunciation-text").element)).toContain(
-      "Odaka",
+    // the tag, with what the tag bank says
+    const tag = wrapper.get(
+      '.pronunciation .tag[data-category="partOfSpeech"]',
     );
+    expect(describedText(tag.element)).toBe("noun");
+    // the headword's patterns, for custom CSS, as Yomitan puts them
+    expect(
+      wrapper.get(".headword").attributes("data-pronunciation-categories"),
+    ).toBe("odaka heiban");
     wrapper.unmount();
   });
 

@@ -13,17 +13,29 @@
       }}</span>
       <ul class="pronunciation-list" :data-count="g.pitches.length">
         <li
-          v-for="({ reading, pitch }, i) in g.pitches"
+          v-for="(p, i) in g.pitches"
           :key="i"
           class="pronunciation"
-          :data-pitch-accent-downstep-position="downsteps(pitch.position)"
+          :data-pitch-accent-downstep-position="downsteps(p.pitch.position)"
         >
-          <span v-for="t in pitch.tags ?? []" :key="t" class="tag">{{
-            t
-          }}</span>
-          <span class="pronunciation-text" v-tooltip="describe(reading, pitch)"
+          <span
+            v-for="t in p.tags"
+            :key="t.name"
+            class="tag"
+            :data-category="t.meta?.category || undefined"
+            v-tooltip="t.meta?.notes || undefined"
+            >{{ t.name }}</span
+          >
+          <!-- the terms it is for, when not all of the word's; its reading is in its
+               text, so Yomitan leaves the reading out here -->
+          <span
+            v-if="p.exclusiveTerms.length"
+            class="pronunciation-disambiguation-list"
+            >{{ p.exclusiveTerms.join(", ") }}</span
+          >
+          <span class="pronunciation-text"
             ><span
-              v-for="(m, k) in pitchMorae(reading, pitch)"
+              v-for="(m, k) in pitchMorae(p.reading, p.pitch)"
               :key="k"
               class="pronunciation-mora"
               :data-pitch="m.high ? 'high' : 'low'"
@@ -31,14 +43,16 @@
               :data-nasal="m.nasal || undefined"
               :data-devoice="m.devoice || undefined"
               >{{ m.nasal ? withoutDakuten(m.text) : m.text
-              }}<span
+              }}<span v-if="m.nasal" class="pronunciation-nasal-diacritic"
+                >&#x309A;</span
+              ><span
                 v-if="m.nasal"
                 class="pronunciation-nasal-indicator" /><span
                 v-if="m.devoice"
                 class="pronunciation-devoice-indicator" /><span
                 class="pronunciation-mora-line" /></span></span
           ><span class="pronunciation-downstep-notation"
-            >[{{ downsteps(pitch.position).join(",") }}]</span
+            >[{{ downsteps(p.pitch.position).join(",") }}]</span
           >
         </li>
       </ul>
@@ -51,11 +65,9 @@ import { computed } from "vue";
 
 import {
   downsteps,
-  groupByDictionary,
-  IPitch,
+  groupPronunciations,
+  IHeadword,
   IPitchEntry,
-  isVerbOrAdjective,
-  pitchDescription,
   pitchMorae,
   withoutDakuten,
 } from "../util/pitch";
@@ -64,15 +76,13 @@ import { vTooltip } from "../util/tooltip";
 const props = defineProps<{
   /** the pitch accent dictionaries' entries for a word */
   entries: IPitchEntry[];
-  /** the word's deinflection rules, e.g. `v5`: a verb's drop is kifuku */
-  rules?: string | null;
+  /** the word's headwords, to tell which of them a pitch is for */
+  headwords: IHeadword[];
 }>();
 
-const groups = computed(() => groupByDictionary(props.entries));
-
-function describe(reading: string, pitch: IPitch): string {
-  return pitchDescription(reading, pitch, isVerbOrAdjective(props.rules));
-}
+const groups = computed(() =>
+  groupPronunciations(props.entries, props.headwords),
+);
 </script>
 
 <style scoped>
@@ -113,6 +123,11 @@ function describe(reading: string, pitch: IPitch): string {
   line-height: 1.5;
 }
 
+.pronunciation-disambiguation-list {
+  padding-right: 0.25em;
+  color: var(--app-text-muted);
+}
+
 .pronunciation-text {
   display: inline;
 }
@@ -144,7 +159,15 @@ function describe(reading: string, pitch: IPitch): string {
   border-right: 0.1em solid currentColor;
 }
 
-/* a nasal mora (鼻濁音): its kana without dakuten, and a small circle */
+/* a nasal mora (鼻濁音): its kana without dakuten, and a small circle; the handakuten is
+   there, unseen, for copying */
+.pronunciation-nasal-diacritic {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+}
+
 .pronunciation-nasal-indicator {
   position: absolute;
   top: 0.125em;

@@ -36,12 +36,12 @@ How the app gets the library and shows entries. The [README](../README.md#app) h
   - images sized from `width`/`height`/`sizeUnits`, including monochrome images.
 - Where the app differs from Yomitan, for example showing images that dictionaries mark collapsed, is listed in [yomitan-differences.md](yomitan-differences.md).
 - Images in definitions are served from the zips through a `dict://` protocol.
-- Pitch accents (from pitch accent dictionaries, e.g. Kanjium) are shown above a word's entries, laid out as Yomitan's (see [yomitan-differences.md](yomitan-differences.md#pitch-accents)):
-  - those of its reading; for a word without one, those of every reading;
-  - by dictionary: its tag, then each pitch with the parts of speech it is for, the reading and the downstep, e.g. `[2]`;
+- Pitch accents (from pitch accent dictionaries, e.g. Kanjium) are found and shown above a word's entries as in Yomitan (see [yomitan-differences.md](yomitan-differences.md#pitch-accents)):
+  - those of its entries' terms and readings; an entry without a reading is read as written;
+  - by dictionary: its tag, then each pitch with its tags (their notes in a tooltip), the terms it is for when not all of the word's, the reading and the downstep, e.g. `[2]`;
   - the reading has a line over the high morae that turns down where the pitch drops, a small circle on nasal morae (鼻濁音) and a dotted one around devoiced morae;
-  - a tooltip names the pattern: heiban, atamadaka, nakadaka or odaka, or for a verb or i-adjective, heiban or kifuku;
-  - dictionaries with pitch accents only aren't in the **Dictionaries** list, which lists those with words.
+  - the headword has its patterns as `data-pronunciation-categories`;
+  - pitch accent dictionaries are in the **Dictionaries** list, to leave out like any other.
 - Terms and definitions are marked with their dictionary's languages (`lang`), so Han characters take the forms of their language (see [dict-admin](dict-admin.md#languages)).
   - So are dictionary names, in the **Dictionaries** list and on entries: with the terms' language.
 - The app follows the device's light or dark color-scheme preference.

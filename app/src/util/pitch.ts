@@ -18,13 +18,42 @@ export interface IPitch {
   tags?: string[];
 }
 
-/** A pitch accent dictionary's entry for a word */
+/** What a dictionary's tag banks say about a tag */
+export interface IPitchTagMeta {
+  category: string;
+  order: number;
+  notes: string;
+}
+
+/** A pitch accent dictionary's entry for a word: the same term and reading as an entry's */
 export interface IPitchEntry {
   dict_id: number;
   dict_path: string;
-  /** as the dictionary has it */
+  term: string;
   reading: string;
   pitches: IPitch[];
+  /** what the dictionary's tag banks say about the pitches' tags */
+  tag_meta: Record<string, IPitchTagMeta>;
+}
+
+/** A word's spelling and reading; an entry without a reading is read as it is written */
+export interface IHeadword {
+  term: string;
+  reading: string;
+}
+
+/** The entries' headwords, each once: `reading` is the term where an entry has none */
+export function headwordsOf(
+  entries: { term: string; reading: string }[],
+): IHeadword[] {
+  const out: IHeadword[] = [];
+  for (const e of entries) {
+    const h = { term: e.term, reading: e.reading || e.term };
+    if (!out.some((x) => x.term === h.term && x.reading === h.reading)) {
+      out.push(h);
+    }
+  }
+  return out;
 }
 
 /** small kana that share a mora with the kana before: きゃ, ファ */
@@ -157,44 +186,112 @@ export function pitchKind(
   return null;
 }
 
-const KIND_NAMES: Record<PitchKind, string> = {
-  heiban: "Heiban (平板): no drop",
-  atamadaka: "Atamadaka (頭高): drops after the first mora",
-  nakadaka: "Nakadaka (中高): drops inside the word",
-  odaka: "Odaka (尾高): drops after the last mora, before a particle",
-  kifuku: "Kifuku (起伏): drops",
-};
-
-/** What the pitch is, for a tooltip: `Nakadaka (中高): drops inside the word` */
-export function pitchDescription(
-  reading: string,
-  pitch: IPitch,
+/**
+ * The pitch patterns of a headword, space-separated, as Yomitan puts them on it
+ * (`data-pronunciation-categories`), e.g. `heiban odaka`; empty if it has none.
+ */
+export function pronunciationCategories(
+  headword: IHeadword,
+  entries: IPitchEntry[],
   verbOrAdjective = false,
 ): string {
-  const kind = pitchKind(reading, pitch.position, verbOrAdjective);
-  const parts = [kind ? KIND_NAMES[kind] : `Pitch: ${pitch.position}`];
-  if (positions(pitch.nasal).length) parts.push("○: nasal (鼻濁音)");
-  if (positions(pitch.devoice).length) parts.push("dotted circle: devoiced");
-  return parts.join("; ");
+  const kinds = new Set<PitchKind>();
+  for (const e of entries) {
+    if (e.term !== headword.term || e.reading !== headword.reading) continue;
+    for (const p of e.pitches) {
+      const kind = pitchKind(e.reading, p.position, verbOrAdjective);
+      if (kind) kinds.add(kind);
+    }
+  }
+  return [...kinds].join(" ");
 }
 
-/** A dictionary's pitch accents for a word, one per reading and pitch */
+/** One pitch of a dictionary, with the headwords it is for */
+export interface IGroupedPitch {
+  reading: string;
+  pitch: IPitch;
+  /** its tags, with what the tag banks say about them */
+  tags: { name: string; meta?: IPitchTagMeta }[];
+  /** the terms it is for, when not all of the word's: shown before it */
+  exclusiveTerms: string[];
+  /** its reading, when the word has more than one (shown by its text) */
+  exclusiveReadings: string[];
+}
+
+/** A dictionary's pitch accents for a word */
 export interface IPitchGroup {
   dict_path: string;
-  pitches: { reading: string; pitch: IPitch }[];
+  pitches: IGroupedPitch[];
 }
 
-/** The entries grouped by dictionary, in the order they come */
-export function groupByDictionary(entries: IPitchEntry[]): IPitchGroup[] {
-  const out: IPitchGroup[] = [];
+function samePositions(a?: number | number[], b?: number | number[]): boolean {
+  const x = positions(a);
+  const y = positions(b);
+  return x.length === y.length && x.every((v, i) => v === y[i]);
+}
+
+function samePitch(a: IPitch, b: IPitch): boolean {
+  const ta = a.tags ?? [];
+  const tb = b.tags ?? [];
+  return (
+    a.position === b.position &&
+    samePositions(a.nasal, b.nasal) &&
+    samePositions(a.devoice, b.devoice) &&
+    ta.length === tb.length &&
+    ta.every((t) => tb.includes(t))
+  );
+}
+
+/**
+ * The entries grouped as Yomitan groups them: by dictionary, in the order they come; the
+ * same pitch of the same reading once, with every term it is for.
+ */
+export function groupPronunciations(
+  entries: IPitchEntry[],
+  headwords: IHeadword[],
+): IPitchGroup[] {
+  const allTerms = new Set(headwords.map((h) => h.term));
+  const multipleReadings = new Set(headwords.map((h) => h.reading)).size > 1;
+  const groups: {
+    dict_path: string;
+    pitches: (Omit<IGroupedPitch, "exclusiveTerms" | "exclusiveReadings"> & {
+      terms: Set<string>;
+    })[];
+  }[] = [];
   for (const e of entries) {
-    let g = out.find((x) => x.dict_path === e.dict_path);
+    let g = groups.find((x) => x.dict_path === e.dict_path);
     if (!g) {
       g = { dict_path: e.dict_path, pitches: [] };
-      out.push(g);
+      groups.push(g);
     }
-    for (const pitch of e.pitches)
-      g.pitches.push({ reading: e.reading, pitch });
+    for (const pitch of e.pitches) {
+      let found = g.pitches.find(
+        (x) => x.reading === e.reading && samePitch(x.pitch, pitch),
+      );
+      if (!found) {
+        found = {
+          reading: e.reading,
+          pitch,
+          tags: (pitch.tags ?? []).map((name) => ({
+            name,
+            meta: e.tag_meta?.[name],
+          })),
+          terms: new Set(),
+        };
+        g.pitches.push(found);
+      }
+      found.terms.add(e.term);
+    }
   }
-  return out;
+  return groups.map((g) => ({
+    dict_path: g.dict_path,
+    pitches: g.pitches.map(({ terms, ...p }) => ({
+      ...p,
+      exclusiveTerms:
+        terms.size === allTerms.size && [...terms].every((t) => allTerms.has(t))
+          ? []
+          : [...terms].filter((t) => allTerms.has(t)),
+      exclusiveReadings: multipleReadings ? [p.reading] : [],
+    })),
+  }));
 }

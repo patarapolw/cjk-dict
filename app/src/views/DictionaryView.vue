@@ -208,12 +208,20 @@
           :aria-expanded="openedItems.includes(it.id)"
           @click="toggleItem(it.id)"
         >
-          <ruby v-if="headReading(it)" class="headword" :lang="itemLang(it)"
+          <ruby
+            v-if="headReading(it)"
+            class="headword"
+            :lang="itemLang(it)"
+            :data-pronunciation-categories="categoriesOf(it)"
             >{{ headTerm(it) }}<rt>{{ headReading(it) }}</rt></ruby
           >
-          <span v-else class="headword" :lang="itemLang(it)">{{
-            headTerm(it)
-          }}</span>
+          <span
+            v-else
+            class="headword"
+            :lang="itemLang(it)"
+            :data-pronunciation-categories="categoriesOf(it)"
+            >{{ headTerm(it) }}</span
+          >
         </button>
         <div v-if="openedItems.includes(it.id)" class="accordion-content">
           <div class="item-actions" :lang="itemLang(it)">
@@ -256,7 +264,7 @@
           <PitchAccents
             v-if="it.pitches?.length"
             :entries="it.pitches"
-            :rules="it.rules"
+            :headwords="headwordsOf(it.entries)"
           />
           <Term
             v-for="(ent, j) in it.entries"
@@ -318,6 +326,11 @@ import {
   wordDicts,
 } from "../util/dicts";
 import { hanChars } from "../util/han";
+import {
+  headwordsOf,
+  isVerbOrAdjective,
+  pronunciationCategories,
+} from "../util/pitch";
 import { declaredHeadLang, headLang, refineHeadLangs } from "../util/lang";
 import { dictsVersion, toBeLoaded } from "../util/loading";
 import { remainingScroll, scrollToStart } from "../util/scroll";
@@ -769,6 +782,22 @@ const itemLangs = computed(() => {
 
 function itemLang(it: Item) {
   return itemLangs.value.get(it.id);
+}
+
+/**
+ * the headword's pitch patterns, as Yomitan puts them on it for custom CSS, e.g. `heiban`;
+ * none without pitch accents
+ */
+function categoriesOf(it: Item): string | undefined {
+  const [head] = headwordsOf(it.entries);
+  if (!head || !it.pitches?.length) return undefined;
+  return (
+    pronunciationCategories(
+      head,
+      it.pitches,
+      isVerbOrAdjective(it.entries[0]?.rules),
+    ) || undefined
+  );
 }
 
 function headReading(it: Item) {

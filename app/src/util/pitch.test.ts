@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import {
   downsteps,
-  groupByDictionary,
+  groupPronunciations,
+  headwordsOf,
   isVerbOrAdjective,
   morae,
   pitchKind,
   pitchMorae,
+  pronunciationCategories,
   withoutDakuten,
 } from "./pitch";
 
@@ -87,27 +89,105 @@ describe("pitchKind", () => {
   });
 });
 
-describe("groupByDictionary", () => {
-  it("lists each dictionary's pitches together", () => {
-    const e = (dict_path: string, reading: string, ...ps: number[]) => ({
-      dict_id: 1,
-      dict_path,
-      reading,
-      pitches: ps.map((position) => ({ position })),
-    });
-    const groups = groupByDictionary([
-      e("A", "はし", 0),
-      e("A", "はた", 0, 1),
-      e("B", "はし", 0),
-    ]);
+const entry = (
+  dict_path: string,
+  term: string,
+  reading: string,
+  ...pitches: { position: number; tags?: string[] }[]
+) => ({ dict_id: 1, dict_path, term, reading, pitches, tag_meta: {} });
+
+describe("headwordsOf", () => {
+  it("reads an entry without a reading as written, each headword once", () => {
     expect(
-      groups.map((g) => [
-        g.dict_path,
-        g.pitches.map((p) => `${p.reading}${p.pitch.position}`),
+      headwordsOf([
+        { term: "箸", reading: "はし" },
+        { term: "箸", reading: "はし" },
+        { term: "コーヒー", reading: "" },
       ]),
     ).toEqual([
-      ["A", ["はし0", "はた0", "はた1"]],
-      ["B", ["はし0"]],
+      { term: "箸", reading: "はし" },
+      { term: "コーヒー", reading: "コーヒー" },
     ]);
+  });
+});
+
+describe("groupPronunciations", () => {
+  it("lists each dictionary's pitches together, the same pitch once", () => {
+    const groups = groupPronunciations(
+      [
+        entry("A", "箸", "はし", { position: 1 }),
+        entry("A", "箸", "はし", { position: 1 }, { position: 0 }),
+        entry("B", "箸", "はし", { position: 1 }),
+      ],
+      [{ term: "箸", reading: "はし" }],
+    );
+    expect(
+      groups.map((g) => [g.dict_path, g.pitches.map((p) => p.pitch.position)]),
+    ).toEqual([
+      ["A", [1, 0]],
+      ["B", [1]],
+    ]);
+    expect(groups[0].pitches[0].exclusiveTerms).toEqual([]);
+    expect(groups[0].pitches[0].exclusiveReadings).toEqual([]);
+  });
+
+  it("names the terms a pitch is for when it isn't for all of the word's", () => {
+    const [g] = groupPronunciations(
+      [
+        entry("A", "日本", "にほん", { position: 2 }),
+        entry("A", "日本", "にっぽん", { position: 3 }),
+        entry("A", "ニッポン", "にっぽん", { position: 3 }),
+      ],
+      [
+        { term: "日本", reading: "にほん" },
+        { term: "日本", reading: "にっぽん" },
+        { term: "ニッポン", reading: "にっぽん" },
+      ],
+    );
+    expect(
+      g.pitches.map((p) => [p.reading, p.exclusiveTerms, p.exclusiveReadings]),
+    ).toEqual([
+      ["にほん", ["日本"], ["にほん"]],
+      ["にっぽん", [], ["にっぽん"]],
+    ]);
+  });
+
+  it("gives tags what the tag bank says", () => {
+    const [g] = groupPronunciations(
+      [
+        {
+          ...entry("A", "端", "はた", { position: 1, tags: ["名", "x"] }),
+          tag_meta: {
+            名: { category: "partOfSpeech", order: 0, notes: "noun" },
+          },
+        },
+      ],
+      [{ term: "端", reading: "はた" }],
+    );
+    expect(g.pitches[0].tags).toEqual([
+      {
+        name: "名",
+        meta: { category: "partOfSpeech", order: 0, notes: "noun" },
+      },
+      { name: "x", meta: undefined },
+    ]);
+  });
+});
+
+describe("pronunciationCategories", () => {
+  it("names the headword's patterns, as Yomitan does", () => {
+    const entries = [
+      entry("A", "端", "はし", { position: 0 }, { position: 2 }),
+      entry("A", "端", "はた", { position: 1 }),
+    ];
+    expect(
+      pronunciationCategories({ term: "端", reading: "はし" }, entries),
+    ).toBe("heiban odaka");
+    expect(
+      pronunciationCategories({ term: "端", reading: "はた" }, entries, true),
+    ).toBe("kifuku");
+    expect(
+      pronunciationCategories({ term: "橋", reading: "はし" }, entries),
+    ).toBe("");
   });
 });
