@@ -152,6 +152,31 @@ describe("groupPronunciations", () => {
     ]);
   });
 
+  it("takes katakana and hiragana spellings as one, as the app's results do", () => {
+    // ちりちり from one dictionary, チリチリ from another: one result
+    const [g] = groupPronunciations(
+      [entry("A", "ちりちり", "ちりちり", { position: 0 })],
+      headwordsOf([
+        { term: "ちりちり", reading: "" },
+        { term: "チリチリ", reading: "" },
+      ]),
+    );
+    expect(g.pitches[0].exclusiveTerms).toEqual([]);
+    expect(g.pitches[0].exclusiveReadings).toEqual([]);
+    // the same pitch of ちりちり and チリチリ: once
+    const [h] = groupPronunciations(
+      [
+        entry("A", "ちりちり", "ちりちり", { position: 0 }),
+        entry("A", "チリチリ", "チリチリ", { position: 0 }),
+      ],
+      headwordsOf([
+        { term: "ちりちり", reading: "" },
+        { term: "チリチリ", reading: "" },
+      ]),
+    );
+    expect(h.pitches).toHaveLength(1);
+  });
+
   it("gives tags what the tag bank says", () => {
     const [g] = groupPronunciations(
       [

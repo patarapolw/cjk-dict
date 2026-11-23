@@ -19,6 +19,7 @@ Pitch accents are found and shown as Yomitan does, with its default settings:
 - found by an entry's term and reading exactly; an entry without a reading is read as written, so 端 with no reading gets none of はし's or はた's pitches;
 - every entry a dictionary has for the word, the same pitch of the same reading once;
 - once per result, above its entries, as Yomitan's default result mode (`group`) shows them once per word;
+  - a result can have a word in katakana and in hiragana (チリチリ, ちりちり), which Yomitan's results don't: such spellings and readings count as one, so a pitch of ちりちり isn't marked as for ちりちり only;
 - dictionaries in a numbered list, each with its tag in Yomitan's color for pronunciation dictionaries, then its pitches:
   - tags, with what the dictionary's tag banks say;
   - the terms a pitch is for, when not all of the result's;

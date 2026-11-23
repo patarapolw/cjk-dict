@@ -243,15 +243,31 @@ function samePitch(a: IPitch, b: IPitch): boolean {
 }
 
 /**
+ * Katakana as hiragana (ア → あ), as search.db matches them: ー and the katakana without a
+ * hiragana counterpart (ヷ ヸ ヹ ヺ) are kept
+ */
+export function foldKana(text: string): string {
+  return text.replace(/[\u30A1-\u30F6]/gu, (c) =>
+    String.fromCharCode(c.charCodeAt(0) - 0x60),
+  );
+}
+
+/**
  * The entries grouped as Yomitan groups them: by dictionary, in the order they come; the
  * same pitch of the same reading once, with every term it is for.
+ *
+ * Yomitan's results (in its default `group` mode) are one term and reading each, but the
+ * app's put katakana and hiragana together (チリチリ with ちりちり): terms and readings
+ * that differ only so are taken as the same here, so that a pitch of ちりちり isn't marked
+ * as for ちりちり only.
  */
 export function groupPronunciations(
   entries: IPitchEntry[],
   headwords: IHeadword[],
 ): IPitchGroup[] {
-  const allTerms = new Set(headwords.map((h) => h.term));
-  const multipleReadings = new Set(headwords.map((h) => h.reading)).size > 1;
+  const allTerms = new Set(headwords.map((h) => foldKana(h.term)));
+  const multipleReadings =
+    new Set(headwords.map((h) => foldKana(h.reading))).size > 1;
   const groups: {
     dict_path: string;
     pitches: (Omit<IGroupedPitch, "exclusiveTerms" | "exclusiveReadings"> & {
@@ -266,7 +282,9 @@ export function groupPronunciations(
     }
     for (const pitch of e.pitches) {
       let found = g.pitches.find(
-        (x) => x.reading === e.reading && samePitch(x.pitch, pitch),
+        (x) =>
+          foldKana(x.reading) === foldKana(e.reading) &&
+          samePitch(x.pitch, pitch),
       );
       if (!found) {
         found = {
@@ -285,13 +303,18 @@ export function groupPronunciations(
   }
   return groups.map((g) => ({
     dict_path: g.dict_path,
-    pitches: g.pitches.map(({ terms, ...p }) => ({
-      ...p,
-      exclusiveTerms:
-        terms.size === allTerms.size && [...terms].every((t) => allTerms.has(t))
+    pitches: g.pitches.map(({ terms, ...p }) => {
+      const folded = new Set([...terms].map(foldKana));
+      const forAll =
+        folded.size === allTerms.size &&
+        [...folded].every((t) => allTerms.has(t));
+      return {
+        ...p,
+        exclusiveTerms: forAll
           ? []
-          : [...terms].filter((t) => allTerms.has(t)),
-      exclusiveReadings: multipleReadings ? [p.reading] : [],
-    })),
+          : [...terms].filter((t) => allTerms.has(foldKana(t))),
+        exclusiveReadings: multipleReadings ? [p.reading] : [],
+      };
+    }),
   }));
 }
