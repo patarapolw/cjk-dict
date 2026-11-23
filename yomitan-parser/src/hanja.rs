@@ -76,9 +76,97 @@ pub fn hangul_readings(term: &str) -> Vec<String> {
     out
 }
 
+/// libhangul's readings of each Hanja with several (`scripts/hanja-eum.mjs`)
+const EUM: &str = include_str!("../data/hanja_eum.txt");
+
+/// A Hanja's Hangul readings (eum), as a character dictionary lists them: hanja_hangul's
+/// main reading first, then libhangul's others (樂: 악 락 요), each without the
+/// initial-sound rule (李: 리). Not hanja_hangul's other readings, which are how a
+/// character reads in some words (道 in 使道 사또), not its eum. Empty for a character that
+/// isn't a Hanja, or has no known reading.
+pub fn char_readings(c: char) -> Vec<String> {
+    let main = Converter::global().char_reading(c);
+    let others = EUM
+        .lines()
+        .find_map(|l| {
+            let (h, rs) = l.split_once('\t')?;
+            (h.chars().eq([c])).then_some(rs)
+        })
+        .unwrap_or("");
+
+    // readings that differ only by the initial-sound rule (樂: 낙 and 락) are one: the main
+    // reading, else the one without the rule
+    let mut out: Vec<char> = main.into_iter().collect();
+    for r in others.split(' ').filter_map(|r| r.chars().next()) {
+        match out.iter().position(|&o| dueum(o) == dueum(r)) {
+            None => out.push(r),
+            Some(i) if Some(out[i]) != main && out[i] == dueum(out[i]) && r != dueum(r) => {
+                out[i] = r
+            }
+            Some(_) => {}
+        }
+    }
+    out.into_iter().map(String::from).collect()
+}
+
+/// A syllable at the start of a word, by the initial-sound rule (두음법칙): 락 → 낙,
+/// 리 → 이, 녀 → 여
+fn dueum(s: char) -> char {
+    const L: u32 = 5; // ㄹ
+    const N: u32 = 2; // ㄴ
+    const ZERO: u32 = 11; // ㅇ
+    let Some(o) = (s as u32).checked_sub(0xAC00).filter(|&o| o < 11172) else {
+        return s;
+    };
+    let (initial, medial) = (o / 588, o % 588 / 28);
+    // ㅑ ㅕ ㅖ ㅛ ㅠ ㅣ
+    let y = matches!(medial, 2 | 6 | 7 | 12 | 17 | 20);
+    let initial = match initial {
+        L if y => ZERO,
+        L => N,
+        N if y => ZERO,
+        i => i,
+    };
+    char::from_u32(0xAC00 + initial * 588 + o % 588).unwrap_or(s)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn eum(c: char) -> Vec<String> {
+        char_readings(c)
+    }
+
+    #[test]
+    fn character_readings_are_eum() {
+        // not 또 (使道 사또), nor 니, 리 (word-medial forms)
+        assert_eq!(eum('道'), ["도"]);
+        assert_eq!(eum('二'), ["이"]);
+        assert_eq!(eum('具'), ["구"]);
+        // several readings, the main one first, without the initial-sound rule
+        assert_eq!(eum('樂'), ["악", "락", "요"]);
+        assert_eq!(eum('率'), ["률", "솔"]);
+        assert_eq!(eum('李'), ["리"]);
+        assert_eq!(eum('女'), ["녀"]);
+        assert_eq!(eum('金'), ["금", "김"]);
+        assert_eq!(eum('茶'), ["차", "다"]);
+        // the main reading wins over a rarer one it shares a form with: 異 is 이, not 리
+        assert_eq!(eum('異'), ["이"]);
+        assert!(eum('a').is_empty());
+        assert!(eum('한').is_empty());
+    }
+
+    #[test]
+    fn initial_sound_rule() {
+        assert_eq!(dueum('락'), '낙');
+        assert_eq!(dueum('리'), '이');
+        assert_eq!(dueum('률'), '율');
+        assert_eq!(dueum('녀'), '여');
+        assert_eq!(dueum('노'), '노');
+        assert_eq!(dueum('도'), '도');
+        assert_eq!(dueum('a'), 'a');
+    }
 
     fn first(term: &str) -> Option<String> {
         hangul_readings(term).into_iter().next()
