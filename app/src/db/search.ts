@@ -34,6 +34,8 @@ export interface ISearchTerm {
   term: string;
   /** space-padded; for Korean, generated from Hanja (光速: ` 광속 `) */
   reading: string;
+  /** deinflection rules of all its entries, space-separated, e.g. `v5` */
+  rules?: string | null;
   /**
    * the pitch accent dictionaries' entries for the term and its reading (every reading if
    * it has none)

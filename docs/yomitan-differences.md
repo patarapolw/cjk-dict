@@ -14,10 +14,14 @@ Keep differences few, and add each new one here.
 
 ## Pitch accents
 
-|                          | Yomitan                                                               | cjk-dict                                                      | Why                                                     |
-| ------------------------ | --------------------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------- |
-| Forms                    | Text with a line over the high morae, a graph, or the downstep number | Text with a line over the high morae, and the downstep number | One form takes less room, and has what the others show. |
-| Nasal and devoiced morae | Marked                                                                | Not marked                                                    | Kanjium, the default, has none.                         |
+The layout follows Yomitan's: dictionaries in a numbered list, each with its tag (in Yomitan's color for pronunciation dictionaries), then its pitches; the reading with a line over the high morae that turns down at the drop, nasal and devoiced morae marked; then the downstep, e.g. `[2]`. It differs in:
+
+|                        | Yomitan                                                               | cjk-dict                                            | Why                                                                                |
+| ---------------------- | --------------------------------------------------------------------- | --------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Forms                  | Text and downstep by default; a graph, and each form, set in Settings | Text and downstep only                              | The app has no settings for it yet.                                                |
+| Where                  | In each entry                                                         | Once per word, above its entries                    | The app shows a word's entries from every dictionary together, under one headword. |
+| A word with no reading | Pitches whose reading is the word itself                              | Pitches of every reading, each drawn on its reading | Wikipedia's and Pixiv's entries have no readings: they would get none.             |
+| The pattern's name     | On the headword, as `data-pronunciation-categories`, for custom CSS   | In a tooltip on the reading                         | Learners can see it; the app has no custom CSS.                                    |
 
 ### Same result, different implementation
 

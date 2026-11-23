@@ -253,7 +253,11 @@
               字 {{ hanChars(headTerm(it)).join("") }}
             </button>
           </div>
-          <PitchAccents v-if="it.pitches?.length" :entries="it.pitches" />
+          <PitchAccents
+            v-if="it.pitches?.length"
+            :entries="it.pitches"
+            :rules="it.rules"
+          />
           <Term
             v-for="(ent, j) in it.entries"
             :key="j"

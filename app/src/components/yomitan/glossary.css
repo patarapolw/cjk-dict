@@ -51,6 +51,10 @@
   background: var(--app-tag-dictionary-background);
 }
 
+.tag[data-category="pronunciation-dictionary"] {
+  background: var(--app-tag-pronunciation-dictionary-background);
+}
+
 /* Images */
 .gloss-image-link {
   display: inline-block;

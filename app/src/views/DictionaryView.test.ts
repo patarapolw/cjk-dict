@@ -442,17 +442,29 @@ describe("DictionaryView", () => {
     await wrapper.get("input.search-input").setValue("橋");
     await lastSearch();
     await flushPromises();
-    const shown = wrapper.findAll(".pitch").map((p) => ({
-      high: p.findAll(".mora.high").map((m) => m.text()),
-      drop: p.findAll(".mora.drop").map((m) => m.text()),
+    const shown = wrapper.findAll(".pronunciation").map((p) => ({
+      high: p
+        .findAll('.pronunciation-mora[data-pitch="high"]')
+        .map((m) => m.text()),
+      drop: p
+        .findAll('.pronunciation-mora[data-pitch-next="low"]')
+        .map((m) => m.text()),
       text: p.text(),
     }));
     expect(shown).toEqual([
       // odaka: drops after し
-      { high: ["し"], drop: ["し"], text: "はし[2]Kanjium" },
-      { high: ["し"], drop: [], text: "はし[0]名Kanjium" },
+      { high: ["し"], drop: ["し"], text: "はし[2]" },
+      { high: ["し"], drop: [], text: "名はし[0]" },
     ]);
-    expect(describedText(wrapper.get(".pitch-reading").element)).toContain(
+    // the dictionary first, as in Yomitan
+    expect(
+      wrapper
+        .get(
+          '.pronunciation-group .tag[data-category="pronunciation-dictionary"]',
+        )
+        .text(),
+    ).toBe("Kanjium");
+    expect(describedText(wrapper.get(".pronunciation-text").element)).toContain(
       "Odaka",
     );
     wrapper.unmount();

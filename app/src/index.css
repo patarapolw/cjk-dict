@@ -26,6 +26,8 @@ body {
   --app-link: #1d4ed8;
   --app-tag-background: #6b7280;
   --app-tag-dictionary-background: #8e44ad;
+  /* Yomitan's, in both themes */
+  --app-tag-pronunciation-dictionary-background: #6640be;
   --app-gloss-image-background: #eeeeee;
   /* tooltips (components/Tooltip.vue): dark in both themes */
   --app-tooltip-background: #1f2937;

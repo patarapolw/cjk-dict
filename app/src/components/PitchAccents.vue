@@ -1,99 +1,175 @@
 <template>
-  <ul class="pitches" lang="ja-JP">
-    <template v-for="(ent, i) in entries" :key="i">
-      <li
-        v-for="(p, j) in ent.pitches"
-        :key="`${i}-${j}`"
-        class="pitch"
-        :data-dictionary="ent.dict_path"
-      >
-        <span
-          class="pitch-reading"
-          :aria-label="ariaLabel(ent.reading, p)"
-          v-tooltip="pitchDescription(ent.reading, p.position)"
-          ><span
-            v-for="(m, k) in pitchMorae(ent.reading, p.position)"
-            :key="k"
-            class="mora"
-            :class="{ high: m.high, drop: m.drop }"
-            aria-hidden="true"
-            >{{ m.text }}</span
-          ></span
+  <!-- laid out as Yomitan's pronunciations: a list of dictionaries (numbered if more than
+       one), each with its tag and its pitches (a list if more than one) -->
+  <ol class="pronunciation-group-list" lang="ja-JP" :data-count="groups.length">
+    <li
+      v-for="g in groups"
+      :key="g.dict_path"
+      class="pronunciation-group"
+      :data-dictionary="g.dict_path"
+    >
+      <span class="tag" data-category="pronunciation-dictionary">{{
+        g.dict_path
+      }}</span>
+      <ul class="pronunciation-list" :data-count="g.pitches.length">
+        <li
+          v-for="({ reading, pitch }, i) in g.pitches"
+          :key="i"
+          class="pronunciation"
+          :data-pitch-accent-downstep-position="downsteps(pitch.position)"
         >
-        <span v-if="downstep(p.position) !== null" class="downstep"
-          >[{{ downstep(p.position) }}]</span
-        >
-        <span v-for="t in p.tags ?? []" :key="t" class="tag">{{ t }}</span>
-        <span class="tag" data-category="dictionary">{{ ent.dict_path }}</span>
-      </li>
-    </template>
-  </ul>
+          <span v-for="t in pitch.tags ?? []" :key="t" class="tag">{{
+            t
+          }}</span>
+          <span class="pronunciation-text" v-tooltip="describe(reading, pitch)"
+            ><span
+              v-for="(m, k) in pitchMorae(reading, pitch)"
+              :key="k"
+              class="pronunciation-mora"
+              :data-pitch="m.high ? 'high' : 'low'"
+              :data-pitch-next="m.drop ? 'low' : undefined"
+              :data-nasal="m.nasal || undefined"
+              :data-devoice="m.devoice || undefined"
+              >{{ m.nasal ? withoutDakuten(m.text) : m.text
+              }}<span
+                v-if="m.nasal"
+                class="pronunciation-nasal-indicator" /><span
+                v-if="m.devoice"
+                class="pronunciation-devoice-indicator" /><span
+                class="pronunciation-mora-line" /></span></span
+          ><span class="pronunciation-downstep-notation"
+            >[{{ downsteps(pitch.position).join(",") }}]</span
+          >
+        </li>
+      </ul>
+    </li>
+  </ol>
 </template>
 
 <script setup lang="ts">
+import { computed } from "vue";
+
 import {
-  downstep,
+  downsteps,
+  groupByDictionary,
   IPitch,
   IPitchEntry,
+  isVerbOrAdjective,
   pitchDescription,
   pitchMorae,
+  withoutDakuten,
 } from "../util/pitch";
 import { vTooltip } from "../util/tooltip";
 
-defineProps<{
+const props = defineProps<{
   /** the pitch accent dictionaries' entries for a word */
   entries: IPitchEntry[];
+  /** the word's deinflection rules, e.g. `v5`: a verb's drop is kifuku */
+  rules?: string | null;
 }>();
 
-/** what a screen reader says: the reading, then where the pitch drops */
-function ariaLabel(reading: string, p: IPitch): string {
-  const n = downstep(p.position);
-  return n === null
-    ? `${reading}, ${p.position}`
-    : `${reading}, ${pitchDescription(reading, p.position)}`;
+const groups = computed(() => groupByDictionary(props.entries));
+
+function describe(reading: string, pitch: IPitch): string {
+  return pitchDescription(reading, pitch, isVerbOrAdjective(props.rules));
 }
 </script>
 
 <style scoped>
-.pitches {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem 1rem;
+.pronunciation-group-list {
   margin: 0 0 0.5rem;
-  padding: 0;
-  list-style: none;
+  padding: 0 0 0 1.4em;
+  list-style-type: decimal;
 }
 
-.pitch {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.25rem;
+.pronunciation-group-list[data-count="1"] {
+  padding-left: 0;
+  list-style-type: none;
 }
 
-.pitch-reading {
-  /* room above the morae for the high line */
-  padding-top: 0.15em;
+.pronunciation-list {
+  margin: 0;
+  padding: 0 0 0 1.4em;
+  list-style-type: circle;
 }
 
-.mora {
-  /* the lines are drawn on every mora, transparent where they're not, so the text
-     doesn't shift */
-  border-top: 2px solid transparent;
-  border-right: 2px solid transparent;
+/* one pitch: on the dictionary's line */
+.pronunciation-list[data-count="1"] {
+  display: inline;
+  padding-left: 0;
+  list-style-type: none;
 }
 
-.mora.high {
-  border-top-color: currentColor;
+.pronunciation-list[data-count="1"] .pronunciation {
+  display: inline;
 }
 
-/* the pitch drops after this mora: the high line turns down */
-.mora.drop {
-  border-right-color: currentColor;
+.pronunciation-group::marker,
+.pronunciation::marker {
+  color: var(--app-text-muted);
 }
 
-.downstep {
-  font-size: 0.875em;
-  opacity: 0.8;
+.pronunciation {
+  line-height: 1.5;
+}
+
+.pronunciation-text {
+  display: inline;
+}
+
+.pronunciation-mora {
+  display: inline-block;
+  position: relative;
+}
+
+/* the line over a high mora; where the pitch drops, it turns down a little */
+.pronunciation-mora[data-pitch="high"] > .pronunciation-mora-line {
+  position: absolute;
+  top: 0.1em;
+  left: 0;
+  right: 0;
+  border-top: 0.1em solid currentColor;
+  pointer-events: none;
+}
+
+.pronunciation-mora[data-pitch="high"][data-pitch-next="low"] {
+  padding-right: 0.1em;
+  margin-right: 0.1em;
+}
+
+.pronunciation-mora[data-pitch="high"][data-pitch-next="low"]
+  > .pronunciation-mora-line {
+  right: -0.1em;
+  height: 0.4em;
+  border-right: 0.1em solid currentColor;
+}
+
+/* a nasal mora (鼻濁音): its kana without dakuten, and a small circle */
+.pronunciation-nasal-indicator {
+  position: absolute;
+  top: 0.125em;
+  right: -0.125em;
+  width: 0.375em;
+  height: 0.375em;
+  border: 1px solid var(--app-error);
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+
+/* a devoiced mora: a dotted circle around it */
+.pronunciation-devoice-indicator {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 1.125em;
+  height: 1.125em;
+  border: 1px dotted var(--app-error);
+  border-radius: 50%;
+  box-sizing: border-box;
+  transform: translate(-50%, -50%);
+}
+
+.pronunciation-downstep-notation {
+  margin-left: 0.25em;
 }
 </style>
