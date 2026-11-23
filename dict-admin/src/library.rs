@@ -1,5 +1,6 @@
 //! The local dictionary library: `<name>.zip` files + `dicts.json`, plus the
-//! `search.db` / `manifest.json` that `build` writes. `upload` mirrors it to R2.
+//! `ids.txt` / `search.db` / `manifest.json` that `build` writes. `upload` mirrors it to R2,
+//! but for `search.db`, which the app builds itself.
 
 use std::{
     fs::File,
@@ -14,6 +15,9 @@ use sha2::{Digest, Sha256};
 pub const DICTS_JSON: &str = "dicts.json";
 pub const SEARCH_DB: &str = "search.db";
 pub const MANIFEST: &str = "manifest.json";
+pub const IDS_TXT: &str = "ids.txt";
+/// [`Manifest::version`]: 2 lists `ids.txt` in place of `search.db`
+pub const MANIFEST_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DictEntry {
@@ -30,10 +34,13 @@ pub struct DictEntry {
 }
 
 /// What the app downloads: compare `sha256` with the local copy to decide what to fetch.
+/// It builds search.db from these, in this order, with these languages.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
     pub version: u32,
-    pub search_db: FileInfo,
+    /// the CJKVI IDS database's, for the character tables; absent in manifests from before
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ids: Option<FileInfo>,
     pub dicts: Vec<ManifestDict>,
 }
 

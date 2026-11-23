@@ -1,9 +1,11 @@
-//! Dictionaries: sync the library (Yomitan zips + search.db + manifest.json) from R2,
-//! search it, and serve media from the zips.
+//! Dictionaries: sync the library (Yomitan zips + ids.txt + manifest.json) from R2, build
+//! search.db from it, search it, and serve media from the zips.
 //!
-//! Files land in `<app data>/dicts/incoming/` (via the `download_url` command, resumable)
-//! and are moved into `<app data>/dicts/` by `dict_commit` once all of them are there,
-//! with the open database closed first (Windows can't replace open files).
+//! Files land in `<app data>/dicts/incoming/` (via the `download_url` command, resumable).
+//! Once all of them are there, `dict_commit` builds the new search.db next to them, from
+//! the one in use (only the dictionaries that changed are indexed), while searches go on
+//! with that one. Then it moves everything into `<app data>/dicts/`, with the open database
+//! closed first (Windows can't replace open files).
 
 use std::{
     collections::HashMap,
@@ -18,12 +20,15 @@ use tauri_plugin_http::reqwest;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager, State};
-use yomitan_parser::search::{DictInfo, HanChar, HanList, SearchDb, SearchRequest, SearchResult};
+use yomitan_parser::search::{
+    self, DictInfo, DictSource, HanChar, HanList, SearchDb, SearchRequest, SearchResult,
+};
 
-use crate::error::AppError;
+use crate::{AppState, error::AppError};
 
 const MANIFEST: &str = "manifest.json";
 const SEARCH_DB: &str = "search.db";
+const IDS_TXT: &str = "ids.txt";
 const INCOMING: &str = "incoming";
 const PENDING: &str = "manifest.pending.json";
 
@@ -47,21 +52,88 @@ struct FileInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ManifestDict {
     name: String,
+    /// the terms' language, e.g. `ja-JP`, as dict-admin indexed it
+    #[serde(default)]
+    lang: Option<String>,
+    /// the definitions' language, e.g. `en`
+    #[serde(default)]
+    target_lang: Option<String>,
     #[serde(flatten)]
     file: FileInfo,
 }
 
+/// dict-admin's `manifest.json`: the files of the library, and the dictionaries in build
+/// order. One from before the app built search.db (version 1) lists `search_db` in place of
+/// `ids`; the app ignores that.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Manifest {
     version: u32,
-    search_db: FileInfo,
+    /// the CJKVI IDS database's `ids.txt`, for the character tables
+    #[serde(default)]
+    ids: Option<FileInfo>,
     dicts: Vec<ManifestDict>,
 }
 
 impl Manifest {
     fn files(&self) -> impl Iterator<Item = &FileInfo> {
-        std::iter::once(&self.search_db).chain(self.dicts.iter().map(|d| &d.file))
+        self.ids.iter().chain(self.dicts.iter().map(|d| &d.file))
     }
+}
+
+/// What a commit indexes, from what search.db was built from (`old`, the committed
+/// manifest) and what it is to be built from (`new`)
+#[derive(Debug, PartialEq)]
+struct IndexPlan {
+    /// build search.db from scratch, of every dictionary
+    full: bool,
+    /// the dictionaries to index, in build order
+    index: Vec<String>,
+    /// the dictionaries to take out first: removed or changed ones
+    remove: Vec<String>,
+}
+
+/// `full` when there is no search.db to update (`current` is false: none, or one built
+/// otherwise, e.g. the one an earlier version downloaded) or nothing it was built from.
+/// Else the dictionaries that are new or changed (zip or languages) are indexed again.
+fn index_plan(old: Option<&Manifest>, new: &Manifest, current: bool) -> IndexPlan {
+    let all = || new.dicts.iter().map(|d| d.name.clone()).collect();
+    let Some(old) = old.filter(|_| current) else {
+        return IndexPlan {
+            full: true,
+            index: all(),
+            remove: vec![],
+        };
+    };
+    let same = |a: &ManifestDict, b: &ManifestDict| {
+        a.file.sha256 == b.file.sha256 && a.lang == b.lang && a.target_lang == b.target_lang
+    };
+    let index: Vec<String> = new
+        .dicts
+        .iter()
+        .filter(|d| !old.dicts.iter().any(|o| o.name == d.name && same(o, d)))
+        .map(|d| d.name.clone())
+        .collect();
+    let remove = old
+        .dicts
+        .iter()
+        .filter(|o| !new.dicts.iter().any(|d| d.name == o.name) || index.contains(&o.name))
+        .map(|o| o.name.clone())
+        .collect();
+    IndexPlan {
+        full: false,
+        index,
+        remove,
+    }
+}
+
+/// `dict-index-progress`: what building search.db is at
+#[derive(Clone, Serialize)]
+struct IndexProgress<'a> {
+    /// a dictionary's name, or a step such as `full-text index`
+    step: &'a str,
+    /// term banks indexed so far, of `total`; 0 when not counted
+    done: usize,
+    total: usize,
 }
 
 /// Where the library is downloaded from.
@@ -151,6 +223,16 @@ impl DictState {
             eprintln!("dictionaries not opened: {e}");
         }
         s
+    }
+
+    /// Whether `<dir>/search.db` is there, built as this version builds it, so that a
+    /// commit can update it rather than build it from scratch
+    fn index_current(&self) -> bool {
+        search::build_version(&self.dir.join(SEARCH_DB))
+            .ok()
+            .flatten()
+            .as_deref()
+            == Some(search::BUILD_VERSION)
     }
 
     /// Drop the open database and wait for in-flight searches to let go of it:
@@ -314,6 +396,13 @@ pub async fn dict_plan(app: AppHandle) -> Result<Vec<PlannedFile>, AppError> {
     }
     let text = res.text().await?;
     let remote_manifest: Manifest = serde_json::from_str(&text)?;
+    if remote_manifest.ids.is_none() {
+        return Err(AppError::Error(
+            "the library is from before the app built search.db: build and upload it again \
+             with dict-admin"
+                .into(),
+        ));
+    }
 
     // hashing files and committing is blocking work
     tauri::async_runtime::spawn_blocking(move || {
@@ -349,22 +438,22 @@ pub async fn dict_plan(app: AppHandle) -> Result<Vec<PlannedFile>, AppError> {
 
         let unchanged =
             std::fs::read_to_string(state.dir.join(MANIFEST)).ok() == Some(text.clone());
-        if unchanged && out.is_empty() {
+        if unchanged && out.is_empty() && state.index_current() {
             let _ = std::fs::remove_file(state.dir.join(PENDING));
             return Ok(out);
         }
+        // `dict_commit` once these (and the tokenizer dictionaries, to build search.db) are
+        // downloaded; right away if there are none, e.g. when dictionaries were only removed
         std::fs::write(state.dir.join(PENDING), &text)?;
-        // nothing to download, but dicts may have been removed: commit right away
-        if out.is_empty() {
-            commit(&app, &state)?;
-        }
         Ok(out)
     })
     .await
     .map_err(|e| AppError::Error(e.to_string()))?
 }
 
-/// Verify downloaded files, move them into place, drop removed dictionaries, reopen.
+/// Verify downloaded files, build search.db from them, move them into place, drop removed
+/// dictionaries, reopen. Nothing to do without a plan (`dict_plan`) to commit. Needs the
+/// tokenizer dictionaries.
 #[tauri::command]
 pub async fn dict_commit(app: AppHandle) -> Result<Vec<String>, AppError> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -409,6 +498,10 @@ fn commit(app: &AppHandle, state: &DictState) -> Result<(), AppError> {
         }
     }
 
+    // the new search.db, next to the files downloaded, while the one in use stays open
+    let new_db = incoming.join(SEARCH_DB);
+    build_index(app, state, &m, &new_db)?;
+
     // close search.db and the zips before replacing them
     state.close()?;
     for f in m.files() {
@@ -417,6 +510,7 @@ fn commit(app: &AppHandle, state: &DictState) -> Result<(), AppError> {
             std::fs::rename(&new, state.dir.join(&f.file))?;
         }
     }
+    std::fs::rename(&new_db, state.dir.join(SEARCH_DB))?;
     let keep: Vec<&str> = m.files().map(|f| f.file.as_str()).collect();
     for e in std::fs::read_dir(&state.dir)?.flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
@@ -428,6 +522,58 @@ fn commit(app: &AppHandle, state: &DictState) -> Result<(), AppError> {
     // the files moved: `committed()` vouches for them from now on
     state.hashed.lock()?.clear();
     state.reopen()
+}
+
+/// Build `out`, the search.db of `m`'s dictionaries: an update of the one in use, or one
+/// from scratch. Reports progress as `dict-index-progress` events.
+fn build_index(
+    app: &AppHandle,
+    state: &DictState,
+    m: &Manifest,
+    out: &Path,
+) -> Result<(), AppError> {
+    let incoming = state.dir.join(INCOMING);
+    // new files first: those in place are the old ones of changed dictionaries
+    let zip_dirs = [incoming.clone(), state.dir.clone()];
+    let find = |file: &str| {
+        zip_dirs
+            .iter()
+            .map(|d| d.join(file))
+            .find(|p| p.is_file())
+            .ok_or_else(|| AppError::Error(format!("{file} is missing")))
+    };
+    let plan = index_plan(state.local_manifest().as_ref(), m, state.index_current());
+    let sources = m
+        .dicts
+        .iter()
+        .filter(|d| plan.index.contains(&d.name))
+        .map(|d| {
+            Ok(DictSource {
+                name: d.name.clone(),
+                zip: find(&d.file.file)?,
+                lang: d.lang.clone(),
+                target_lang: d.target_lang.clone(),
+            })
+        })
+        .collect::<Result<Vec<_>, AppError>>()?;
+    let ids_txt = find(IDS_TXT)?;
+
+    let progress = |step: &str, done: usize, total: usize| {
+        let _ = app.emit("dict-index-progress", IndexProgress { step, done, total });
+    };
+    let tok = &app.state::<AppState>().tokenizer_mapper;
+    let base = state.dir.join(SEARCH_DB);
+    tauri::async_runtime::block_on(async {
+        if plan.full {
+            search::build(out, &sources, tok, progress).await
+        } else {
+            search::update(&base, out, &sources, &plan.remove, &zip_dirs, tok, progress).await
+        }
+    })?;
+    progress("characters", 0, 0);
+    let changed = plan.full || !plan.index.is_empty() || !plan.remove.is_empty();
+    search::build_chars_from(out, &ids_txt, changed, &zip_dirs)?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -556,6 +702,93 @@ pub fn asset_protocol(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn manifest(dicts: &[(&str, &str, Option<&str>)]) -> Manifest {
+        Manifest {
+            version: 2,
+            ids: Some(FileInfo {
+                file: IDS_TXT.into(),
+                size: 1,
+                sha256: "i".into(),
+            }),
+            dicts: dicts
+                .iter()
+                .map(|(name, sha256, lang)| ManifestDict {
+                    name: name.to_string(),
+                    lang: lang.map(String::from),
+                    target_lang: None,
+                    file: FileInfo {
+                        file: format!("{name}.zip"),
+                        size: 1,
+                        sha256: sha256.to_string(),
+                    },
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn only_changed_dictionaries_are_indexed_again() {
+        let old = manifest(&[
+            ("A", "a", None),
+            ("B", "b", None),
+            ("C", "c", Some("ja-JP")),
+        ]);
+        // B replaced, C's language changed, D added, A kept
+        let new = manifest(&[
+            ("A", "a", None),
+            ("B", "b2", None),
+            ("C", "c", Some("zh")),
+            ("D", "d", None),
+        ]);
+        assert_eq!(
+            index_plan(Some(&old), &new, true),
+            IndexPlan {
+                full: false,
+                index: vec!["B".into(), "C".into(), "D".into()],
+                remove: vec!["B".into(), "C".into()],
+            }
+        );
+        let fewer = manifest(&[("C", "c", Some("ja-JP"))]);
+        assert_eq!(
+            index_plan(Some(&old), &fewer, true),
+            IndexPlan {
+                full: false,
+                index: vec![],
+                remove: vec!["A".into(), "B".into()],
+            }
+        );
+    }
+
+    #[test]
+    fn without_a_current_search_db_everything_is_indexed() {
+        let old = manifest(&[("A", "a", None)]);
+        let new = manifest(&[("A", "a", None), ("B", "b", None)]);
+        let full = IndexPlan {
+            full: true,
+            index: vec!["A".into(), "B".into()],
+            remove: vec![],
+        };
+        // e.g. the search.db an earlier version downloaded
+        assert_eq!(index_plan(Some(&old), &new, false), full);
+        assert_eq!(index_plan(None, &new, true), full);
+    }
+
+    #[test]
+    fn a_manifest_from_before_reads() {
+        let m: Manifest = serde_json::from_str(
+            r#"{"version":1,"search_db":{"file":"search.db","size":5,"sha256":"s"},
+                "dicts":[{"name":"A","title":"A","revision":"1","lang":"ja-JP","term_count":5,
+                          "file":"A.zip","size":1,"sha256":"a"}]}"#,
+        )
+        .unwrap();
+        assert!(m.ids.is_none());
+        assert_eq!(m.dicts[0].lang.as_deref(), Some("ja-JP"));
+        assert_eq!(
+            m.files().map(|f| f.file.as_str()).collect::<Vec<_>>(),
+            ["A.zip"]
+        );
+    }
 
     #[test]
     fn sha256_file_reports_progress() {

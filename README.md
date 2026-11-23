@@ -2,27 +2,28 @@
 
 Yomitan dictionary search for Chinese, Japanese and Korean: a Tauri app (desktop and Android) that searches a dictionary library kept in a private Cloudflare R2 bucket.
 
-- The **library** is a folder of Yomitan dictionary zips, plus `search.db`, a small SQLite index built from them.
+- The **library** is a folder of Yomitan dictionary zips.
   - The zips' term banks are re-split into \~256 KB files, so the app can read single entries quickly.
   - `dict-admin` manages the library, and `rclone` mirrors it to R2.
 - The **app** downloads the library, or only what changed, and searches on the device:
+  - It builds `search.db`, a small SQLite index, from the zips, indexing only the dictionaries that changed.
   - It queries `search.db` for matches.
-  - It reads definitions and images straight from the zips, so nothing is indexed on the device.
+  - It reads definitions and images straight from the zips, so only what search needs is indexed.
 
 ```
 yomitan-parser/   Rust crate: Yomitan zip reader, search.db build + query, lindera tokenizer, pinyin
-dict-admin/       Rust CLI: manage the library, build search.db, upload with rclone
+dict-admin/       Rust CLI: manage the library, check it builds, upload with rclone
 app/              Tauri app (Vue 3); app/src-tauri is its own Cargo workspace
 docs/             how dict-admin, searching and the app work in detail
 ```
 
-Words are split into tokens by [lindera](https://github.com/lindera/lindera), a morphological analyzer, with its unidic (Japanese), ko-dic (Korean) and cc-cedict (Chinese) dictionaries. `dict-admin` uses them to index terms, and the app to tokenize `~` queries.
+Words are split into tokens by [lindera](https://github.com/lindera/lindera), a morphological analyzer, with its unidic (Japanese), ko-dic (Korean) and cc-cedict (Chinese) dictionaries. The app uses them to index terms and to tokenize `~` queries, and `dict-admin` to index terms.
 
 More in [`docs/`](docs/):
 
 - [dict-admin.md](docs/dict-admin.md): each `dict-admin` command, dictionary languages, the default dictionaries.
 - [search.md](docs/search.md): search syntax, wildcards, readings, characters, Korean romanization.
-- [app.md](docs/app.md): how the app downloads the library, shows entries, and its tooltips.
+- [app.md](docs/app.md): how the app downloads the library, builds `search.db`, shows entries, and its tooltips.
 - [yomitan-differences.md](docs/yomitan-differences.md): where rendering differs from Yomitan.
 
 ## Setup
@@ -52,9 +53,12 @@ The app is currently set up for personal use. A public release would need change
 library/
   <name>.zip      Yomitan zips, rebanked (default + custom dictionaries)
   dicts.json      [{ name, lang?, target_lang?, source? }]: build order and language overrides
-  search.db       written by `build`: terms, tokens, readings, tags, and where each entry is in its zip;
-                  character decomposition, and where each kanji entry is; pitch accents
-  manifest.json   written by `build`: file sizes and sha256; the app compares these to download only what changed
+  ids.txt         downloaded by `build`: the CJKVI IDS database, how characters break down
+  search.db       written by `build`, as the app builds its own; not uploaded: terms, tokens, readings,
+                  tags, and where each entry is in its zip; character decomposition, and where each
+                  kanji entry is; pitch accents
+  manifest.json   written by `build`: file sizes and sha256, build order and languages; the app compares
+                  these to download only what changed, and to index only what changed
 ```
 
 `pnpm admin <command>` runs `dict-admin` (`cargo run --release`), passing arguments through. The library folder defaults to `library/`; set `--library` or `CJK_DICT_LIBRARY` to use another.
@@ -63,7 +67,7 @@ To start a library and publish it:
 
 ```bash
 pnpm admin defaults                        # download the default dictionaries
-pnpm admin build                           # search.db + manifest.json
+pnpm admin build                           # manifest.json (+ search.db, to check)
 pnpm admin upload --remote r2:cjk-dict     # rclone; or set CJK_DICT_REMOTE
 ```
 
@@ -84,14 +88,14 @@ pnpm admin list                            # with L1, L2 (* set in dicts.json), 
 pnpm admin size                            # estimated R2 mirror size by language
 pnpm admin size --lang ja-JP               # only Japanese dictionary zips
 
-pnpm admin build                           # search.db + manifest.json
-pnpm admin rebuild                         # discard and rebuild the complete search index
+pnpm admin build                           # manifest.json (+ search.db, to check)
+pnpm admin rebuild                         # the same, with search.db built from scratch
 pnpm admin upload --remote r2:cjk-dict     # rclone; or set CJK_DICT_REMOTE
 ```
 
 - `--lang` and `--target-lang` set a dictionary's languages: its terms' (L1) and its definitions' (L2), which pick the forms of Han characters. Most dictionaries need neither; see [Languages](docs/dict-admin.md#languages).
-- `build` indexes only new or changed dictionaries; `rebuild` starts over.
-- `upload` refuses a stale build, and uploads in an order that never leaves the app a manifest pointing at missing files.
+- `build` indexes only new or changed dictionaries into the library's `search.db`; `rebuild` starts over. The app builds its own the same way, so this one only checks that the dictionaries index, and counts their entries for `list`.
+- `upload` refuses a stale build, and uploads in an order that never leaves the app a manifest pointing at missing files. It leaves out `search.db`.
 
 ### R2 and rclone
 
@@ -113,7 +117,6 @@ pnpm admin upload --remote r2:cjk-dict     # rclone; or set CJK_DICT_REMOTE
 | `CJK_DICT_REMOTE`      | where `upload` copies the library: an rclone `<remote>:<bucket>[/<prefix>]`, e.g. `r2:cjk-dict`, `r2` being the remote's name in `rclone config` |
 | `CJK_DICT_LIBRARY`     | the library folder; default `library`                                                                                                            |
 | `CJK_DICT_LINDERA_DIR` | the tokenizer dictionaries; default `tmp/lindera`                                                                                                |
-| `CJK_DICT_IDS_DIR`     | the CJKVI IDS database; default `tmp/cjkvi-ids`                                                                                                  |
 | `GITHUB_TOKEN`         | optional, for `defaults` when GitHub's API rate-limits it                                                                                        |
 
 A prefix in `CJK_DICT_REMOTE` must match the app's `CJK_DICT_R2_PREFIX`.
@@ -184,7 +187,7 @@ How the app downloads and searches the library: [docs/app.md](docs/app.md), [doc
 - The code is under the [MIT License](LICENSE).
 - Dictionaries, and data built from them such as `search.db`, keep their own licenses: see the [default dictionaries](docs/dict-admin.md#defaults) and their projects. So do:
   - [lindera](https://github.com/lindera/lindera)'s tokenizer dictionaries, downloaded from its releases;
-  - [hanja_hangul](https://crates.io/crates/hanja_hangul)'s word tables, which `dict-admin` includes;
-  - [libhangul](https://github.com/libhangul/libhangul)'s Hanja readings (BSD-3-Clause), which `dict-admin` includes;
-  - the [CJKVI IDS database](https://github.com/cjkvi/cjkvi-ids)'s `ids.txt` (derived from the CHISE project, GPLv2), which `search.db` includes;
+  - [hanja_hangul](https://crates.io/crates/hanja_hangul)'s word tables (CC BY-SA 2.0 KR), which `dict-admin` and the app include;
+  - [libhangul](https://github.com/libhangul/libhangul)'s Hanja readings (BSD-3-Clause), which `dict-admin` and the app include;
+  - the [CJKVI IDS database](https://github.com/cjkvi/cjkvi-ids)'s `ids.txt` (derived from the CHISE project, GPLv2), which the library and `search.db` include;
   - pitch accent dictionaries' entries, e.g. [Kanjium](https://github.com/mifunetoshiro/kanjium)'s (CC BY-SA 4.0), which `search.db` includes.

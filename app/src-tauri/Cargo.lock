@@ -1818,6 +1818,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "hanja_hangul"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4a64fd6cccb7f552b261a59b362e2ccdc7785b0f60e0b74f9b1935139423964"
+
+[[package]]
 name = "hashbrown"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6174,6 +6180,7 @@ dependencies = [
 name = "yomitan-parser"
 version = "0.2.0"
 dependencies = [
+ "hanja_hangul",
  "lindera",
  "lindera-analysis",
  "rusqlite",

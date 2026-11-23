@@ -4,11 +4,25 @@ How the app gets the library and shows entries. The [README](../README.md#app) h
 
 ## Downloading the library
 
-- On start, the app compares the remote `manifest.json` with its own copy, and downloads only the changed files.
+- On start, the app compares the remote `manifest.json` with its own copy, and downloads only the changed files: dictionary zips and `ids.txt`.
 - Downloads run in the background and resume where they stopped.
-- Files go to a staging folder, and replace the old ones only when all of them have arrived and their checksums match. Until then, the app keeps searching the previous version.
+- Files go to a staging folder, and replace the old ones only when all of them have arrived and their checksums match.
 - It signs its R2 requests itself, with presigned URLs.
-- On first launch, it also downloads the [lindera](https://github.com/lindera/lindera) tokenizer dictionaries in the background, used to tokenize `~` queries:
+
+## Building search.db
+
+- The app builds `search.db` itself, from the zips, once they have arrived; nothing downloads one.
+  - It's the same build as `dict-admin`'s (see [dict-admin.md](dict-admin.md#build-and-rebuild)): the dictionaries in the manifest's order, with its languages.
+  - It's built next to the files downloaded, then put in place with them. Until then, the app keeps searching the previous version.
+- Only new or changed dictionaries are indexed: their zip or languages changed since the last build. Removed ones are taken out.
+- It's built from scratch when there is none, or when the app builds it differently from the one it has (`search::BUILD_VERSION`), e.g. the `search.db` an earlier version downloaded.
+- It needs the tokenizer dictionaries, so it waits for them on first launch.
+- Its progress shows in the downloads panel, and on Android in the sync notification: "Indexing <dictionary>", with how many of its term banks are done.
+- A build that fails, e.g. as the app was closed, is tried again on the next launch, without downloading anything again.
+
+## Other downloads
+
+- On first launch, the app also downloads the [lindera](https://github.com/lindera/lindera) tokenizer dictionaries in the background, used to index terms and tokenize `~` queries:
   - unidic (Japanese), ko-dic (Korean) and cc-cedict (Chinese), from [lindera's 6.2.0 release](https://github.com/lindera/lindera/releases/tag/v6.2.0);
   - \~73 MB to download, \~310 MB unpacked.
 - It also downloads fonts for the Han characters the system's fonts lack, such as rare components in a character's breakdown:

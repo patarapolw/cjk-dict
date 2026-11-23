@@ -20,7 +20,7 @@
   </div>
   <!-- Background downloads: non-modal, the app stays usable meanwhile -->
   <aside
-    v-if="toBeLoaded.length || loadErrors.length || verifying"
+    v-if="toBeLoaded.length || loadErrors.length || verifying || indexing"
     class="downloads"
     :class="{ collapsed: downloadsCollapsed }"
     aria-live="polite"
@@ -30,6 +30,7 @@
         Downloading ({{ toBeLoaded.length }} left)
       </span>
       <span v-else-if="verifying">Verifying dictionaries</span>
+      <span v-else-if="indexing">Indexing dictionaries</span>
       <span v-else>Download failed</span>
       <button
         type="button"
@@ -39,7 +40,7 @@
         {{ downloadsCollapsed ? "Show" : "Hide" }}
       </button>
       <button
-        v-if="!toBeLoaded.length && !verifying"
+        v-if="!toBeLoaded.length && !verifying && !indexing"
         type="button"
         class="text-button"
         @click="loadErrors = []"
@@ -64,6 +65,27 @@
           <div
             class="progress-value"
             :style="{ width: `${verifyingPercent}%` }"
+          />
+        </div>
+      </div>
+      <div v-else-if="indexing">
+        <p>
+          {{ indexingStatus?.text }}
+          <span v-if="indexingStatus?.percent != null" style="float: right">
+            ({{ indexingStatus.percent }}%)
+          </span>
+        </p>
+        <div
+          class="progress"
+          role="progressbar"
+          :aria-label="indexingStatus?.text"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          :aria-valuenow="indexingStatus?.percent ?? undefined"
+        >
+          <div
+            class="progress-value"
+            :style="{ width: `${indexingStatus?.percent ?? 0}%` }"
           />
         </div>
       </div>
@@ -100,9 +122,12 @@ import Tooltip from "./components/Tooltip.vue";
 import {
   DownloadUrlProgress,
   DownloadingProps,
+  IndexProgress,
   SyncStatus,
   VerifyProgress,
   dictsVersion,
+  indexStatus,
+  indexing,
   loadErrors,
   syncStatus,
   toBeLoaded,
@@ -139,6 +164,10 @@ const verifyingPercent = computed(() => {
   return v && v.size ? Math.floor((100 * v.hashed) / v.size) : 0;
 });
 
+const indexingStatus = computed(() =>
+  indexing.value ? indexStatus(indexing.value) : null,
+);
+
 // Checksumming the library takes minutes on a phone: show which file it's at.
 // `dict_plan` and `dict_commit` in flight; an event arriving after one returned is stale.
 const checksumming = ref(0);
@@ -149,6 +178,7 @@ async function checksummed<T>(run: () => Promise<T>) {
   } finally {
     checksumming.value--;
     verifying.value = null;
+    indexing.value = null;
   }
 }
 
@@ -159,6 +189,7 @@ const status = computed(() =>
   syncStatus({
     checking: checksumming.value > 0,
     verifying: verifying.value,
+    indexing: indexing.value,
     download: download.value,
     queue: toBeLoaded.value,
   }),
@@ -203,6 +234,9 @@ onMounted(async () => {
     await listen<VerifyProgress>("dict-verify-progress", ({ payload }) => {
       if (checksumming.value) verifying.value = payload;
     }),
+    await listen<IndexProgress>("dict-index-progress", ({ payload }) => {
+      if (checksumming.value) indexing.value = payload;
+    }),
     await listen<DownloadUrlProgress>(
       "download-url-progress",
       ({ payload }) => {
@@ -236,10 +270,7 @@ async function runQueue() {
       }
       toBeLoaded.value = toBeLoaded.value.filter((d) => d !== current);
 
-      // last file of a dictionary sync: put everything in place at once
-      if (current.dict && !toBeLoaded.value.some((d) => d.dict)) {
-        await commitDicts();
-      }
+      await commitWhenReady();
       if (current.font) await installFonts();
     }
   } finally {
@@ -250,6 +281,17 @@ async function runQueue() {
 watch(toBeLoaded, () => {
   if (toBeLoaded.value.length) runQueue();
 });
+
+// A plan from `dict_plan` to commit: once its files are downloaded, and the tokenizer
+// dictionaries, which building search.db needs. All of them at once.
+let commitPending = false;
+async function commitWhenReady() {
+  if (!commitPending || toBeLoaded.value.some((d) => d.dict || d.lindera)) {
+    return;
+  }
+  commitPending = false;
+  await commitDicts();
+}
 
 async function commitDicts() {
   try {
@@ -265,7 +307,15 @@ async function commitDicts() {
 }
 
 async function loadAll() {
-  // Dictionaries: download what changed in the library (zips + search.db), then commit.
+  // lindera dictionaries, for tokenizing "~" search queries on the device and terms when
+  // building search.db: first, as committing dictionaries waits for them.
+  toBeLoaded.value = [
+    ...toBeLoaded.value,
+    ...(await makeLinderaDownloadList(["unidic", "ko-dic", "cc-cedict"])),
+  ];
+
+  // Dictionaries: download what changed in the library (zips + ids.txt), then commit,
+  // which builds search.db from them.
   try {
     const plan = await checksummed(() =>
       invoke<{ filename: string; url: string }[]>("dict_plan"),
@@ -281,6 +331,9 @@ async function loadAll() {
       ),
     ];
     if (!plan.length) dictsVersion.value++;
+    // nothing to commit unless dict_plan left a plan: then dict_commit does nothing
+    commitPending = true;
+    await commitWhenReady();
   } catch (e) {
     console.error(e);
     loadErrors.value = [
@@ -288,12 +341,6 @@ async function loadAll() {
       { filename: "dictionaries", error: String(e) },
     ];
   }
-
-  // lindera dictionaries, for tokenizing "~" search queries on the device.
-  toBeLoaded.value = [
-    ...toBeLoaded.value,
-    ...(await makeLinderaDownloadList(["unidic", "ko-dic", "cc-cedict"])),
-  ];
 
   // fonts for the Han characters the system's fonts lack: those already here first
   try {

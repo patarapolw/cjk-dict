@@ -31,6 +31,24 @@ describe("syncStatus", () => {
     ).toEqual({ text: "Verifying search.db", percent: 29 });
   });
 
+  it("shows how far building search.db is", () => {
+    expect(
+      syncStatus({
+        ...idle,
+        checking: true,
+        indexing: { step: "CC-CEDICT", done: 3, total: 12 },
+      }),
+    ).toEqual({ text: "Indexing CC-CEDICT", percent: 25 });
+    // a step without banks to count
+    expect(
+      syncStatus({
+        ...idle,
+        checking: true,
+        indexing: { step: "characters", done: 0, total: 0 },
+      }),
+    ).toEqual({ text: "Indexing characters", percent: null });
+  });
+
   it("shows the current download's progress and what's left", () => {
     expect(
       syncStatus({

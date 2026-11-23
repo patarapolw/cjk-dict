@@ -4,8 +4,9 @@
 //! where each entry is: dict + `term_bank_N.json` + array index). Definitions and media
 //! stay in the zips, which are read on demand.
 //!
-//! - [`build`] (dict-admin): zips -> `search.db`
-//! - [`build_chars`] (dict-admin): character decomposition ([`crate::ids`]) -> `search.db`
+//! - [`build`], [`update`]: zips -> `search.db`; the app builds its own, from the zips it
+//!   downloads, and dict-admin one to check the library
+//! - [`build_chars`]: character decomposition ([`crate::ids`]) -> `search.db`
 //! - [`SearchDb`] (app): query `search.db`, then read entries / media from the zips
 
 use std::{
@@ -118,8 +119,8 @@ CREATE TABLE IF NOT EXISTS kanji_link (
 
 /// Pitch accents (Yomitan term meta of mode `pitch`, e.g. Kanjium's), every entry whole, so
 /// a search shows them with the words without reading the zips. As in Yomitan, an entry is
-/// found by its term and reading exactly as the dictionary has them. Kept compact, as the
-/// app downloads search.db ([`pack_pitches`]). Created on an existing search.db too, which
+/// found by its term and reading exactly as the dictionary has them. Kept compact
+/// ([`pack_pitches`]). Created on an existing search.db too, which
 /// an update then backfills.
 const PITCH_SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS term_pitch (
@@ -207,6 +208,32 @@ CREATE TABLE IF NOT EXISTS term_char (
 
 /// `meta.term_char`: how `term_char` was filled. A build fills it again when this changes.
 const TERM_CHAR_VERSION: &str = "1";
+
+/// `meta.build`: how this version builds search.db. The app builds its search.db from
+/// scratch when the one it has says otherwise (or nothing, as one from before this does),
+/// rather than update it: bump it when a build would index the same zips differently.
+pub const BUILD_VERSION: &str = "1";
+
+/// `meta.build` of `db` ([`BUILD_VERSION`]); `None` without a db, or for one from before it
+pub fn build_version(db: &Path) -> Result<Option<String>, YomitanError> {
+    if !db.is_file() {
+        return Ok(None);
+    }
+    let conn = Connection::open_with_flags(db, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    Ok(meta(&conn, "build")?)
+}
+
+/// `<dir>/<name>.zip` in the first of `dirs` that has it
+fn find_zip(dirs: &[PathBuf], name: &str) -> Option<PathBuf> {
+    dirs.iter()
+        .map(|d| d.join(format!("{name}.zip")))
+        .find(|p| p.is_file())
+}
+
+/// The folder of `db`, where its zips are unless said otherwise
+fn db_dir(db: &Path) -> Vec<PathBuf> {
+    vec![db.parent().unwrap_or(Path::new(".")).to_path_buf()]
+}
 
 /// Facts about how search.db was built, e.g. `kana` = 1: terms and readings have katakana
 /// as hiragana ([`normalize_term`]).
@@ -357,7 +384,7 @@ pub async fn build(
     tok: &TokenizerMapper,
     progress: impl Fn(&str, usize, usize),
 ) -> Result<Vec<DictInfo>, YomitanError> {
-    build_inner(out, dicts, &[], tok, progress, false).await
+    build_inner(None, out, dicts, &[], &db_dir(out), tok, progress).await
 }
 
 /// Update only the supplied dictionaries, first removing their old entries and any other
@@ -369,22 +396,39 @@ pub async fn build_incremental(
     tok: &TokenizerMapper,
     progress: impl Fn(&str, usize, usize),
 ) -> Result<Vec<DictInfo>, YomitanError> {
-    build_inner(out, dicts, remove, tok, progress, true).await
+    build_inner(Some(out), out, dicts, remove, &db_dir(out), tok, progress).await
 }
 
-async fn build_inner(
+/// [`build_incremental`] of `base` into `out`, leaving `base` as it is, e.g. to keep
+/// searching it meanwhile. The zips of dictionaries `base` has are looked for in `zip_dirs`,
+/// in order. Without `base`, `out` is built from scratch.
+pub async fn update(
+    base: &Path,
     out: &Path,
     dicts: &[DictSource],
     remove: &[String],
+    zip_dirs: &[PathBuf],
     tok: &TokenizerMapper,
     progress: impl Fn(&str, usize, usize),
-    incremental: bool,
+) -> Result<Vec<DictInfo>, YomitanError> {
+    build_inner(Some(base), out, dicts, remove, zip_dirs, tok, progress).await
+}
+
+async fn build_inner(
+    base: Option<&Path>,
+    out: &Path,
+    dicts: &[DictSource],
+    remove: &[String],
+    zip_dirs: &[PathBuf],
+    tok: &TokenizerMapper,
+    progress: impl Fn(&str, usize, usize),
 ) -> Result<Vec<DictInfo>, YomitanError> {
     let tmp = out.with_extension("db.tmp");
     let _ = std::fs::remove_file(&tmp);
-    let has_existing = incremental && out.is_file();
-    if has_existing {
-        std::fs::copy(out, &tmp)?;
+    let base = base.filter(|b| b.is_file());
+    let has_existing = base.is_some();
+    if let Some(base) = base {
+        std::fs::copy(base, &tmp)?;
     }
     let mut conn = Connection::open(&tmp)?;
     conn.execute_batch(
@@ -414,8 +458,8 @@ async fn build_inner(
     }
     if !has_existing {
         conn.execute(
-            "INSERT OR REPLACE INTO meta (key, value) VALUES ('kana', '1')",
-            [],
+            "INSERT OR REPLACE INTO meta (key, value) VALUES ('kana', '1'), ('build', ?1)",
+            [BUILD_VERSION],
         )?;
     }
     conn.execute_batch(FTS_TRIGGERS)?;
@@ -484,7 +528,6 @@ async fn build_inner(
             0,
             0,
         );
-        let dir = out.parent().unwrap_or(Path::new("."));
         let rows: Vec<(i64, String)> = {
             let mut st = conn.prepare("SELECT id, name FROM dict")?;
             st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
@@ -492,8 +535,7 @@ async fn build_inner(
         };
         let tx = conn.transaction()?;
         for (dict_id, name) in rows {
-            let zip = dir.join(format!("{name}.zip"));
-            if zip.is_file() {
+            if let Some(zip) = find_zip(zip_dirs, &name) {
                 let mut zip = YomitanZip::open(&zip)?;
                 if backfill_kanji {
                     index_kanji(&tx, &mut zip, dict_id)?;
@@ -775,9 +817,19 @@ fn fingerprint(bytes: &[u8]) -> String {
 ///
 /// Does nothing, and returns `false`, when `ids.txt` is unchanged since it last filled them
 /// and `recount` is false; pass `recount` when dictionaries changed, since the counts follow
-/// the terms. Leaving search.db as it was keeps its checksum, so the app does not download
-/// it again.
+/// the terms.
 pub fn build_chars(db: &Path, ids_txt: &Path, recount: bool) -> Result<bool, YomitanError> {
+    build_chars_from(db, ids_txt, recount, &db_dir(db))
+}
+
+/// [`build_chars`], with the zips of the dictionaries in `db` looked for in `zip_dirs`, in
+/// order
+pub fn build_chars_from(
+    db: &Path,
+    ids_txt: &Path,
+    recount: bool,
+    zip_dirs: &[PathBuf],
+) -> Result<bool, YomitanError> {
     let text = std::fs::read_to_string(ids_txt)?;
     let fp = format!("{}+{HAN_VERSION}", fingerprint(text.as_bytes()));
 
@@ -801,7 +853,7 @@ pub fn build_chars(db: &Path, ids_txt: &Path, recount: bool) -> Result<bool, Yom
         fill_han(&mut conn, &text, fp)?;
     }
     if !term_char_current {
-        fill_term_char(&mut conn, db.parent().unwrap_or(Path::new(".")))?;
+        fill_term_char(&mut conn, zip_dirs)?;
     }
     conn.execute_batch("ANALYZE;")?;
     Ok(true)
@@ -882,8 +934,8 @@ fn fill_han(conn: &mut Connection, text: &str, fp: String) -> Result<(), Yomitan
 }
 
 /// `term_char`: the readings of each term's characters. Japanese needs kanji readings, from
-/// the kanji dictionaries (zips in `dir`) whose readings are kana, e.g. KANJIDIC.
-fn fill_term_char(conn: &mut Connection, dir: &Path) -> Result<(), YomitanError> {
+/// the kanji dictionaries (zips in `zip_dirs`) whose readings are kana, e.g. KANJIDIC.
+fn fill_term_char(conn: &mut Connection, zip_dirs: &[PathBuf]) -> Result<(), YomitanError> {
     conn.execute_batch(TERM_CHAR_SCHEMA)?;
     let mut kana = KanaReadings::default();
     if has_table(conn, "kanji_link")? {
@@ -892,10 +944,9 @@ fn fill_term_char(conn: &mut Connection, dir: &Path) -> Result<(), YomitanError>
             .query_map([], |r| r.get(0))?
             .collect::<Result<_, _>>()?;
         for name in names {
-            let path = dir.join(format!("{name}.zip"));
-            if !path.is_file() {
+            let Some(path) = find_zip(zip_dirs, &name) else {
                 continue;
-            }
+            };
             let mut zip = YomitanZip::open(&path)?;
             for bank in zip
                 .banks()
@@ -3883,6 +3934,60 @@ mod pitch_tests {
         assert_eq!(pitch.tag_meta["名"].category, "partOfSpeech");
         assert_eq!(pitch.tag_meta["名"].notes, "noun");
         drop(db);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// The app: the new search.db is built next to the dictionaries downloaded, while the
+    /// one in use stays as it was
+    #[tokio::test]
+    async fn an_update_leaves_its_base_alone() {
+        let (dir, base) = fixture();
+        let incoming = dir.join("incoming");
+        std::fs::create_dir_all(&incoming).unwrap();
+        std::fs::rename(dir.join("Pitch.zip"), incoming.join("Pitch.zip")).unwrap();
+        let out = incoming.join("search.db");
+        let before = std::fs::read(&base).unwrap();
+
+        let tok = TokenizerMapper::new(dir.clone());
+        let source = DictSource {
+            zip: incoming.join("Pitch.zip"),
+            ..pitch_source(&dir)
+        };
+        update(
+            &base,
+            &out,
+            &[source],
+            &[],
+            &[incoming.clone(), dir.clone()],
+            &tok,
+            |_, _, _| {},
+        )
+        .await
+        .unwrap();
+        assert_eq!(std::fs::read(&base).unwrap(), before);
+        assert!(!out.with_extension("db.tmp").exists());
+
+        std::fs::rename(incoming.join("Pitch.zip"), dir.join("Pitch.zip")).unwrap();
+        let db = SearchDb::open(&out, &dir).unwrap();
+        assert_eq!(pitches(&db, "箸", &[]).len(), 2);
+        // the words of the base
+        assert_eq!(db.dicts().unwrap()[0].name, "words");
+        drop(db);
+        // an update keeps the base's build version: this one's is from before it
+        assert_eq!(build_version(&out).unwrap(), None);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_build_says_how_it_was_built() {
+        let (dir, _) = fixture();
+        let out = dir.join("new.db");
+        assert_eq!(build_version(&out).unwrap(), None);
+        let tok = TokenizerMapper::new(dir.clone());
+        build(&out, &[pitch_source(&dir)], &tok, |_, _, _| {})
+            .await
+            .unwrap();
+        assert_eq!(build_version(&out).unwrap().as_deref(), Some(BUILD_VERSION));
         std::fs::remove_dir_all(dir).unwrap();
     }
 

@@ -24,6 +24,7 @@ export async function makeLinderaDownloadList(
       filename,
       outDir: "lindera",
       url,
+      lindera: true,
     });
   }
 

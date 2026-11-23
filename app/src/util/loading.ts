@@ -6,6 +6,9 @@ export interface DownloadingProps {
   url: string;
   /** part of a dictionary sync: committed once all such files are downloaded */
   dict?: boolean;
+  /** a tokenizer dictionary (util/tokenize.ts): committing a sync, which builds
+   * search.db, waits for these too */
+  lindera?: boolean;
   /** a font (util/fonts.ts): used as soon as it is downloaded */
   font?: boolean;
 }
@@ -30,10 +33,22 @@ export interface VerifyProgress {
   size: number;
 }
 
+/** `dict-index-progress`: building search.db from the downloaded dictionaries */
+export interface IndexProgress {
+  /** a dictionary's name, or a step such as `characters` */
+  step: string;
+  /** term banks indexed so far, of `total`; 0 when not counted */
+  done: number;
+  total: number;
+}
+
 export const toBeLoaded = ref<DownloadingProps[]>([]);
 
 /** The file being verified, while `dict_plan` or `dict_commit` checksums the library. */
 export const verifying = ref<VerifyProgress | null>(null);
+
+/** What `dict_commit` is indexing, while it builds search.db. */
+export const indexing = ref<IndexProgress | null>(null);
 
 /** Downloads that failed this session (retried on next launch). */
 export const loadErrors = ref<{ filename: string; error: string }[]>([]);
@@ -50,6 +65,7 @@ export function syncStatus(s: {
   /** `dict_plan` or `dict_commit` in flight */
   checking: boolean;
   verifying: VerifyProgress | null;
+  indexing?: IndexProgress | null;
   /** the latest progress of the download in flight */
   download: DownloadUrlProgress | null;
   /** downloads not finished yet, the current one first */
@@ -62,6 +78,7 @@ export function syncStatus(s: {
     const { file, hashed, size } = s.verifying;
     return { text: `Verifying ${file}`, percent: percent(hashed, size) };
   }
+  if (s.indexing) return indexStatus(s.indexing);
   if (s.queue.length) {
     const current = s.queue[0];
     const name = current.filename.split("/").pop();
@@ -79,6 +96,15 @@ export function syncStatus(s: {
   }
   if (s.checking) return { text: "Checking for updates", percent: null };
   return null;
+}
+
+/** `Indexing CC-CEDICT`, with how many of its term banks are done */
+export function indexStatus(p: IndexProgress): SyncStatus {
+  return {
+    text: `Indexing ${p.step}`,
+    percent:
+      p.total > 0 ? Math.min(100, Math.floor((100 * p.done) / p.total)) : null,
+  };
 }
 
 /** Bumped after downloaded dictionaries are put in place, so views can search again. */

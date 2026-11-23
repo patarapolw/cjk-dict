@@ -75,7 +75,11 @@ Options and behavior:
 
 ## `build` and `rebuild`
 
-- `build` updates `search.db` incrementally:
+- `build` writes `manifest.json`, what the app downloads and builds its `search.db` from:
+  - each zip's size and SHA-256, and `ids.txt`'s;
+  - the dictionaries in build order, with their languages as indexed (`lang`, `target_lang`), which the app indexes them with.
+- It also updates the library's `search.db`, as the app builds its own, to check that the dictionaries index and to count their entries (`list`). `upload` leaves it out.
+- It updates `search.db` incrementally:
   - It indexes new or changed dictionaries, and removes deleted ones.
   - It hashes the zips against the previous manifest to detect replacements.
 - `rebuild` discards the current index and rebuilds it from scratch.
@@ -98,12 +102,12 @@ It fills `search.db`'s character tables from the [CJKVI IDS database](https://gi
 Notes:
 
 - Japanese words' character readings need a kanji dictionary with Japanese readings. `build` warns when there is none; KANJIDIC is one of the defaults.
-- `ids.txt` is downloaded to `tmp/cjkvi-ids` (`--ids-dir`, `CJK_DICT_IDS_DIR`); delete it to get the latest.
-- The tables are refilled only when `ids.txt`, the dictionaries or how `dict-admin` fills them change, so an unchanged library keeps the same `search.db`.
+- `ids.txt` is downloaded into the library, which the app downloads it from; delete it to get the latest.
+- The tables are refilled only when `ids.txt`, the dictionaries or how they are filled change.
 
 ### Korean Hanja readings
 
-Korean headwords written in Hanja get Hangul readings when `search.db` is built (光速 → 광속, 光나다 → 광나다), since Korean dictionaries give none.
+Korean headwords written in Hanja get Hangul readings when `search.db` is built, by `dict-admin` and the app alike (光速 → 광속, 光나다 → 광나다), since Korean dictionaries give none.
 
 - They come from [hanja_hangul](https://crates.io/crates/hanja_hangul):
   - a reading per character;
@@ -119,7 +123,7 @@ Korean headwords written in Hanja get Hangul readings when `search.db` is built 
     - readings of a few words: 道 is 도, not also 또 (使道 사또);
     - forms before the initial-sound rule, which hanja_hangul applies itself: 二 is 이, not also 니, 리 (二世安樂 is 이세안락).
   - libhangul's readings are in `yomitan-parser/data/hanja_eum.txt`, made by `node scripts/hanja-eum.mjs`.
-- hanja_hangul's word tables are CC BY-SA 2.0 KR (derived from the National Institute of Korean Language's dictionaries). Only `dict-admin` uses it (yomitan-parser's `hangul-readings` feature), not the app.
+- hanja_hangul's word tables are CC BY-SA 2.0 KR (derived from the National Institute of Korean Language's dictionaries). `dict-admin` and the app include them (yomitan-parser's `hangul-readings` feature).
 
 ## `remove` and `list`
 
@@ -139,6 +143,7 @@ Korean headwords written in Hanja get Hangul readings when `search.db` is built 
 ## `upload`
 
 - Refuses a stale build.
-- Copies the zips first, then `search.db`, then `manifest.json`, so the app never sees a manifest pointing at missing files.
+- Copies the zips, `dicts.json` and `ids.txt` first, then `manifest.json`, so the app never sees a manifest pointing at missing files.
+- Leaves out `search.db`: the app builds its own.
 - Then deletes from R2 what was removed from the library.
 - Behind a TLS-intercepting proxy, set `SSL_CERT_FILE`.

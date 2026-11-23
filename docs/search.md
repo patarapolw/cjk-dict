@@ -26,7 +26,7 @@ How the app's search works. The [README](../README.md#app) has how to run the ap
 - Pinyin without tones (`{zhong guo}`) is expanded to every tone, for readings of up to four syllables; a longer one matches as typed.
 - Katakana and hiragana find each other: `こーひー` finds コーヒー, and `<興>{キョウ}` finds 興味 (きょうみ).
   - `search.db` stores terms, tokens and readings with katakana as hiragana.
-  - `dict-admin build` rebuilds a `search.db` from before this from scratch; the app searches one as before until then.
+  - A `search.db` from before this is rebuilt from scratch.
 
 ## Wildcards
 

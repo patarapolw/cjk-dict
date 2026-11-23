@@ -2,8 +2,9 @@
 //!
 //! The library is a folder of Yomitan zips (`<name>.zip`) + `dicts.json`. Zips are stored
 //! with their term banks re-split into small ones (see `parser::rebank`); otherwise as published.
-//! `build` indexes them into `search.db` and writes `manifest.json`; `upload` mirrors the
-//! folder to R2 with rclone. The app downloads the zips + search.db and reads definitions
+//! `build` writes `manifest.json`, and indexes the zips into `search.db` as the app does, to
+//! check them; `upload` mirrors the folder to R2 with rclone, but for `search.db`. The app
+//! downloads the zips + `ids.txt`, builds its own search.db from them, and reads definitions
 //! and media straight from the zips. This is the only way dictionaries are added or removed.
 
 mod defaults;
@@ -31,14 +32,15 @@ use yomitan_parser::{
 };
 
 use crate::library::{
-    DICTS_JSON, DictEntry, Library, MANIFEST, Manifest, ManifestDict, SEARCH_DB, check_name,
-    file_info,
+    DICTS_JSON, DictEntry, IDS_TXT, Library, MANIFEST, MANIFEST_VERSION, Manifest, ManifestDict,
+    SEARCH_DB, check_name, file_info,
 };
 
 #[derive(Parser)]
 #[command(version, about)]
 struct Cli {
-    /// Library folder: <name>.zip + dicts.json (+ search.db, manifest.json after `build`)
+    /// Library folder: <name>.zip + dicts.json (+ ids.txt, search.db, manifest.json after
+    /// `build`)
     #[arg(
         long,
         global = true,
@@ -113,31 +115,24 @@ enum Cmd {
     /// Remove a dictionary from the library
     Remove { name: String },
 
-    /// Build search.db and manifest.json from the library
+    /// Write manifest.json, and update search.db (as the app builds it, to check the
+    /// dictionaries index). Downloads the CJKVI IDS database's ids.txt into the library if
+    /// missing; delete it to update.
     Build {
         /// Lindera tokenizer dictionaries (downloaded if missing)
         #[arg(long, env = "CJK_DICT_LINDERA_DIR", default_value = "tmp/lindera")]
         lindera_dir: PathBuf,
-
-        /// Character decomposition data: the CJKVI IDS database's ids.txt (downloaded if
-        /// missing; delete it to update)
-        #[arg(long, env = "CJK_DICT_IDS_DIR", default_value = "tmp/cjkvi-ids")]
-        ids_dir: PathBuf,
     },
 
-    /// Rebuild search.db and manifest.json from scratch
+    /// `build`, with search.db built from scratch
     Rebuild {
         /// Lindera tokenizer dictionaries (downloaded if missing)
         #[arg(long, env = "CJK_DICT_LINDERA_DIR", default_value = "tmp/lindera")]
         lindera_dir: PathBuf,
-
-        /// Character decomposition data: the CJKVI IDS database's ids.txt (downloaded if
-        /// missing; delete it to update)
-        #[arg(long, env = "CJK_DICT_IDS_DIR", default_value = "tmp/cjkvi-ids")]
-        ids_dir: PathBuf,
     },
 
-    /// Mirror the library to R2 with rclone (zips first, then search.db, then manifest.json)
+    /// Mirror the library to R2 with rclone (zips and ids.txt first, then manifest.json),
+    /// but for search.db, which the app builds itself
     Upload {
         /// rclone destination, e.g. r2:cjk-dict
         #[arg(long, env = "CJK_DICT_REMOTE")]
@@ -266,14 +261,8 @@ async fn main() -> Result<()> {
             let _ = std::fs::remove_file(lib.zip_path(&name));
             eprintln!("removed {name}; run `build` and `upload` to publish");
         }
-        Cmd::Build {
-            lindera_dir,
-            ids_dir,
-        } => build(&lib, &lindera_dir, &ids_dir, false).await?,
-        Cmd::Rebuild {
-            lindera_dir,
-            ids_dir,
-        } => build(&lib, &lindera_dir, &ids_dir, true).await?,
+        Cmd::Build { lindera_dir } => build(&lib, &lindera_dir, false).await?,
+        Cmd::Rebuild { lindera_dir } => build(&lib, &lindera_dir, true).await?,
         Cmd::Upload { remote, dry_run } => upload(&lib, &remote, dry_run)?,
     }
 
@@ -484,7 +473,7 @@ fn rebank(zip: &Path, name: &str) -> Result<()> {
     }
 }
 
-async fn build(lib: &Library, lindera_dir: &Path, ids_dir: &Path, rebuild: bool) -> Result<()> {
+async fn build(lib: &Library, lindera_dir: &Path, rebuild: bool) -> Result<()> {
     let dicts = lib.dicts()?;
     let db = lib.dir.join(SEARCH_DB);
     // built before katakana and hiragana were matched alike: its terms can't be updated
@@ -601,7 +590,7 @@ async fn build(lib: &Library, lindera_dir: &Path, ids_dir: &Path, rebuild: bool)
     );
 
     // character decomposition; how often characters are used follows the dictionaries
-    let ids_txt = ids::ensure(ids_dir)?;
+    let ids_txt = ids::ensure(&lib.dir)?;
     let t = Instant::now();
     let dicts_changed =
         rebuild_from_scratch || !changed_sources.is_empty() || !removed_names.is_empty();
@@ -665,8 +654,8 @@ async fn build(lib: &Library, lindera_dir: &Path, ids_dir: &Path, rebuild: bool)
         });
     }
     let manifest = Manifest {
-        version: 1,
-        search_db: file_info(&db, SEARCH_DB)?,
+        version: MANIFEST_VERSION,
+        ids: Some(file_info(&ids_txt, IDS_TXT)?),
         dicts: out,
     };
     let tmp = lib.dir.join(format!("{MANIFEST}.tmp"));
@@ -682,14 +671,15 @@ async fn build(lib: &Library, lindera_dir: &Path, ids_dir: &Path, rebuild: bool)
         );
     }
     eprintln!(
-        "  {SEARCH_DB}: {:.1} MB",
-        manifest.search_db.size as f64 / 1e6
+        "  {SEARCH_DB}: {:.1} MB (not uploaded: the app builds its own)",
+        std::fs::metadata(&db)?.len() as f64 / 1e6
     );
     Ok(())
 }
 
 /// Mirror the library to R2. Order matters: the app reads manifest.json first, so
-/// everything it points to must already be there; deletions happen last.
+/// everything it points to must already be there; deletions happen last. search.db stays
+/// local: the app builds its own from the zips.
 fn upload(lib: &Library, remote: &str, dry_run: bool) -> Result<()> {
     lib.check_fresh()?;
     let dir = lib.dir.to_string_lossy().into_owned();
@@ -716,9 +706,10 @@ fn upload(lib: &Library, remote: &str, dry_run: bool) -> Result<()> {
         "--include",
         "*.zip",
         "--include",
-        "dicts.json",
+        DICTS_JSON,
+        "--include",
+        IDS_TXT,
     ])?;
-    rclone(&["copy", d, remote, "--include", SEARCH_DB])?;
     rclone(&["copy", d, remote, "--include", MANIFEST])?;
     rclone(&[
         "sync",
@@ -727,9 +718,9 @@ fn upload(lib: &Library, remote: &str, dry_run: bool) -> Result<()> {
         "--include",
         "*.zip",
         "--include",
-        "dicts.json",
+        DICTS_JSON,
         "--include",
-        SEARCH_DB,
+        IDS_TXT,
         "--include",
         MANIFEST,
     ])?;
@@ -761,7 +752,7 @@ fn size(lib: &Library, lang: Option<&str>) -> Result<()> {
             Err(error) => return Err(error.into()),
         };
         let shared_files = [
-            (SEARCH_DB, std::fs::metadata(lib.dir.join(SEARCH_DB))?.len()),
+            (IDS_TXT, std::fs::metadata(lib.dir.join(IDS_TXT))?.len()),
             (DICTS_JSON, dicts_size),
             (MANIFEST, std::fs::metadata(lib.dir.join(MANIFEST))?.len()),
         ];

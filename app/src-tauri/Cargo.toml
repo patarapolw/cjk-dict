@@ -27,8 +27,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1.53.1", features = ["io-util", "fs", "rt", "sync"] }
 zip = "8.6.0"
-# query tokenizer for "~" search (same code dict-admin uses at import)
-yomitan-parser = { path = "../../yomitan-parser", features = ["search"] }
+# builds search.db from the downloaded zips, as dict-admin does (with Hangul readings for
+# Korean Hanja headwords), searches it, and tokenizes "~" queries
+yomitan-parser = { path = "../../yomitan-parser", features = ["search", "hangul-readings"] }
 rusty-s3 = "0.8"
 url = "2"
 sha2 = "0.10"
