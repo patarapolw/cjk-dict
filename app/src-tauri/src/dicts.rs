@@ -12,8 +12,8 @@ use std::{
     fs::File,
     io::Read,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
-    time::{Duration, SystemTime},
+    sync::{Arc, Condvar, Mutex},
+    time::{Duration, Instant, SystemTime},
 };
 use tauri_plugin_http::reqwest;
 
@@ -24,7 +24,7 @@ use yomitan_parser::search::{
     self, DictInfo, DictSource, HanChar, HanList, SearchDb, SearchRequest, SearchResult,
 };
 
-use crate::{AppState, error::AppError};
+use crate::{AppState, error::AppError, sync_service::set_native_sync_status};
 
 const MANIFEST: &str = "manifest.json";
 const SEARCH_DB: &str = "search.db";
@@ -123,6 +123,102 @@ fn index_plan(old: Option<&Manifest>, new: &Manifest, current: bool) -> IndexPla
         full: false,
         index,
         remove,
+    }
+}
+
+/// Keeps the sync's status (on Android, SyncService: its notification, the foreground
+/// service and its wake lock) up while search.db is built, from Rust rather than through
+/// the page, which the system may hold back in the background. A step can run for minutes
+/// without progress to report (the full-text index, the character tables): every
+/// [`IndexStatus::HEARTBEAT`] the status is sent again meanwhile, so the wake lock doesn't
+/// lapse. Dropped, it ends the status; the page sends what comes next.
+struct IndexStatus {
+    shared: Arc<(Mutex<IndexShared>, Condvar)>,
+    heartbeat: Option<std::thread::JoinHandle<()>>,
+    app: AppHandle,
+}
+
+struct IndexShared {
+    text: String,
+    percent: Option<u8>,
+    sent_text: String,
+    sent: Instant,
+    done: bool,
+}
+
+impl IndexStatus {
+    /// Android drops notification updates that come faster
+    const MIN_INTERVAL: Duration = Duration::from_secs(1);
+    /// well within SyncService's 10-minute wake lock
+    const HEARTBEAT: Duration = Duration::from_secs(30);
+
+    fn start(app: &AppHandle) -> Self {
+        let text = "Indexing dictionaries".to_string();
+        set_native_sync_status(app, Some(text.clone()), None);
+        let shared = Arc::new((
+            Mutex::new(IndexShared {
+                text: text.clone(),
+                percent: None,
+                sent_text: text,
+                sent: Instant::now(),
+                done: false,
+            }),
+            Condvar::new(),
+        ));
+        let heartbeat = {
+            let shared = shared.clone();
+            let app = app.clone();
+            std::thread::spawn(move || {
+                let (lock, cvar) = &*shared;
+                let Ok(mut s) = lock.lock() else { return };
+                loop {
+                    s = match cvar.wait_timeout(s, Self::HEARTBEAT) {
+                        Ok((s, _)) => s,
+                        Err(_) => return,
+                    };
+                    if s.done {
+                        return;
+                    }
+                    if s.sent.elapsed() >= Self::HEARTBEAT {
+                        s.sent = Instant::now();
+                        set_native_sync_status(&app, Some(s.text.clone()), s.percent);
+                    }
+                }
+            })
+        };
+        Self {
+            shared,
+            heartbeat: Some(heartbeat),
+            app: app.clone(),
+        }
+    }
+
+    /// What the build is at: sent at once when the step changes, else at most once a second
+    fn set(&self, step: &str, done: usize, total: usize) {
+        let Ok(mut s) = self.shared.0.lock() else {
+            return;
+        };
+        s.text = format!("Indexing {step}");
+        s.percent = (total > 0).then(|| (100 * done.min(total) / total) as u8);
+        if s.text != s.sent_text || s.sent.elapsed() >= Self::MIN_INTERVAL {
+            s.sent_text = s.text.clone();
+            s.sent = Instant::now();
+            set_native_sync_status(&self.app, Some(s.text.clone()), s.percent);
+        }
+    }
+}
+
+impl Drop for IndexStatus {
+    fn drop(&mut self) {
+        if let Ok(mut s) = self.shared.0.lock() {
+            s.done = true;
+        }
+        self.shared.1.notify_all();
+        if let Some(h) = self.heartbeat.take() {
+            let _ = h.join();
+        }
+        // SyncService stops a moment later, unless the page sends what comes next
+        set_native_sync_status(&self.app, None, None);
     }
 }
 
@@ -558,8 +654,10 @@ fn build_index(
         .collect::<Result<Vec<_>, AppError>>()?;
     let ids_txt = find(IDS_TXT)?;
 
+    let status = IndexStatus::start(app);
     let progress = |step: &str, done: usize, total: usize| {
         let _ = app.emit("dict-index-progress", IndexProgress { step, done, total });
+        status.set(step, done, total);
     };
     let tok = &app.state::<AppState>().tokenizer_mapper;
     let base = state.dir.join(SEARCH_DB);

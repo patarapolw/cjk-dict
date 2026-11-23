@@ -18,6 +18,10 @@ How the app gets the library and shows entries. The [README](../README.md#app) h
 - It's built from scratch when there is none, or when the app builds it differently from the one it has (`search::BUILD_VERSION`), e.g. the `search.db` an earlier version downloaded.
 - It needs the tokenizer dictionaries, so it waits for them on first launch.
 - Its progress shows in the downloads panel, and on Android in the sync notification: "Indexing <dictionary>", with how many of its term banks are done.
+- On Android, the build keeps the sync's foreground service (`SyncService`) running itself, from Rust, rather than through the page, which Android may hold back in the background:
+  - it updates the notification at most once a second, and at once when the step changes;
+  - in steps without progress to report, which can take minutes (the full-text index, the character tables), it sends the status again every 30 s, which re-arms the service's 10-minute wake lock, so the build goes on with the screen off;
+  - the service is of type `dataSync`, which Android 15 allows 6 hours a day.
 - A build that fails, e.g. as the app was closed, is tried again on the next launch, without downloading anything again.
 
 ## Other downloads

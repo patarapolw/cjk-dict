@@ -1,10 +1,12 @@
 //! Keep the app running while it syncs dictionaries.
 //!
 //! On Android, an app in the background (or with the screen off) is soon frozen, which
-//! stalls downloading and checksumming gigabytes of dictionaries. While a sync runs, the
-//! frontend reports its progress here, and on Android a foreground service
-//! (`SyncService.kt`) shows it as a notification and keeps the app running. Desktops
-//! don't freeze apps in the background: nothing to do there.
+//! stalls downloading and checksumming gigabytes of dictionaries, and building search.db
+//! from them. While a sync runs, the frontend reports its progress here, and on Android a
+//! foreground service (`SyncService.kt`) shows it as a notification and keeps the app
+//! running. Building search.db reports from Rust too ([`set_native_sync_status`]), as it
+//! runs for long without the page. Desktops don't freeze apps in the background: nothing
+//! to do there.
 
 use crate::error::AppError;
 
@@ -25,6 +27,29 @@ pub async fn set_sync_status<R: tauri::Runtime>(
     {
         let _ = (webview, text, percent);
         Ok(())
+    }
+}
+
+/// [`set_sync_status`] from Rust, for work the page may not hear of for minutes: building
+/// search.db. Each call also re-arms SyncService's wake lock, which otherwise lapses after
+/// 10 minutes without one. Failures are only logged.
+pub fn set_native_sync_status(app: &tauri::AppHandle, text: Option<String>, percent: Option<u8>) {
+    #[cfg(target_os = "android")]
+    {
+        use tauri::Manager;
+        let Some(window) = app.webview_windows().into_values().next() else {
+            return;
+        };
+        if let Err(e) =
+            android::set_sync_status(AsRef::<tauri::Webview>::as_ref(&window), text, percent)
+        {
+            eprintln!("setSyncStatus failed: {e}");
+        }
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (app, text, percent);
     }
 }
 
