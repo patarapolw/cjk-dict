@@ -34,7 +34,10 @@ body {
   --app-tooltip-text: #f9fafb;
   --app-tooltip-border: transparent;
 
-  font-synthesis: none;
+  /* bold made up where a font has none, as browsers do by default (and so Yomitan):
+     Android's CJK font often comes in one weight, so tags and bold glossary text would
+     be regular there. Italics stay real only. */
+  font-synthesis: weight;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
