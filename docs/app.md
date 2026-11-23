@@ -45,7 +45,6 @@ How the app gets the library and shows entries. The [README](../README.md#app) h
 - Terms and definitions are marked with their dictionary's languages (`lang`), so Han characters take the forms of their language (see [dict-admin](dict-admin.md#languages)).
   - So are dictionary names, in the **Dictionaries** list and on entries: with the terms' language.
 - The app follows the device's light or dark color-scheme preference.
-- Bold, e.g. on tags, is made up from the regular face where a font has no bold (`font-synthesis: weight`), as Android's CJK font often has none. Italics aren't made up.
 - Selecting text (e.g. a long press on Android):
   - an entry's headword selects as a whole, without its reading;
   - tags (`.tag`) and elements with a tooltip can't be selected. They sit next to text with no space between, so a word selected beside one would take its text too, e.g. `vt` + `to` as "vtto";
