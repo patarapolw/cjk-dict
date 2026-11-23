@@ -81,8 +81,9 @@ const EUM: &str = include_str!("../data/hanja_eum.txt");
 
 /// A Hanja's Hangul readings (eum), as a character dictionary lists them: hanja_hangul's
 /// main reading first, then libhangul's others (樂: 악 락 요), each without the
-/// initial-sound rule (李: 리). Not hanja_hangul's other readings, which are how a
-/// character reads in some words (道 in 使道 사또), not its eum. Empty for a character that
+/// initial-sound rule (李: 리). Not hanja_hangul's other readings, which are candidates for
+/// reading words, not its eum: readings of a few words (道 in 使道 사또), and forms before
+/// the initial-sound rule (二: 니, 리; 二世安樂 is 이세안락). Empty for a character that
 /// isn't a Hanja, or has no known reading.
 pub fn char_readings(c: char) -> Vec<String> {
     let main = Converter::global().char_reading(c);
@@ -140,7 +141,7 @@ mod tests {
 
     #[test]
     fn character_readings_are_eum() {
-        // not 또 (使道 사또), nor 니, 리 (word-medial forms)
+        // not 또 (使道 사또), nor 니, 리 (forms before the initial-sound rule)
         assert_eq!(eum('道'), ["도"]);
         assert_eq!(eum('二'), ["이"]);
         assert_eq!(eum('具'), ["구"]);

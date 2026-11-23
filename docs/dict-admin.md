@@ -96,7 +96,9 @@ Korean headwords written in Hanja get Hangul readings when `search.db` is built 
 - A character's own readings (the Characters view) are different: those a character dictionary lists, not every way it reads in words.
   - hanja_hangul's main reading comes first, then the others from [libhangul](https://github.com/libhangul/libhangul)'s `hanja.txt` (BSD-3-Clause): 樂 악 락 요.
   - Readings that differ only by the initial-sound rule count once, without it: 락, not 낙; 李 리.
-  - Not hanja_hangul's other readings, which come from words: 道 is 도, not also 또 (使道 사또); 二 is 이, not also 니, 리.
+  - Not hanja_hangul's other readings, which are candidates for reading words, not the character's own:
+    - readings of a few words: 道 is 도, not also 또 (使道 사또);
+    - forms before the initial-sound rule, which hanja_hangul applies itself: 二 is 이, not also 니, 리 (二世安樂 is 이세안락).
   - libhangul's readings are in `yomitan-parser/data/hanja_eum.txt`, made by `node scripts/hanja-eum.mjs`.
 - hanja_hangul's word tables are CC BY-SA 2.0 KR (derived from the National Institute of Korean Language's dictionaries). Only `dict-admin` uses it (yomitan-parser's `hangul-readings` feature), not the app.
 
