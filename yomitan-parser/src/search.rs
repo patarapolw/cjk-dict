@@ -25,7 +25,7 @@ use crate::{
     error::YomitanError,
     ids::{self, Ids},
     korean::{self, RomanQuery},
-    parser::{BankKind, YomitanZip},
+    parser::{BankKind, YomitanIndex, YomitanZip},
     pinyin::{expand_pinyin, normalize_pinyin},
     tokenize::{Lang, TokenizerMapper},
     util::{NonEmpty, OptionNonEmpty, fold_kana, normalize_term, normalize_text},
@@ -328,6 +328,39 @@ pub struct DictInfo {
     pub term_count: usize,
     /// pitch accent entries (Yomitan term meta of mode `pitch`)
     pub pitch_count: usize,
+    /// who made it and how to credit it, from its index.json
+    pub credits: DictCredits,
+}
+
+/// What a dictionary's index.json says about who made it and how to credit it
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct DictCredits {
+    pub author: Option<String>,
+    /// its source, e.g. a project page
+    pub url: Option<String>,
+    pub description: Option<String>,
+    /// the credit it asks for, e.g. KANJIDIC's: "This publication has included material
+    /// from the KANJIDIC2 dictionary file, ..."
+    pub attribution: Option<String>,
+}
+
+impl DictCredits {
+    fn of(index: &YomitanIndex) -> Self {
+        let f = |s: &Option<String>| s.clone().non_empty_trimmed();
+        Self {
+            author: f(&index.author),
+            url: f(&index.url),
+            description: f(&index.description),
+            attribution: f(&index.attribution),
+        }
+    }
+
+    /// from index.json's text; none if it doesn't parse
+    fn of_json(json: Option<&str>) -> Self {
+        json.and_then(|j| serde_json::from_str::<YomitanIndex>(j).ok())
+            .map(|i| Self::of(&i))
+            .unwrap_or_default()
+    }
 }
 
 /// The tag a dictionary's source language is stored as: `ja`/`ko` become `ja-JP`/`ko-KR`,
@@ -635,6 +668,7 @@ async fn build_inner(
 
         infos.push(DictInfo {
             name: d.name.clone(),
+            credits: DictCredits::of(&index),
             title: index.title,
             revision: index.revision,
             lang: l1,
@@ -2837,7 +2871,7 @@ impl SearchDb {
             HashMap::new()
         };
         let mut st = conn.prepare(
-            "SELECT id, name, title, revision, L1, L2, term_count FROM dict ORDER BY id",
+            "SELECT id, name, title, revision, L1, L2, term_count, index_json FROM dict ORDER BY id",
         )?;
         let rows = st
             .query_map([], |r| {
@@ -2849,6 +2883,7 @@ impl SearchDb {
                     target_lang: r.get(5)?,
                     term_count: r.get::<_, i64>(6)? as usize,
                     pitch_count: pitch_counts.get(&r.get::<_, i64>(0)?).copied().unwrap_or(0),
+                    credits: DictCredits::of_json(r.get::<_, Option<String>>(7)?.as_deref()),
                 })
             })?
             .collect::<Result<_, _>>()?;
@@ -3693,7 +3728,9 @@ mod pitch_tests {
             &[
                 (
                     "index.json",
-                    r#"{"title":"Pitch","revision":"1","format":3,"sourceLanguage":"ja"}"#,
+                    r#"{"title":"Pitch","revision":"1","format":3,"sourceLanguage":"ja",
+                        "author":"Someone","url":"https://example.com/pitch",
+                        "attribution":" Credit me. ","description":""}"#,
                 ),
                 ("term_meta_bank_1.json", PITCH_BANK),
                 ("tag_bank_1.json", r#"[["名","partOfSpeech",0,"noun",0]]"#),
@@ -3809,6 +3846,14 @@ mod pitch_tests {
                 .collect::<Vec<_>>(),
             [("words", 0, 0), ("Pitch", 0, 6)]
         );
+        // who made it and how to credit it, from index.json; empty is none
+        let c = &dicts[1].credits;
+        assert_eq!(c.author.as_deref(), Some("Someone"));
+        assert_eq!(c.url.as_deref(), Some("https://example.com/pitch"));
+        assert_eq!(c.attribution.as_deref(), Some("Credit me."));
+        assert_eq!(c.description, None);
+        assert_eq!(dicts[0].credits.author, None);
+        assert_eq!(infos[0].credits.attribution.as_deref(), Some("Credit me."));
         // every entry of the term and reading, in the dictionary's order
         assert_eq!(
             pitches(&db, "箸", &[]),

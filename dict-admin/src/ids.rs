@@ -2,7 +2,7 @@
 //! for the character tables of `search.db` (`yomitan_parser::search::build_chars`).
 //!
 //! @see https://github.com/cjkvi/cjkvi-ids. `ids.txt` is derived from the CHISE project's
-//! IDS database and follows its license (GPLv2).
+//! IDS database and follows its terms.
 
 use std::path::{Path, PathBuf};
 

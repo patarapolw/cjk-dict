@@ -5,6 +5,7 @@
       <nav class="header-nav" aria-label="Views">
         <RouterLink to="/dictionary">Words</RouterLink>
         <RouterLink to="/kanji">Characters</RouterLink>
+        <RouterLink to="/about">About</RouterLink>
       </nav>
       <select v-model="lang" aria-label="Search language">
         <option
