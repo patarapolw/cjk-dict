@@ -59,6 +59,10 @@ pub struct ManifestDict {
     /// without
     #[serde(default, skip_serializing_if = "is_zero")]
     pub char_count: usize,
+    /// words with pitch accents (e.g. Kanjium's); absent in manifests from before, and for
+    /// dictionaries without
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub pitch_count: usize,
     #[serde(flatten)]
     pub file: FileInfo,
 }
@@ -68,12 +72,21 @@ fn is_zero(n: &usize) -> bool {
 }
 
 impl ManifestDict {
-    /// `528000 terms`, `10384 characters`, or both
+    /// `528000 terms`, `10384 characters`, `124134 pitch accents`, or what of them it has
     pub fn counts(&self) -> String {
-        match (self.term_count, self.char_count) {
-            (t, 0) => format!("{t} terms"),
-            (0, k) => format!("{k} characters"),
-            (t, k) => format!("{t} terms, {k} characters"),
+        let parts: Vec<String> = [
+            (self.term_count, "terms"),
+            (self.char_count, "characters"),
+            (self.pitch_count, "pitch accents"),
+        ]
+        .iter()
+        .filter(|(n, _)| *n > 0)
+        .map(|(n, what)| format!("{n} {what}"))
+        .collect();
+        if parts.is_empty() {
+            "0 terms".into()
+        } else {
+            parts.join(", ")
         }
     }
 }

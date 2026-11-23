@@ -5,7 +5,7 @@
 ## `add`
 
 - Copies or downloads a zip into the library as `<name>.zip`, after checking that it is a Yomitan dictionary.
-- Rejects a zip with neither term nor kanji entries, e.g. a broken release.
+- Rejects a zip with no term, kanji or pitch accent entries, e.g. a broken release.
 - `--replace` overwrites a dictionary of the same name, e.g. with a new revision.
 
 ### Languages
@@ -30,6 +30,20 @@ KANJIDIC2 JSON from jmdict-simplified (`kanjidic2-en-*.json.zip`, or the `.json`
 
 `pnpm admin defaults --only KANJIDIC --replace` updates it to the latest release.
 
+### Kanjium
+
+[Kanjium](https://github.com/mifunetoshiro/kanjium)'s `accents.txt` has no Yomitan release, so `add` converts it to a Yomitan dictionary of pitch accents (`term_meta_bank` entries of mode `pitch`, no terms):
+
+- Each line is `term<TAB>reading<TAB>positions`, e.g. `１	ひと	0,2`.
+  - A position is the mora after which the pitch drops; `0`: it doesn't.
+  - An empty reading means the term is kana: it becomes the reading.
+  - Parts of speech before positions become their tags: `(副)1,(形動)0`, `(名;形動)0`.
+- The same word on two lines is merged.
+- The conversion is deterministic; the revision is `accents.txt` and the start of its SHA-256.
+- `index.json`'s `attribution` has the credit Kanjium asks for (see [Defaults](#defaults)).
+
+`pnpm admin defaults --only Kanjium --replace` downloads the latest `accents.txt` again.
+
 ## `defaults`
 
 The default dictionaries (the list the app used to download itself), each downloaded from the project that converts it to Yomitan:
@@ -41,6 +55,7 @@ The default dictionaries (the list the app used to download itself), each downlo
 | `ja`/`zh`/`ko.Wikipedia`            | Wikipedia articles' short abstracts                                                                     | [MarvNC/wikipedia-yomitan](https://github.com/MarvNC/wikipedia-yomitan)                                                                                                                                                                                 | Wikipedia, via [DBpedia](https://dbpedia.org/)'s short-abstract dumps                                             |
 | CC-CEDICT                           | Chinese–English                                                                                         | [MarvNC/cc-cedict-yomitan](https://github.com/MarvNC/cc-cedict-yomitan)                                                                                                                                                                                 | [CC-CEDICT](https://cc-cedict.org/wiki/)                                                                          |
 | KO-EN.KRDICT                        | Korean–English                                                                                          | [Lyroxide/yomitan-ko-dic](https://github.com/Lyroxide/yomitan-ko-dic)                                                                                                                                                                                   | the National Institute of Korean Language's [Basic Korean Dictionary](https://krdict.korean.go.kr/eng/mainAction) |
+| Kanjium                             | Japanese pitch accents (about 124,000 words)                                                            | converted by `add` from `accents.txt`                                                                                                                                                                                                                   | [Kanjium](https://github.com/mifunetoshiro/kanjium) (CC BY-SA 4.0), largely from EDRDG's EDICT                    |
 | `wty-ja-en`/`wty-ko-en`/`wty-zh-en` | Japanese, Korean and Chinese–English                                                                    | [yomidevs/wiktionary-to-yomitan](https://github.com/yomidevs/wiktionary-to-yomitan), released on [Hugging Face](https://huggingface.co/datasets/daxida/wty-release) (its [download page](https://yomidevs.github.io/wiktionary-to-yomitan/) links them) | Wiktionary, via [kaikki.org](https://kaikki.org/) ([wiktextract](https://github.com/tatuylonen/wiktextract))      |
 
 These dictionaries aren't part of cjk-dict:
@@ -48,6 +63,7 @@ These dictionaries aren't part of cjk-dict:
 - cjk-dict doesn't include or redistribute them; `dict-admin` downloads them from the projects above.
 - Each belongs to its authors and keeps its own license and terms; see its project. cjk-dict isn't affiliated with them.
 - Check those terms before sharing a build or the library with anyone (see [Security](../README.md#security)).
+- Kanjium asks apps that use it to credit its additions, e.g. on an About page: "The pitch accent notation, verb particle data, phonetics, homonyms and other additions or modifications to EDICT, KANJIDIC or KRADFILE were provided by Uros O. through his free database."
 
 Options and behavior:
 
@@ -55,6 +71,7 @@ Options and behavior:
 - `--only <name>` (repeatable) picks some of them; `--list` prints them with their language overrides and download URLs.
 - It records each one's language overrides in `dicts.json`, where the dictionary's own `index.json` falls short.
 - GitHub-hosted ones resolve to the asset of the repo's latest release. Set `GITHUB_TOKEN` if you hit the API's unauthenticated rate limit.
+- Kanjium and the wty dictionaries have fixed URLs: Kanjium's is `accents.txt` on its repo's `master`.
 
 ## `build` and `rebuild`
 
@@ -62,7 +79,8 @@ Options and behavior:
   - It indexes new or changed dictionaries, and removes deleted ones.
   - It hashes the zips against the previous manifest to detect replacements.
 - `rebuild` discards the current index and rebuilds it from scratch.
-- Only terms, and where kanji entries are, are indexed. Definitions, term/kanji meta and media stay in the zips.
+- Only terms, and where kanji entries are, are indexed. Definitions, kanji meta, frequencies and media stay in the zips.
+- Pitch accents (term meta of mode `pitch`, e.g. Kanjium's) are copied whole into `search.db`'s `term_pitch`, by term and reading, so a search returns them with the words. An existing `search.db` gets those of the dictionaries it has on the next `build`.
 - Terms are tokenized with [lindera](https://github.com/lindera/lindera), so that `~` finds words containing them.
   - Its unidic, ko-dic and cc-cedict dictionaries, the same as the app's, are downloaded from [lindera's 6.2.0 release](https://github.com/lindera/lindera/releases/tag/v6.2.0) to `tmp/lindera` when indexing is needed (`--lindera-dir`, `CJK_DICT_LINDERA_DIR`).
 
@@ -101,7 +119,7 @@ Korean headwords written in Hanja get Hangul readings when `search.db` is built 
 - `list` shows each dictionary:
   - its source and target languages (L1, L2): as built, or as `dicts.json` sets them before a build; `*` marks those set in `dicts.json`;
   - its zip's size;
-  - its terms and characters, or `not built`;
+  - its terms, characters and pitch accents, or `not built`;
   - where it came from.
 
 ## `size`

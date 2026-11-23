@@ -402,6 +402,62 @@ describe("DictionaryView", () => {
     ).toBe("zh");
     wrapper.unmount();
   });
+  it("shows a word's pitch accents", async () => {
+    mockIPC((cmd, args) => {
+      if (cmd === "dict_styles") return null;
+      if (cmd === "dicts") return [];
+      if (cmd !== "search") throw new Error(`unexpected command: ${cmd}`);
+      searches.push((args as { req: Record<string, unknown> }).req);
+      const entry = {
+        dict_id: 1,
+        dict_path: "MyDict",
+        lang: "ja-JP",
+        target_lang: "en",
+        term_id: 1,
+        term: "橋",
+        reading: "はし",
+        def_tags: "",
+        rules: "",
+        score: 0,
+        glossary: JSON.stringify(["bridge"]),
+        sequence: null,
+        tags: "",
+      };
+      const pitches = [
+        {
+          dict_id: 2,
+          dict_path: "Kanjium",
+          reading: "はし",
+          pitches: [{ position: 2 }, { position: 0, tags: ["名"] }],
+        },
+      ];
+      return {
+        items: [
+          { id: 1, term: "橋", reading: " はし ", entries: [entry], pitches },
+        ],
+        next: null,
+      };
+    });
+    const wrapper = await mountView();
+    await wrapper.get("input.search-input").setValue("橋");
+    await lastSearch();
+    await flushPromises();
+    const shown = wrapper.findAll(".pitch").map((p) => ({
+      high: p.findAll(".mora.high").map((m) => m.text()),
+      drop: p.findAll(".mora.drop").map((m) => m.text()),
+      text: p.text(),
+    }));
+    expect(shown).toEqual([
+      // odaka: drops after し
+      { high: ["し"], drop: ["し"], text: "はし[2]Kanjium" },
+      { high: ["し"], drop: [], text: "はし[0]名Kanjium" },
+    ]);
+    expect(describedText(wrapper.get(".pitch-reading").element)).toContain(
+      "Odaka",
+    );
+    wrapper.unmount();
+  });
+
   it("leaves out the dictionaries unticked, and remembers them", async () => {
     // listed without a language first: MyDict, then A
     dicts = [dict("A", "ja-JP"), dict("MyDict", null)];

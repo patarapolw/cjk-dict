@@ -36,6 +36,11 @@ How the app gets the library and shows entries. The [README](../README.md#app) h
   - images sized from `width`/`height`/`sizeUnits`, including monochrome images.
 - Where the app differs from Yomitan, for example showing images that dictionaries mark collapsed, is listed in [yomitan-differences.md](yomitan-differences.md).
 - Images in definitions are served from the zips through a `dict://` protocol.
+- Pitch accents (from pitch accent dictionaries, e.g. Kanjium) are shown above a word's entries:
+  - those of its reading; for a word without one, those of every reading;
+  - a line over the high morae, turning down where the pitch drops, then the downstep number, e.g. `[2]`, and the parts of speech it is for;
+  - a tooltip names the pattern: heiban, atamadaka, nakadaka or odaka;
+  - dictionaries with pitch accents only aren't in the **Dictionaries** list, which lists those with words.
 - Terms and definitions are marked with their dictionary's languages (`lang`), so Han characters take the forms of their language (see [dict-admin](dict-admin.md#languages)).
   - So are dictionary names, in the **Dictionaries** list and on entries: with the terms' language.
 - The app follows the device's light or dark color-scheme preference.

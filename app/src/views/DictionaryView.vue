@@ -253,6 +253,7 @@
               字 {{ hanChars(headTerm(it)).join("") }}
             </button>
           </div>
+          <PitchAccents v-if="it.pitches?.length" :entries="it.pitches" />
           <Term
             v-for="(ent, j) in it.entries"
             :key="j"
@@ -294,6 +295,7 @@ import {
 import { toKana } from "wanakana";
 
 import { useRoute, useRouter } from "vue-router";
+import PitchAccents from "../components/PitchAccents.vue";
 import Term from "../components/yomitan/Term.vue";
 import { ISearchTerm, ITerm, searchDB } from "../db/search";
 import { clipboardMonitorOn, lastClipboardText } from "../util/clipboard";

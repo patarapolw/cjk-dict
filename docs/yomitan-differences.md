@@ -12,6 +12,13 @@ Keep differences few, and add each new one here.
 | `width` and `height` the wrong way round | Used as given.                                             | Swapped when both are given and the image's own shape matches them swapped.             | Some images in vertical-text (`縦中横`) spans, such as fractions, give the size for vertical text. Used as given, they shrink to a 0.25em sliver. |
 | Media paths written with `\`             | Not checked.                                               | The path is tried as given, then with `\` replaced by `/`.                              | The ja, zh and ko Wikipedia dictionaries refer to `assets\wikipedia-icon.png`, but their zips store `assets/wikipedia-icon.png`.                  |
 
+## Pitch accents
+
+|                          | Yomitan                                                               | cjk-dict                                                      | Why                                                     |
+| ------------------------ | --------------------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------- |
+| Forms                    | Text with a line over the high morae, a graph, or the downstep number | Text with a line over the high morae, and the downstep number | One form takes less room, and has what the others show. |
+| Nasal and devoiced morae | Marked                                                                | Not marked                                                    | Kanjium, the default, has none.                         |
+
 ### Same result, different implementation
 
 These differ in how they work, not in what you see. They're listed so that a rendering difference can be traced back to them.
