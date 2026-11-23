@@ -92,14 +92,14 @@ It fills `search.db`'s character tables from the [CJKVI IDS database](https://gi
 
 - how each character breaks down into components;
 - which characters each component is in;
-- its Hangul readings (from hanja_hangul);
+- its Hangul readings (eum), as a character dictionary lists them (see [Korean Hanja readings](#korean-hanja-readings));
 - how many terms use it.
 
 Notes:
 
 - Japanese words' character readings need a kanji dictionary with Japanese readings. `build` warns when there is none; KANJIDIC is one of the defaults.
 - `ids.txt` is downloaded to `tmp/cjkvi-ids` (`--ids-dir`, `CJK_DICT_IDS_DIR`); delete it to get the latest.
-- The tables are refilled only when `ids.txt` or the dictionaries change, so an unchanged library keeps the same `search.db`.
+- The tables are refilled only when `ids.txt`, the dictionaries or how `dict-admin` fills them change, so an unchanged library keeps the same `search.db`.
 
 ### Korean Hanja readings
 
@@ -111,6 +111,14 @@ Korean headwords written in Hanja get Hangul readings when `search.db` is built 
   - a table of dictionary words that read otherwise.
 - Of a character's several readings (樂: 락, 낙, 악, 요), the one that is also a Hangul headword is kept.
 - `build` fills in the readings of an existing `search.db` too.
+- A character's own readings (the Characters view) are different: those a character dictionary lists, not every way it reads in words.
+  - hanja_hangul's main reading comes first, then the others from [libhangul](https://github.com/libhangul/libhangul)'s `hanja.txt` (BSD-3-Clause): 樂 악 락 요.
+  - A reading the initial-sound rule makes from another is left out, unless it's the main reading: 樂 락, not also 낙; 李 리.
+  - The rule goes one way (ㄹ → ㄴ → ㅇ), so an ㄹ or ㄴ reading beside an ㄴ or ㅇ main reading is kept, e.g. a customary reading: 諾 낙 락 (受諾 수락), 怒 노 로 (喜怒哀樂 희로애락).
+  - Not hanja_hangul's other readings, which are candidates for reading words, not the character's own:
+    - readings of a few words: 道 is 도, not also 또 (使道 사또);
+    - forms before the initial-sound rule, which hanja_hangul applies itself: 二 is 이, not also 니, 리 (二世安樂 is 이세안락).
+  - libhangul's readings are in `yomitan-parser/data/hanja_eum.txt`, made by `node scripts/hanja-eum.mjs`.
 - hanja_hangul's word tables are CC BY-SA 2.0 KR (derived from the National Institute of Korean Language's dictionaries). Only `dict-admin` uses it (yomitan-parser's `hangul-readings` feature), not the app.
 
 ## `remove` and `list`

@@ -167,7 +167,7 @@ const HAN_SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS han_char (
   ch          TEXT PRIMARY KEY,
   ids         TEXT NOT NULL DEFAULT '', -- ids.txt's IDS columns, tab-separated: ⿹②一[GTKV]\t⿻②一[J]
-  hangul      TEXT NOT NULL DEFAULT '', -- space-separated Hangul readings (eum), e.g. 락 악 요 for 樂
+  hangul      TEXT NOT NULL DEFAULT '', -- space-separated Hangul readings (eum), e.g. 악 락 요 for 樂
   uses        INTEGER NOT NULL DEFAULT 0 -- terms in term_search with the character
 ) WITHOUT ROWID;
 -- the components each IDS names directly; characters made of a component are found by
@@ -739,6 +739,10 @@ pub fn pitch_counts(db: &Path) -> Result<HashMap<String, usize>, YomitanError> {
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
+/// Bumped when the character tables are filled differently from the same `ids.txt`, so that
+/// [`build_chars`] refills them: 2 took Hangul readings from [`crate::hanja::char_readings`]
+const HAN_VERSION: &str = "han-2";
+
 /// FNV-1a, to tell whether `ids.txt` changed since the last [`build_chars`]
 fn fingerprint(bytes: &[u8]) -> String {
     let mut h: u64 = 0xcbf29ce484222325;
@@ -760,7 +764,7 @@ fn fingerprint(bytes: &[u8]) -> String {
 /// it again.
 pub fn build_chars(db: &Path, ids_txt: &Path, recount: bool) -> Result<bool, YomitanError> {
     let text = std::fs::read_to_string(ids_txt)?;
-    let fp = fingerprint(text.as_bytes());
+    let fp = format!("{}+{HAN_VERSION}", fingerprint(text.as_bytes()));
 
     let mut conn = Connection::open(db)?;
     conn.execute_batch(HAN_SCHEMA)?;
@@ -940,15 +944,13 @@ fn fill_term_char(conn: &mut Connection, dir: &Path) -> Result<(), YomitanError>
     Ok(())
 }
 
-/// Hangul readings (eum) of a Hanja, as a dictionary lists them: without the initial-sound
-/// rule, so 李 is 리.
+/// Hangul readings (eum) of a Hanja, as a dictionary lists them ([`crate::hanja::char_readings`]):
+/// without the initial-sound rule, so 李 is 리.
 #[cfg(feature = "hangul-readings")]
 fn hangul_of(ch: &str) -> String {
     let mut cs = ch.chars();
     match (cs.next(), cs.next()) {
-        (Some(c), None) if hanja_hangul::is_hanja(c) => hanja_hangul::Converter::global()
-            .readings(ch, false, 8)
-            .join(" "),
+        (Some(c), None) => crate::hanja::char_readings(c).join(" "),
         _ => String::new(),
     }
 }
