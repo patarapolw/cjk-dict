@@ -454,6 +454,7 @@ dependencies = [
  "tokio",
  "yomitan-parser",
  "zip",
+ "zstd",
 ]
 
 [[package]]

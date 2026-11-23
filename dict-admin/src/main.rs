@@ -3,8 +3,8 @@
 //! The library is a folder of Yomitan zips (`<name>.zip`) + `dicts.json`. Zips are stored
 //! with their term banks re-split into small ones (see `parser::rebank`); otherwise as published.
 //! `build` indexes them into `search.db` and writes `manifest.json`; `upload` mirrors the
-//! folder to R2 with rclone. The app downloads the zips + search.db and reads definitions
-//! and media straight from the zips. This is the only way dictionaries are added or removed.
+//! folder to R2 with rclone. The app downloads the zips + search.db (zstd-compressed, as
+//! search.db.zst) and reads definitions and media straight from the zips. This is the only way dictionaries are added or removed.
 
 mod defaults;
 mod download;
@@ -31,8 +31,8 @@ use yomitan_parser::{
 };
 
 use crate::library::{
-    DICTS_JSON, DictEntry, Library, MANIFEST, Manifest, ManifestDict, SEARCH_DB, check_name,
-    file_info,
+    DICTS_JSON, DictEntry, Library, MANIFEST, MANIFEST_VERSION, Manifest, ManifestDict, SEARCH_DB,
+    SEARCH_DB_ZST, check_name, file_info, pack_search_db,
 };
 
 #[derive(Parser)]
@@ -137,7 +137,8 @@ enum Cmd {
         ids_dir: PathBuf,
     },
 
-    /// Mirror the library to R2 with rclone (zips first, then search.db, then manifest.json)
+    /// Mirror the library to R2 with rclone (zips first, then search.db.zst, then
+    /// manifest.json)
     Upload {
         /// rclone destination, e.g. r2:cjk-dict
         #[arg(long, env = "CJK_DICT_REMOTE")]
@@ -664,15 +665,23 @@ async fn build(lib: &Library, lindera_dir: &Path, ids_dir: &Path, rebuild: bool)
             file,
         });
     }
+    // what the app downloads: compressed again only if search.db changed
+    let t = Instant::now();
+    let previous_zst = lib.manifest().ok().flatten().and_then(|m| m.search_db_zst);
+    let zst = pack_search_db(&db, &lib.dir.join(SEARCH_DB_ZST), previous_zst.as_ref())?;
+    if previous_zst.as_ref().map(|p| &p.file.sha256) != Some(&zst.file.sha256) {
+        eprintln!("{SEARCH_DB_ZST} in {:.1}s", t.elapsed().as_secs_f64());
+    }
     let manifest = Manifest {
-        version: 1,
-        search_db: file_info(&db, SEARCH_DB)?,
+        version: MANIFEST_VERSION,
+        search_db_zst: Some(zst),
         dicts: out,
     };
     let tmp = lib.dir.join(format!("{MANIFEST}.tmp"));
     std::fs::write(&tmp, serde_json::to_string_pretty(&manifest)? + "\n")?;
     std::fs::rename(tmp, lib.dir.join(MANIFEST))?;
 
+    let zst_info = manifest.search_db_zst.as_ref().expect("written above");
     for d in &manifest.dicts {
         eprintln!(
             "  {}: {}, {:.1} MB",
@@ -682,8 +691,9 @@ async fn build(lib: &Library, lindera_dir: &Path, ids_dir: &Path, rebuild: bool)
         );
     }
     eprintln!(
-        "  {SEARCH_DB}: {:.1} MB",
-        manifest.search_db.size as f64 / 1e6
+        "  {SEARCH_DB_ZST}: {:.1} MB ({SEARCH_DB}: {:.1} MB)",
+        zst_info.file.size as f64 / 1e6,
+        zst_info.unpacked_size as f64 / 1e6
     );
     Ok(())
 }
@@ -718,7 +728,7 @@ fn upload(lib: &Library, remote: &str, dry_run: bool) -> Result<()> {
         "--include",
         "dicts.json",
     ])?;
-    rclone(&["copy", d, remote, "--include", SEARCH_DB])?;
+    rclone(&["copy", d, remote, "--include", SEARCH_DB_ZST])?;
     rclone(&["copy", d, remote, "--include", MANIFEST])?;
     rclone(&[
         "sync",
@@ -729,7 +739,7 @@ fn upload(lib: &Library, remote: &str, dry_run: bool) -> Result<()> {
         "--include",
         "dicts.json",
         "--include",
-        SEARCH_DB,
+        SEARCH_DB_ZST,
         "--include",
         MANIFEST,
     ])?;
@@ -761,7 +771,10 @@ fn size(lib: &Library, lang: Option<&str>) -> Result<()> {
             Err(error) => return Err(error.into()),
         };
         let shared_files = [
-            (SEARCH_DB, std::fs::metadata(lib.dir.join(SEARCH_DB))?.len()),
+            (
+                SEARCH_DB_ZST,
+                std::fs::metadata(lib.dir.join(SEARCH_DB_ZST))?.len(),
+            ),
             (DICTS_JSON, dicts_size),
             (MANIFEST, std::fs::metadata(lib.dir.join(MANIFEST))?.len()),
         ];

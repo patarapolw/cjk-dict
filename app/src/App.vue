@@ -29,7 +29,7 @@
       <span v-if="toBeLoaded.length">
         Downloading ({{ toBeLoaded.length }} left)
       </span>
-      <span v-else-if="verifying">Verifying dictionaries</span>
+      <span v-else-if="verifying">Checking dictionaries</span>
       <span v-else>Download failed</span>
       <button
         type="button"
@@ -50,13 +50,13 @@
     <div v-show="!downloadsCollapsed" class="downloads-body">
       <div v-if="verifying">
         <p>
-          Verifying {{ verifying.file }}
+          {{ verifyLabel(verifying) }}
           <span style="float: right">({{ verifyingPercent }}%)</span>
         </p>
         <div
           class="progress"
           role="progressbar"
-          :aria-label="`Verifying ${verifying.file}`"
+          :aria-label="verifyLabel(verifying)"
           aria-valuemin="0"
           aria-valuemax="100"
           :aria-valuenow="verifyingPercent"
@@ -106,6 +106,7 @@ import {
   loadErrors,
   syncStatus,
   toBeLoaded,
+  verifyLabel,
   verifying,
 } from "./util/loading.ts";
 import { lang } from "./util/settings.ts";
@@ -139,7 +140,8 @@ const verifyingPercent = computed(() => {
   return v && v.size ? Math.floor((100 * v.hashed) / v.size) : 0;
 });
 
-// Checksumming the library takes minutes on a phone: show which file it's at.
+// Checksumming the library and unpacking search.db take minutes on a phone: show which
+// file it's at.
 // `dict_plan` and `dict_commit` in flight; an event arriving after one returned is stale.
 const checksumming = ref(0);
 async function checksummed<T>(run: () => Promise<T>) {
@@ -236,11 +238,8 @@ async function runQueue() {
       }
       toBeLoaded.value = toBeLoaded.value.filter((d) => d !== current);
 
-      // last file of a dictionary sync: put everything in place at once
-      if (current.dict && !toBeLoaded.value.some((d) => d.dict)) {
-        await commitDicts();
-      }
       if (current.font) await installFonts();
+      await commitWhenReady();
     }
   } finally {
     queueRunning = false;
@@ -251,10 +250,34 @@ watch(toBeLoaded, () => {
   if (toBeLoaded.value.length) runQueue();
 });
 
+// A plan from `dict_plan` to commit, once every download is done: its files, the tokenizer
+// dictionaries and the fonts. Committing checksums the files and unpacks search.db, which
+// takes minutes on a phone: no download waits behind it.
+let commitPending = false;
+async function commitWhenReady() {
+  if (!commitPending || toBeLoaded.value.length) return;
+  commitPending = false;
+  await commitDicts();
+}
+
+// Files that failed their checksum are downloaded again, then committed again: at most
+// this many times in a session.
+const REDOWNLOADS = 2;
+let redownloads = 0;
+
 async function commitDicts() {
   try {
-    await checksummed(() => invoke("dict_commit"));
-    dictsVersion.value++;
+    const { committed, corrupt } = await checksummed(() =>
+      invoke<{ committed: boolean; corrupt: string[] }>("dict_commit"),
+    );
+    if (committed) dictsVersion.value++;
+    if (!corrupt.length) return;
+    if (redownloads >= REDOWNLOADS) {
+      throw new Error(`${corrupt.join(", ")}: checksum mismatch`);
+    }
+    redownloads++;
+    console.warn(`downloading again: ${corrupt.join(", ")}`);
+    await planDicts();
   } catch (e) {
     console.error(e);
     loadErrors.value = [
@@ -265,7 +288,26 @@ async function commitDicts() {
 }
 
 async function loadAll() {
-  // Dictionaries: download what changed in the library (zips + search.db), then commit.
+  // Every download is queued before the dictionaries are committed (checked and unpacked).
+  // lindera dictionaries, for tokenizing "~" search queries on the device.
+  toBeLoaded.value = [
+    ...toBeLoaded.value,
+    ...(await makeLinderaDownloadList(["unidic", "ko-dic", "cc-cedict"])),
+  ];
+
+  // fonts for the Han characters the system's fonts lack: those already here first
+  try {
+    await installFonts();
+    toBeLoaded.value = [...toBeLoaded.value, ...(await makeFontDownloadList())];
+  } catch (e) {
+    console.error(e);
+  }
+
+  await planDicts();
+}
+
+// Dictionaries: download what changed in the library (zips + search.db.zst), then commit.
+async function planDicts() {
   try {
     const plan = await checksummed(() =>
       invoke<{ filename: string; url: string }[]>("dict_plan"),
@@ -281,26 +323,15 @@ async function loadAll() {
       ),
     ];
     if (!plan.length) dictsVersion.value++;
+    // nothing to commit unless dict_plan left a plan: then dict_commit does nothing
+    commitPending = true;
+    await commitWhenReady();
   } catch (e) {
     console.error(e);
     loadErrors.value = [
       ...loadErrors.value,
       { filename: "dictionaries", error: String(e) },
     ];
-  }
-
-  // lindera dictionaries, for tokenizing "~" search queries on the device.
-  toBeLoaded.value = [
-    ...toBeLoaded.value,
-    ...(await makeLinderaDownloadList(["unidic", "ko-dic", "cc-cedict"])),
-  ];
-
-  // fonts for the Han characters the system's fonts lack: those already here first
-  try {
-    await installFonts();
-    toBeLoaded.value = [...toBeLoaded.value, ...(await makeFontDownloadList())];
-  } catch (e) {
-    console.error(e);
   }
 }
 </script>

@@ -22,17 +22,24 @@ export interface UnzipProgress {
   outDir: string;
 }
 
-/** `dict-verify-progress`: checksumming a downloaded dictionary file */
+/** `dict-verify-progress`: checksumming a downloaded dictionary file, or unpacking search.db */
 export interface VerifyProgress {
   file: string;
-  /** bytes hashed so far */
+  /** bytes hashed so far (unpacked, when `unpacking`) */
   hashed: number;
   size: number;
+  /** unpacking search.db.zst rather than checking a file */
+  unpacking?: boolean;
+}
+
+/** `Verifying CC-CEDICT.zip`, or `Unpacking search.db` */
+export function verifyLabel(v: VerifyProgress): string {
+  return `${v.unpacking ? "Unpacking" : "Verifying"} ${v.file}`;
 }
 
 export const toBeLoaded = ref<DownloadingProps[]>([]);
 
-/** The file being verified, while `dict_plan` or `dict_commit` checksums the library. */
+/** The file being verified or unpacked, while `dict_commit` checks the library. */
 export const verifying = ref<VerifyProgress | null>(null);
 
 /** Downloads that failed this session (retried on next launch). */
@@ -59,8 +66,8 @@ export function syncStatus(s: {
     total > 0 ? Math.min(100, Math.floor((100 * done) / total)) : null;
 
   if (s.verifying) {
-    const { file, hashed, size } = s.verifying;
-    return { text: `Verifying ${file}`, percent: percent(hashed, size) };
+    const { hashed, size } = s.verifying;
+    return { text: verifyLabel(s.verifying), percent: percent(hashed, size) };
   }
   if (s.queue.length) {
     const current = s.queue[0];
