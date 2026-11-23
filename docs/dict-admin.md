@@ -95,7 +95,8 @@ Korean headwords written in Hanja get Hangul readings when `search.db` is built 
 - `build` fills in the readings of an existing `search.db` too.
 - A character's own readings (the Characters view) are different: those a character dictionary lists, not every way it reads in words.
   - hanja_hangul's main reading comes first, then the others from [libhangul](https://github.com/libhangul/libhangul)'s `hanja.txt` (BSD-3-Clause): 樂 악 락 요.
-  - Readings that differ only by the initial-sound rule count once, without it: 락, not 낙; 李 리.
+  - A reading the initial-sound rule makes from another is left out, unless it's the main reading: 樂 락, not also 낙; 李 리.
+  - The rule goes one way (ㄹ → ㄴ → ㅇ), so an ㄹ or ㄴ reading beside an ㄴ or ㅇ main reading is kept, e.g. a customary reading: 諾 낙 락 (受諾 수락), 怒 노 로 (喜怒哀樂 희로애락).
   - Not hanja_hangul's other readings, which are candidates for reading words, not the character's own:
     - readings of a few words: 道 is 도, not also 또 (使道 사또);
     - forms before the initial-sound rule, which hanja_hangul applies itself: 二 is 이, not also 니, 리 (二世安樂 is 이세안락).
