@@ -57,6 +57,23 @@ How the app gets the library and shows entries. The [README](../README.md#app) h
   - tags (`.tag`) and elements with a tooltip can't be selected. They sit next to text with no space between, so a word selected beside one would take its text too, e.g. `vt` + `to` as "vtto";
   - elsewhere, the system picks the word. For Chinese and Japanese, it's often a single character.
 
+## About
+
+**About**, next to **Words** and **Characters**, credits what the app uses:
+
+- the app's version, and its code's license (MIT);
+- each downloaded dictionary:
+  - for a default dictionary, its source, its Yomitan conversion and its license, from [`app/src/util/credits.ts`](../app/src/util/credits.ts), and the credit it asks for in its own words, e.g. Kanjium's and KANJIDIC's;
+  - its `index.json`'s `author`, and its `attribution` where that says more than the default's credit;
+  - for any other dictionary, its `index.json`'s `url` as its source;
+- the other data: lindera's tokenizer dictionaries, the HanaMin font, the CJKVI IDS database, and the Hangul reading tables `search.db` is built with.
+
+Notes:
+
+- Each default's license is the one its source states, linked to the page that says so; e.g. Pixiv's is pixiv's terms of use, not an open license.
+- `credits.ts` lists every default dictionary, as `dict-admin/src/defaults.rs` does; a test checks that the two agree.
+- Links open in the system's browser.
+
 ## Tooltips
 
 - Buttons and labels explain themselves with tooltips (`v-tooltip`, [`app/src/util/tooltip.ts`](../app/src/util/tooltip.ts)), in place of `title`, which a touchscreen never shows.

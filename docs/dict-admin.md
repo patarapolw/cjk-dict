@@ -62,8 +62,9 @@ These dictionaries aren't part of cjk-dict:
 
 - cjk-dict doesn't include or redistribute them; `dict-admin` downloads them from the projects above.
 - Each belongs to its authors and keeps its own license and terms; see its project. cjk-dict isn't affiliated with them.
+- The app's About page credits them ([app.md](app.md#about)): a new default needs its credit in `app/src/util/credits.ts` too.
 - Check those terms before sharing a build or the library with anyone (see [Security](../README.md#security)).
-- Kanjium asks apps that use it to credit its additions, e.g. on an About page: "The pitch accent notation, verb particle data, phonetics, homonyms and other additions or modifications to EDICT, KANJIDIC or KRADFILE were provided by Uros O. through his free database."
+- Kanjium asks apps that use it to credit its additions, e.g. on an About page, which the app's About page does ([app.md](app.md#about)): "The pitch accent notation, verb particle data, phonetics, homonyms and other additions or modifications to EDICT, KANJIDIC or KRADFILE were provided by Uros O. through his free database."
 
 Options and behavior:
 

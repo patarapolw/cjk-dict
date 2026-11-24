@@ -5,6 +5,7 @@
       <nav class="header-nav" aria-label="Views">
         <RouterLink to="/dictionary">Words</RouterLink>
         <RouterLink to="/kanji">Characters</RouterLink>
+        <RouterLink to="/about">About</RouterLink>
       </nav>
       <select v-model="lang" aria-label="Search language">
         <option
@@ -355,6 +356,8 @@ async function planDicts() {
   flex-direction: row;
   /* in a narrow window, the language select goes on a line of its own */
   flex-wrap: wrap;
+  /* the views and the select on the right, with or without the title */
+  justify-content: flex-end;
   align-items: center;
   box-sizing: border-box;
   min-height: 4rem;
@@ -393,8 +396,9 @@ async function planDicts() {
   padding: 0.25rem 0.5rem;
 }
 
-/* too narrow to be anything but cut off */
-@media (max-width: 24rem) {
+/* too narrow for the whole title beside the views and the select: hide it rather than
+   leave a stub such as "CJK Di…" (most phones) */
+@media (max-width: 29rem) {
   .header-title {
     display: none;
   }

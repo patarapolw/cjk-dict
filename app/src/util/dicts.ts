@@ -17,6 +17,15 @@ export interface IDictInfo {
   term_count: number;
   /** pitch accent entries; absent from an app built before */
   pitch_count?: number;
+  /** who made it and how to credit it, from its index.json; absent from an app built before */
+  credits?: {
+    author: string | null;
+    /** its source, e.g. a project page */
+    url: string | null;
+    description: string | null;
+    /** the credit it asks for */
+    attribution: string | null;
+  };
 }
 
 /**

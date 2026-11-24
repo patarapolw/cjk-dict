@@ -191,9 +191,9 @@ How the app downloads and searches the library: [docs/app.md](docs/app.md), [doc
 ## License
 
 - The code is under the [MIT License](LICENSE).
-- Dictionaries, and data built from them such as `search.db`, keep their own licenses: see the [default dictionaries](docs/dict-admin.md#defaults) and their projects. So do:
+- Dictionaries, and data built from them such as `search.db`, keep their own licenses: see the [default dictionaries](docs/dict-admin.md#defaults) and their projects, also credited on the app's About page ([docs/app.md](docs/app.md#about)). So do:
   - [lindera](https://github.com/lindera/lindera)'s tokenizer dictionaries, downloaded from its releases;
   - [hanja_hangul](https://crates.io/crates/hanja_hangul)'s word tables, which `dict-admin` includes;
   - [libhangul](https://github.com/libhangul/libhangul)'s Hanja readings (BSD-3-Clause), which `dict-admin` includes;
-  - the [CJKVI IDS database](https://github.com/cjkvi/cjkvi-ids)'s `ids.txt` (derived from the CHISE project, GPLv2), which `search.db` includes;
+  - the [CJKVI IDS database](https://github.com/cjkvi/cjkvi-ids)'s `ids.txt` (derived from the CHISE project, under its terms), which `search.db` includes;
   - pitch accent dictionaries' entries, e.g. [Kanjium](https://github.com/mifunetoshiro/kanjium)'s (CC BY-SA 4.0), which `search.db` includes.
