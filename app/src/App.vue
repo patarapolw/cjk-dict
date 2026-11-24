@@ -325,6 +325,8 @@ async function loadAll() {
   flex-direction: row;
   /* in a narrow window, the language select goes on a line of its own */
   flex-wrap: wrap;
+  /* the views and the select on the right, with or without the title */
+  justify-content: flex-end;
   align-items: center;
   box-sizing: border-box;
   min-height: 4rem;
