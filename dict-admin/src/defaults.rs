@@ -102,6 +102,9 @@ const GITHUB: &[(&str, &[GhSource])] = &[
 const FIXED: &[(&str, Option<&str>, Option<&str>, &str)] = &[
     // Kanjium's pitch accents (accents.txt; the repo has no releases), which `add` converts
     ("Kanjium", Some("ja-JP"), None, crate::kanjium::URL),
+    // libhangul's Hanja table (hanja.txt; the repo has no releases of it), which `add`
+    // converts: Hanja with Hangul readings and meanings, in Korean
+    ("Hanja", Some("ko-KR"), Some("ko"), crate::libhangul::URL),
 ];
 
 /// wty (Wiktionary) dictionaries, L1 -> English. Chinese is `zh`: Wiktionary has both
@@ -312,6 +315,9 @@ mod tests {
         let r = resolve(&["Kanjium".to_string()]).unwrap();
         assert_eq!(r[0].lang, Some("ja-JP"));
         assert!(r[0].url.ends_with("/accents.txt"));
-        assert_eq!(names().len(), 12);
+        let r = resolve(&["Hanja".to_string()]).unwrap();
+        assert_eq!((r[0].lang, r[0].target_lang), (Some("ko-KR"), Some("ko")));
+        assert!(r[0].url.ends_with("/hanja.txt"));
+        assert_eq!(names().len(), 13);
     }
 }

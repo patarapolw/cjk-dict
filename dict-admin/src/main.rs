@@ -11,6 +11,7 @@ mod download;
 mod ids;
 mod kanjidic;
 mod kanjium;
+mod libhangul;
 mod library;
 mod lindera;
 
@@ -391,6 +392,20 @@ fn add(
             .and_then(|n| Ok(std::fs::rename(&converted, &tmp).map(|_| n)?));
         match done {
             Ok(n) => eprintln!("converted Kanjium's accents.txt: {n} words"),
+            Err(e) => {
+                let _ = std::fs::remove_file(&converted);
+                let _ = std::fs::remove_file(&tmp);
+                return Err(e);
+            }
+        }
+    }
+    // libhangul's hanja.txt: converted to a Yomitan kanji dictionary of Hanja
+    if libhangul::is_hanja_txt(&tmp) {
+        let converted = lib.dir.join(format!(".{name}.zip.converted"));
+        let done = libhangul::convert(&tmp, &converted)
+            .and_then(|n| Ok(std::fs::rename(&converted, &tmp).map(|_| n)?));
+        match done {
+            Ok(n) => eprintln!("converted libhangul's hanja.txt: {n} characters"),
             Err(e) => {
                 let _ = std::fs::remove_file(&converted);
                 let _ = std::fs::remove_file(&tmp);

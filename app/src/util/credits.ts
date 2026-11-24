@@ -97,6 +97,17 @@ export const DEFAULT_CREDITS: Record<string, ICredit> = {
     credit:
       "The pitch accent notation, verb particle data, phonetics, homonyms and other additions or modifications to EDICT, KANJIDIC or KRADFILE were provided by Uros O. through his free database.",
   },
+  Hanja: {
+    source: {
+      name: "libhangul's hanja.txt",
+      url: "https://github.com/libhangul/libhangul",
+    },
+    license: {
+      name: "BSD-3-Clause",
+      url: "https://opensource.org/license/bsd-3-clause",
+    },
+    credit: "Copyright (c) 2005,2006 Choe Hwanjin. All rights reserved.",
+  },
   Pixiv: {
     source: { name: "pixiv百科事典", url: "https://dic.pixiv.net/" },
     conversion: {
