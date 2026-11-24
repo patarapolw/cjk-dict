@@ -406,6 +406,8 @@ pub async fn dict_plan(app: AppHandle) -> Result<Vec<PlannedFile>, AppError> {
             wanted.push(&zst.file);
         }
 
+        // files the committed manifest doesn't vouch for: downloaded, or waiting in incoming/
+        let all_in_place = wanted.is_empty();
         let mut out = vec![];
         for f in wanted {
             // Downloaded by an earlier run that was closed before the rest finished (or
@@ -426,7 +428,9 @@ pub async fn dict_plan(app: AppHandle) -> Result<Vec<PlannedFile>, AppError> {
 
         let unchanged =
             std::fs::read_to_string(state.dir.join(MANIFEST)).ok() == Some(text.clone());
-        if unchanged && out.is_empty() {
+        // up to date only with everything in place: files waiting in incoming/ (e.g. pushed
+        // by scripts/push-library.mjs) are committed, even under the same manifest
+        if unchanged && all_in_place {
             let _ = std::fs::remove_file(state.dir.join(PENDING));
             return Ok(out);
         }

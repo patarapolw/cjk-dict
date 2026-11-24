@@ -6,6 +6,8 @@
     "serve": "rclone serve http library --addr 127.0.0.1:8080",
     "dev": "CJK_DICT_BASE_URL=http://127.0.0.1:8080 pnpm app start",
     "app": "pnpm --filter cjk-dict-app",
+    "android": "node scripts/push-library.mjs && pnpm app android",
+    "android:push": "node scripts/push-library.mjs",
     "admin": "cargo run --release -q -p dict-admin --",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",

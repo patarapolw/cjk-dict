@@ -127,6 +127,7 @@ pnpm dev                                   # terminal 2: tauri dev against it, n
 pnpm app start                             # tauri dev (desktop) against R2, from .env
 pnpm app tauri build                       # package a release desktop app
 pnpm app android                           # tauri dev (Android) without Vite dev server setup. Stays intact when detached.
+pnpm android                               # the same, after pushing the library to the phone over adb
 pnpm app tauri android dev                 # tauri dev (Android) with Vite dev server. May require OS firewall setup.
 ```
 
@@ -160,6 +161,13 @@ They start the app without the Tauri CLI, running Vite and `cargo build` as task
 ### Debugging on Android
 
 - Turn on USB debugging on the phone, connect it, and run `pnpm app android` (a debug build).
+- `pnpm android` first pushes the library over USB (`scripts/push-library.mjs`, also `pnpm android:push`), so the app needn't download it from R2:
+  - it pushes the zips and `search.db.zst` the app lacks into its `dicts/incoming/`, where downloads land; the app checks them when it syncs, as any download;
+  - the app plans from R2's `manifest.json`, so run `pnpm admin upload` first: a file that differs from what was uploaded is downloaded again;
+  - it needs the app installed, as a debug build (for `run-as`): on a first install it pushes nothing;
+  - with several devices connected, set `ANDROID_SERIAL`.
+- A debug build's Rust code is unoptimized: checksums, unpacking and searches run several times slower than in a release build. For realistic timings, build with `CARGO_PROFILE_DEV_OPT_LEVEL=3 pnpm app android`.
+- If installing fails with `INSTALL_FAILED_VERIFICATION_FAILURE`, Play Protect blocked the APK, and doesn't ask when `adb` installs it. Copy the APK (`app/src-tauri/gen/android/app/build/outputs/apk/arm64/debug/`) to the phone, and install it from there.
 - A debug build allows WebView debugging: open `chrome://inspect/#devices` in Chrome (or `edge://inspect` in Edge) on the computer, and inspect the app's WebView.
 - It serves its own frontend, so it needs no firewall setup, unlike `pnpm app tauri android dev`.
 - Some Android settings, e.g. Accessibility → Touch & hold delay, take effect when the app restarts.
