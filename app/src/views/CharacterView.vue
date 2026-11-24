@@ -51,8 +51,8 @@
           <code>木口</code>, also find the characters made of all of them: 呆,
           杏, …; <code>*口</code> shows the characters made directly of 口, each
           in full. A reading, e.g. <code>きょう</code>, <code>xing</code> or
-          <code>흥</code>, finds the characters read so; with Japanese or Korean
-          selected, romaji or romanization does too: <code>kyou</code>,
+          <code>흥</code>, finds the characters read so; so do romaji and Korean
+          romanization, by the search language: <code>kyou</code>,
           <code>heung</code>.
         </template>
         <span
@@ -459,7 +459,7 @@ const lookup = computed(() => {
     romanized: isRomanization(r),
   };
 });
-/** what the reading was taken as, for the hint: きょう, pinyin, romanization */
+/** what the reading was taken as, for the hint: きょう, pinyin, Korean romanization */
 const readingAs = computed(() => {
   const { kana, latin, romanized } = lookup.value;
   const out: { text: string; kana?: boolean }[] = [];
@@ -467,7 +467,7 @@ const readingAs = computed(() => {
   if (!romanized) return out;
   // with Auto-detect: every way
   if (latin.pinyin && latin.korean) out.push({ text: "pinyin" });
-  if (latin.korean) out.push({ text: "romanization" });
+  if (latin.korean) out.push({ text: "Korean romanization" });
   return out;
 });
 /** the key of what a reading looks up, to search again when it changes */

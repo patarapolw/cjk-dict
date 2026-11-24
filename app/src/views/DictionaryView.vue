@@ -77,7 +77,7 @@
             {{ parsed.term ? "read" : "by reading" }}
             <code>{{ hintReading }}</code>
           </template>
-          <template v-if="romanizedQuery"> as romanization</template>
+          <template v-if="romanizedQuery"> as Korean romanization</template>
           <template v-if="qState === 'exact'"> (exact)</template>
           <template v-else-if="qState === 'fts'">
             (words containing it)</template

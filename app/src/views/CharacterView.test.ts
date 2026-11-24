@@ -417,7 +417,7 @@ describe("CharacterView", () => {
       korean: true,
     });
     expect(wrapper.get(".search-hint").text().replace(/\s+/g, " ")).toBe(
-      "Characters read lim as romanization",
+      "Characters read lim as Korean romanization",
     );
     expect(
       wrapper.findAll(".char-card").map((c) => c.attributes("data-char")),
@@ -448,7 +448,7 @@ describe("CharacterView", () => {
       korean: true,
     });
     expect(wrapper.get(".search-hint").text().replace(/\s+/g, " ")).toBe(
-      "Characters read rin as りん, pinyin or romanization",
+      "Characters read rin as りん, pinyin or Korean romanization",
     );
     expect(
       wrapper.findAll(".char-card").map((c) => c.attributes("data-char")),
@@ -465,7 +465,7 @@ describe("CharacterView", () => {
       calls.find((c) => c.cmd === "han_by_reading")?.args.readings,
     ).toEqual(["heung"]);
     expect(wrapper.get(".search-hint").text().replace(/\s+/g, " ")).toBe(
-      "Characters read heung as pinyin or romanization",
+      "Characters read heung as pinyin or Korean romanization",
     );
     wrapper.unmount();
   });

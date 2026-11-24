@@ -110,17 +110,17 @@ A reading instead of characters lists the characters read so, each in full, as a
 - Hangul, with the initial-sound rule either way: `이` finds 李, listed as 리.
 - Latin letters, by the search language:
 
-  | Search language | Latin letters are                     | e.g.                                     |
-  | --------------- | ------------------------------------- | ---------------------------------------- |
-  | Auto-detect     | romaji, pinyin and romanization alike | `kyou` finds 京, `heung` finds 興        |
-  | Japanese        | romaji, or else pinyin                | `kyou` finds 京, `okoru` finds 興        |
-  | Chinese         | pinyin                                | `xing` finds 興                          |
-  | Korean          | romanization, or else pinyin          | `heung` finds 興, `xīng` is still pinyin |
+  | Search language | Latin letters are                            | e.g.                                     |
+  | --------------- | -------------------------------------------- | ---------------------------------------- |
+  | Auto-detect     | romaji, pinyin and Korean romanization alike | `kyou` finds 京, `heung` finds 興        |
+  | Japanese        | romaji, or else pinyin                       | `kyou` finds 京, `okoru` finds 興        |
+  | Chinese         | pinyin                                       | `xing` finds 興                          |
+  | Korean          | Korean romanization, or else pinyin          | `heung` finds 興, `xīng` is still pinyin |
   - Romaji is looked up in hiragana. A long vowel's macron is spelled as kana spell it: `kyō` is きょう.
-  - Romanization is Revised Romanization, as in [Words](#korean):
+  - Korean romanization is Revised Romanization, as in [Words](#korean):
     - with the same loose spellings: `eu`/`u`, `r`/`l`, ...; `hung` finds 興 too;
     - with the initial-sound rule: `i` finds 李.
-  - The hint says what the reading was taken as: "Characters read kyou as きょう, pinyin or romanization".
+  - The hint says what the reading was taken as: "Characters read kyou as きょう, pinyin or Korean romanization".
   - With Auto-detect, the characters of every way are listed together, the most used first.
 
 - The readings are the kanji dictionaries' (KANJIDIC, CC-CEDICT.Hanzi) and the cards' Hangul readings, whichever dictionaries are ticked.
