@@ -70,6 +70,26 @@
           Searching words with <code>{{ charReading.ch }}</code> read
           <code>{{ charReading.reading }}</code>
         </template>
+        <!-- searched the other way, as nothing matched as typed -->
+        <template v-else-if="otherWayHint">
+          <template v-if="otherWayHint.as === 'reading'">
+            Nothing as a word: searching
+            <code>{{ otherWayHint.text }}</code> by reading
+          </template>
+          <template v-else>
+            Nothing by reading: searching
+            <code>{{ otherWayHint.text }}</code> as a word
+          </template>
+          <template v-if="qState === 'exact'"> (exact)</template>
+          <button
+            v-if="parsed.rest"
+            type="button"
+            class="link-button"
+            @click="searchNext"
+          >
+            Next: {{ parsed.rest }}
+          </button>
+        </template>
         <template v-else-if="parsed.term || hintReading">
           Searching
           <code v-if="parsed.term">{{ parsed.term }}</code>
@@ -270,6 +290,7 @@ import {
   isImeReading,
   isRomanization,
   normalizeQuery,
+  type ParsedQuery,
   parseQuery,
   toFurigana,
 } from "../util/furigana";
@@ -347,14 +368,84 @@ const imeFurigana = ref(true);
 const isKorean = computed(() => lang.value === "ko-KR");
 /** search Korean by typing romanization: hangugeo → 한국어 */
 const romanKo = ref(true);
-/** the term is Latin letters, matched against how Hangul terms are romanized */
-const romanizedQuery = computed(
-  () =>
-    isKorean.value &&
-    romanKo.value &&
-    isRomanization(parsed.value.term) &&
-    !parsed.value.reading,
-);
+/**
+ * Latin letters, matched against how Hangul terms are romanized: a term (`hangugeo`), or a
+ * reading alone (`{gwangsok}`, which finds 光速 by its Hangul reading 광속, as Hangul
+ * readings are what search.db romanizes)
+ */
+const romanizedQuery = computed(() => {
+  if (!isKorean.value || !romanKo.value) return false;
+  const { term, reading, readingGlob } = parsed.value;
+  if (term) return isRomanization(term) && !reading && !readingGlob;
+  return isRomanization(reading);
+});
+
+/** how a query is searched: as typed, or the other way, as a reading or as a word */
+type SearchAs = "reading" | "term" | null;
+/** a query that found nothing as typed, searched the other way, which found something */
+const searchedAs = ref<SearchAs>(null);
+
+/**
+ * The other way to search a query that found nothing: a word by reading, a reading alone
+ * as a word (e.g. 日本 typed with `{}` on). Not a pattern, `~`, nor a query with a reading
+ * of its own, Korean romanization (a reading already), or an incomplete romaji syllable.
+ */
+function otherWay(query: ParsedQuery, type: string | null): SearchAs {
+  if (type === "fts" || query.incomplete || query.readingGlob) return null;
+  if (romanizedQuery.value || charReading.value) return null;
+  const pattern = /[*?[\]]/u;
+  if (query.term && !query.reading) {
+    return pattern.test(query.term) ? null : "reading";
+  }
+  if (!query.term && query.reading) {
+    return pattern.test(query.reading) ? null : "term";
+  }
+  return null;
+}
+
+/** the search request's query, searched `as` a reading or a word, or as typed */
+function queryAs(query: ParsedQuery, as: SearchAs) {
+  if (as === "reading") {
+    return {
+      term: "",
+      reading: query.term.trim(),
+      readingGlob: "",
+      romanized: false,
+    };
+  }
+  if (as === "term") {
+    return {
+      term: query.reading,
+      reading: "",
+      readingGlob: "",
+      romanized: false,
+    };
+  }
+  // Korean romanization alone in {}: searched as a romanized term
+  if (romanizedQuery.value && !query.term) {
+    return {
+      term: query.reading,
+      reading: "",
+      readingGlob: "",
+      romanized: true,
+    };
+  }
+  return {
+    term: query.term.trim(),
+    reading: query.reading,
+    readingGlob: query.readingGlob,
+    romanized: romanizedQuery.value,
+  };
+}
+
+/** for the hint: the query searched the other way */
+const otherWayHint = computed(() => {
+  const { term, reading } = parsed.value;
+  if (searchedAs.value === "reading")
+    return { as: "reading", text: term.trim() };
+  if (searchedAs.value === "term") return { as: "term", text: reading };
+  return null;
+});
 
 /** the parsed reading, e.g. `にほん*` (`*`: the rest of the reading is unknown) */
 /** `*<興>{キョウ}`: words with 興 read キョウ, by the index of characters' readings */
@@ -480,6 +571,8 @@ watch(
   () => {
     // bump now, so an in-flight search for the old query discards its results
     const id = ++requestId;
+    // a new query: as typed, until it finds nothing
+    searchedAs.value = null;
     clearTimeout(searchTimer);
     searchTimer = setTimeout(async () => {
       await activeRequest;
@@ -599,7 +692,6 @@ async function loadMore(isNew?: boolean) {
   const query = parsed.value;
   const term = query.term.trim();
   const { reading, readingGlob, rest } = query;
-  const romanized = romanizedQuery.value;
 
   if (!(term || reading)) {
     // empty query: don't leave the previous query's results up
@@ -627,21 +719,37 @@ async function loadMore(isNew?: boolean) {
 
   let segmented: string[] = [];
 
+  /** as typed; a later page, the way the first was searched */
+  let as: SearchAs = isNew ? null : searchedAs.value;
+  const search = (way: SearchAs) =>
+    searchDB.search({
+      ...queryAs(query, way),
+      ch: way ? undefined : charReading.value?.ch,
+      chReading: way ? undefined : charReading.value?.reading,
+      excludeDicts: excludedDicts.value,
+      limit: 5,
+      offset,
+      type,
+    });
+
   const request = (async () => {
     try {
-      const result = await searchDB.search({
-        term,
-        reading,
-        readingGlob,
-        romanized,
-        ch: charReading.value?.ch,
-        chReading: charReading.value?.reading,
-        excludeDicts: excludedDicts.value,
-        limit: 5,
-        offset,
-        type,
-      });
+      let result = await search(as);
       if (id !== requestId) return; // the query changed meanwhile
+
+      // Nothing matches: search the other way, a word by reading or a reading as a word,
+      // before splitting the text into words
+      const other =
+        isNew && !as && !result.items.length && otherWay(query, type);
+      if (other) {
+        const found = await search(other);
+        if (id !== requestId) return;
+        if (found.items.length) {
+          result = found;
+          as = other;
+        }
+      }
+      if (isNew) searchedAs.value = as;
 
       // Nothing matches a longer text, e.g. a sentence from the clipboard: look up its
       // first word instead (and offer the rest as "Next").
@@ -651,7 +759,7 @@ async function loadMore(isNew?: boolean) {
         !rest &&
         !reading &&
         !readingGlob &&
-        !romanized &&
+        !romanizedQuery.value &&
         !query.incomplete &&
         type !== "fts" &&
         [...term].length > 1
@@ -830,6 +938,8 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   clearTimeout(searchTimer);
+  // a search in flight leaves its results, and any search after it, undone
+  requestId++;
   resizeObserver?.disconnect();
   window.removeEventListener("scroll", onScroll, { capture: true });
   window.removeEventListener("resize", onScroll);
@@ -896,6 +1006,11 @@ onBeforeUnmount(() => {
     margin: 0.25rem 0;
     font-size: 0.8125rem;
     color: var(--app-text-muted);
+  }
+
+  /* "Next: ..." apart from what is searched, which a template's whitespace doesn't keep */
+  .search-hint .link-button {
+    margin-inline-start: 0.75em;
   }
 
   .search-modes {

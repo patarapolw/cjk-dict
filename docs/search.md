@@ -11,7 +11,11 @@ How the app's search works. The [README](../README.md#app) has how to run the ap
   - `~` token search. It needs the tokenizer; until that has downloaded, `~` is disabled and falls back to prefix search.
 - The `{}` button searches by reading only: type the reading, no `{}` needed.
 - A space marks a word boundary: only the first word is looked up, and "Next" moves on to the rest.
-- When nothing matches a longer text (e.g. a copied sentence), it is split into words with the tokenizer.
+- When nothing matches, the search is tried the other way, in every search language; the hint says so:
+  - a word, by reading: `zhongguo` finds 中国, `にほんご` finds 日本語;
+  - a reading alone (`{}`, or the `{}` button), as a word: `{sake}` finds sake, and `日本` typed with the `{}` button on finds 日本.
+  - Not a pattern (`*`, `?`, `[...]`), `~`, a word with a reading of its own (`<日本>{にほん}`), nor Korean romanization, a reading already.
+- When neither way matches a longer text (e.g. a copied sentence), it is split into words with the tokenizer.
 - Each result links to:
   - an exact search for itself;
   - `~` words containing it;
@@ -137,8 +141,11 @@ A reading instead of characters lists the characters read so, each in full, as a
   - `dict-admin build` adds the table to an existing `search.db`.
   - A `search.db` built before that still works, more slowly, by romanizing the terms as it searches.
 - Hanja headwords get Hangul readings from `dict-admin` (see [dict-admin](dict-admin.md#korean-hanja-readings)). A Hangul word is its own reading, so:
-  - `광속`, `{광속}` and `gwangsok` find both 광속 and 光速;
+  - `광속`, `{광속}`, `gwangsok` and `{gwangsok}` find both 광속 and 光速;
   - `<光速>{광속}` finds 光速.
+- With **Search by romanization** on, a reading alone in romanization (`{gwangsok}`, or `gwangsok` with the `{}` button) is searched as romanization too.
+  - The romanization keys come from the Hangul readings, so it is a search by reading either way.
+  - A reading after a term (`<光速>{gwangsok}`) is not: write it in Hangul.
 
 ## Input options
 
