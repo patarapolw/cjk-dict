@@ -326,6 +326,8 @@ pub struct DictInfo {
     pub lang: Option<String>,
     pub target_lang: Option<String>,
     pub term_count: usize,
+    /// kanji bank entries indexed: single characters, e.g. KANJIDIC's
+    pub char_count: usize,
     /// pitch accent entries (Yomitan term meta of mode `pitch`)
     pub pitch_count: usize,
     /// who made it and how to credit it, from its index.json
@@ -674,6 +676,7 @@ async fn build_inner(
             lang: l1,
             target_lang,
             term_count: count,
+            char_count,
             pitch_count,
         });
     }
@@ -2870,6 +2873,14 @@ impl SearchDb {
         } else {
             HashMap::new()
         };
+        let char_counts: HashMap<i64, usize> = if self.has_kanji {
+            let mut st =
+                conn.prepare("SELECT dict_id, count(*) FROM kanji_link GROUP BY dict_id")?;
+            st.query_map([], |r| Ok((r.get(0)?, r.get::<_, i64>(1)? as usize)))?
+                .collect::<Result<_, _>>()?
+        } else {
+            HashMap::new()
+        };
         let mut st = conn.prepare(
             "SELECT id, name, title, revision, L1, L2, term_count, index_json FROM dict ORDER BY id",
         )?;
@@ -2882,6 +2893,7 @@ impl SearchDb {
                     lang: r.get(4)?,
                     target_lang: r.get(5)?,
                     term_count: r.get::<_, i64>(6)? as usize,
+                    char_count: char_counts.get(&r.get::<_, i64>(0)?).copied().unwrap_or(0),
                     pitch_count: pitch_counts.get(&r.get::<_, i64>(0)?).copied().unwrap_or(0),
                     credits: DictCredits::of_json(r.get::<_, Option<String>>(7)?.as_deref()),
                 })
@@ -3338,6 +3350,14 @@ mod han_tests {
         assert_eq!(char_counts(&db_path).unwrap()["kanji"], 2);
         let db = SearchDb::open(&db_path, &dir).unwrap();
         assert!(db.has_term_char);
+        // the Characters view's dictionaries: those with characters
+        let counts: Vec<(String, usize)> = db
+            .dicts()
+            .unwrap()
+            .into_iter()
+            .map(|d| (d.name, d.char_count))
+            .collect();
+        assert_eq!(counts, [("kanji".to_string(), 2)]);
         assert_eq!(
             find(&db, "ja-JP", "林", "リン"),
             pairs(&[("森林", "しんりん")])
@@ -3842,9 +3862,9 @@ mod pitch_tests {
         assert_eq!(
             dicts
                 .iter()
-                .map(|d| (d.name.as_str(), d.term_count, d.pitch_count))
+                .map(|d| (d.name.as_str(), d.term_count, d.pitch_count, d.char_count))
                 .collect::<Vec<_>>(),
-            [("words", 0, 0), ("Pitch", 0, 6)]
+            [("words", 0, 0, 0), ("Pitch", 0, 6, 0)]
         );
         // who made it and how to credit it, from index.json; empty is none
         let c = &dicts[1].credits;

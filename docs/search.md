@@ -72,6 +72,8 @@ The Characters view (`#/kanji?q=<characters>`) shows, for each Han character:
   - a radical also lists the characters written with its component forms: 水 lists 河;
   - **Search `*口`** below it searches `*口`, which shows them all, each in full (see below);
 - its kanji dictionary entries: readings, meanings, and stats with the dictionary's own notes;
+  - of the kanji dictionaries [chosen](#choosing-dictionaries), and only those of the search language and those that don't say theirs: KANJIDIC (Japanese, Chinese and Korean readings) in every language, CC-CEDICT.Hanzi (Chinese) with Chinese or all;
+  - the search language's first;
 - Hangul readings;
 - its single-character word entries.
 
@@ -142,4 +144,8 @@ Optional, below the search box:
 - The choice is kept as you switch the search language, so every dictionary of a language may be unticked. The app then says so, and leaves the choosing to you.
 - **Search all** ticks those listed again.
 - The choice is remembered per device, as the dictionaries left out: one added to the library later is searched.
-- The Characters view still shows every dictionary.
+- The Characters view has its own **Dictionaries**, of the kanji dictionaries, chosen the same way:
+  - listed by the same language rule: KANJIDIC, which doesn't say its language, always; CC-CEDICT.Hanzi (Chinese) with Chinese or all;
+  - an unticked one's entries aren't shown, and at least one stays ticked;
+  - **Show all** ticks those listed again;
+  - the choice is remembered per device, apart from Words'.
