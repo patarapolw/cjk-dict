@@ -113,7 +113,10 @@ It fills `search.db`'s character tables from the [CJKVI IDS database](https://gi
 - how each character breaks down into components;
 - which characters each component is in;
 - its Hangul readings (eum), as a character dictionary lists them (see [Korean Hanja readings](#korean-hanja-readings));
-- how many terms use it.
+- how many terms use it;
+- each character's own readings (`han_reading`), for the Characters view's search by reading:
+  - from the kanji dictionaries: on, kun and name readings in kana, KANJIDIC's pinyin and Korean, CC-CEDICT.Hanzi's pinyin;
+  - and its Hangul readings above.
 
 Notes:
 

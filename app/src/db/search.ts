@@ -123,6 +123,12 @@ export interface IHanList {
   total: number;
 }
 
+/** How a reading in Latin letters is read: as pinyin, as Korean romanization, or both */
+export interface ILatin {
+  pinyin: boolean;
+  korean: boolean;
+}
+
 const ALL_LANGS = ["ja-JP", "zh", "ko-KR"];
 
 class SearchDatabase {
@@ -190,6 +196,26 @@ class SearchDatabase {
       limit,
       offset,
       direct,
+    });
+  }
+
+  /**
+   * Characters read any of `readings`, the most used first: kana (`きょう`; a kun reading
+   * with or without its okurigana, `おこ` or `おこる`), pinyin (`xing`, every tone without
+   * one) or Hangul (`흥`). Latin letters are read as `latin` says: pinyin, Korean
+   * romanization (`heung`) as Words matches it, or both.
+   */
+  async hanByReading(
+    readings: string[],
+    latin: ILatin,
+    limit: number,
+    offset: number,
+  ): Promise<IHanList> {
+    return await invoke<IHanList>("han_by_reading", {
+      readings,
+      ...latin,
+      limit,
+      offset,
     });
   }
 

@@ -132,6 +132,19 @@ beforeEach(() => {
       if (a.components === "木" && a.direct) return page(MADE_OF_MU);
       return page([]);
     }
+    if (cmd === "han_by_reading") {
+      const readings = a.readings as string[];
+      const all = readings.includes("りん")
+        ? ["林", "森"]
+        : readings.includes("lim") && a.korean
+          ? ["林"]
+          : [];
+      return {
+        items: all.map((ch) => ({ ch, uses: 1 })),
+        next: null,
+        total: all.length,
+      };
+    }
     if (cmd === "search") return { items: [], next: null };
     if (cmd === "dicts") return dicts;
     throw new Error(`unexpected command: ${cmd}`);
@@ -349,6 +362,135 @@ describe("CharacterView", () => {
     expect(calls.find((c) => c.cmd === "han_chars")?.args).toEqual({
       text: "林",
     });
+    wrapper.unmount();
+  });
+
+  it("shows the characters read so for a reading, each in full", async () => {
+    const { wrapper } = await mountView("/kanji");
+    await wrapper.get("input.search-input").setValue("りん");
+    await loaded(wrapper);
+    expect(calls.find((c) => c.cmd === "han_by_reading")?.args).toEqual({
+      readings: ["りん"],
+      pinyin: true,
+      korean: true,
+      limit: 20,
+      offset: 0,
+    });
+    expect(calls.find((c) => c.cmd === "han_chars")?.args).toEqual({
+      text: "林森",
+    });
+    expect(wrapper.get(".search-hint").text()).toBe("Characters read りん");
+    expect(
+      wrapper.findAll(".char-card").map((c) => c.attributes("data-char")),
+    ).toEqual(["林", "森"]);
+    expect(wrapper.find(".containing").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("looks romaji up in kana with Japanese selected", async () => {
+    lang.value = "ja-JP";
+    const { wrapper } = await mountView("/kanji");
+    await wrapper.get("input.search-input").setValue("rin");
+    await loaded(wrapper);
+    expect(calls.find((c) => c.cmd === "han_by_reading")?.args).toMatchObject({
+      readings: ["りん"],
+      pinyin: true,
+      korean: false,
+    });
+    expect(wrapper.get(".search-hint").text().replace(/\s+/g, " ")).toBe(
+      "Characters read rin as りん",
+    );
+    expect(
+      wrapper.findAll(".char-card").map((c) => c.attributes("data-char")),
+    ).toEqual(["林", "森"]);
+    wrapper.unmount();
+  });
+
+  it("takes Latin letters as Korean romanization with Korean selected", async () => {
+    lang.value = "ko-KR";
+    const { wrapper } = await mountView("/kanji");
+    await wrapper.get("input.search-input").setValue("lim");
+    await loaded(wrapper);
+    expect(calls.find((c) => c.cmd === "han_by_reading")?.args).toMatchObject({
+      readings: ["lim"],
+      pinyin: false,
+      korean: true,
+    });
+    expect(wrapper.get(".search-hint").text().replace(/\s+/g, " ")).toBe(
+      "Characters read lim as Korean romanization",
+    );
+    expect(
+      wrapper.findAll(".char-card").map((c) => c.attributes("data-char")),
+    ).toEqual(["林"]);
+
+    // with Chinese, pinyin
+    lang.value = "zh";
+    calls = [];
+    await vi.waitFor(() =>
+      expect(calls.some((c) => c.cmd === "han_by_reading")).toBe(true),
+    );
+    expect(calls.find((c) => c.cmd === "han_by_reading")?.args).toMatchObject({
+      readings: ["lim"],
+      pinyin: true,
+      korean: false,
+    });
+    wrapper.unmount();
+  });
+
+  it("reads Latin letters every way with Auto-detect", async () => {
+    const { wrapper } = await mountView("/kanji");
+    await wrapper.get("input.search-input").setValue("rin");
+    await loaded(wrapper);
+    // romaji in kana too, and pinyin and romanization alike
+    expect(calls.find((c) => c.cmd === "han_by_reading")?.args).toMatchObject({
+      readings: ["rin", "りん"],
+      pinyin: true,
+      korean: true,
+    });
+    expect(wrapper.get(".search-hint").text().replace(/\s+/g, " ")).toBe(
+      "Characters read rin as りん, pinyin or Korean romanization",
+    );
+    expect(
+      wrapper.findAll(".char-card").map((c) => c.attributes("data-char")),
+    ).toEqual(["林", "森"]);
+
+    // not romaji: pinyin or romanization
+    calls = [];
+    await wrapper.get("input.search-input").setValue("heung");
+    await vi.waitFor(() =>
+      expect(calls.some((c) => c.cmd === "han_by_reading")).toBe(true),
+    );
+    await flushPromises();
+    expect(
+      calls.find((c) => c.cmd === "han_by_reading")?.args.readings,
+    ).toEqual(["heung"]);
+    expect(wrapper.get(".search-hint").text().replace(/\s+/g, " ")).toBe(
+      "Characters read heung as pinyin or Korean romanization",
+    );
+    wrapper.unmount();
+  });
+
+  it("takes a reading in braces, and says when no character has it", async () => {
+    const { wrapper } = await mountView("/kanji");
+    await wrapper.get("input.search-input").setValue("{xing}");
+    await vi.waitFor(() =>
+      expect(calls.some((c) => c.cmd === "han_by_reading")).toBe(true),
+    );
+    await flushPromises();
+    expect(
+      calls.find((c) => c.cmd === "han_by_reading")?.args.readings,
+    ).toEqual(["xing"]);
+    expect(wrapper.get(".no-results").text()).toBe("No characters read xing");
+
+    // `*` and Han characters are not readings
+    calls = [];
+    await wrapper.get("input.search-input").setValue("*林");
+    await vi.waitFor(() =>
+      expect(calls.some((c) => c.cmd === "han_containing")).toBe(true),
+    );
+    await flushPromises();
+    expect(calls.some((c) => c.cmd === "han_by_reading")).toBe(false);
+    expect(wrapper.find(".no-results").exists()).toBe(false);
     wrapper.unmount();
   });
 

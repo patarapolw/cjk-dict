@@ -19,6 +19,7 @@ use tauri_plugin_http::reqwest;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager, State};
+use yomitan_parser::char_reading::Latin;
 use yomitan_parser::search::{DictInfo, HanChar, HanList, SearchDb, SearchRequest, SearchResult};
 
 use crate::error::AppError;
@@ -613,6 +614,28 @@ pub async fn han_containing(
     .await
     .map_err(|e| AppError::Error(e.to_string()))?
     .map_err(AppError::from)
+}
+
+/// Characters read any of `readings` (kana, pinyin or Hangul), the most used first. Latin
+/// letters are pinyin (`pinyin`, the default), Korean romanization (`korean`), or both.
+#[tauri::command]
+pub async fn han_by_reading(
+    state: State<'_, DictState>,
+    readings: Vec<String>,
+    pinyin: Option<bool>,
+    korean: Option<bool>,
+    limit: Option<u32>,
+    offset: Option<u32>,
+) -> Result<HanList, AppError> {
+    let db = state.get()?;
+    let latin = Latin {
+        pinyin: pinyin.unwrap_or(true),
+        korean: korean.unwrap_or(false),
+    };
+    tauri::async_runtime::spawn_blocking(move || db.han_by_reading(&readings, latin, limit, offset))
+        .await
+        .map_err(|e| AppError::Error(e.to_string()))?
+        .map_err(AppError::from)
 }
 
 /// A dictionary's `styles.css`, if its zip has one. The view scopes it to that

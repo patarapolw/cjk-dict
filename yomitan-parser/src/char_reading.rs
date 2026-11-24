@@ -16,7 +16,11 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::{ids::is_han, pinyin::expand_pinyin, util::fold_kana};
+use crate::{
+    ids::is_han,
+    pinyin::{expand_pinyin, normalize_pinyin},
+    util::fold_kana,
+};
 
 /// Kanji readings in hiragana, from kanji dictionaries, with the forms they take in
 /// compounds: (form, reading it is a form of), longest first.
@@ -255,6 +259,89 @@ pub fn query_forms(reading: &str) -> Vec<String> {
     out
 }
 
+/// A character's readings as a kanji dictionary lists them (`コウ キョウ`, `おこ.る`, `yǔ, yù`,
+/// `흥`), as `han_reading` keeps them: kana in hiragana, a kun reading both up to its
+/// okurigana and whole (おこ and おこる), pinyin as `YU3`, Hangul as it is. Readings that are
+/// none of these are left out.
+pub fn stored_forms(readings: &str) -> Vec<String> {
+    let mut out = vec![];
+    for r in readings.split([' ', ',', '、']) {
+        let r = r.trim().trim_matches(['-', '‐']);
+        if r.is_empty() {
+            continue;
+        }
+        if r.chars().all(is_hangul_syllable) {
+            push(&mut out, r.to_string());
+        } else if r.chars().all(|c| is_kana_or_katakana(c) || c == '.') {
+            let h = fold_kana(r);
+            push(&mut out, h.split('.').next().unwrap_or("").to_string());
+            push(&mut out, h.replace('.', ""));
+        } else if let Some(p) = normalize_pinyin(r).filter(|p| !p.contains(' ')) {
+            push(&mut out, p.to_uppercase());
+        }
+    }
+    out
+}
+
+/// The readings to look characters up by, for a reading typed: as [`stored_forms`] keeps
+/// them. Unlike [`query_forms`], kana are taken as typed, not as a compound's sound change
+/// (ぎょう finds 行, not 京); Hangul and pinyin are as there.
+///
+/// Other text (Latin letters) is read as `latin` says: as pinyin, as Korean romanization
+/// (`heung` is 흥, `i` is 이 and 리: [`crate::korean::syllables_of`]), or both.
+pub fn lookup_forms(reading: &str, latin: Latin) -> Vec<String> {
+    let r = reading.trim().trim_matches(['-', '‐']);
+    if !r.chars().any(is_hangul_syllable) && !r.chars().any(is_kana_or_katakana) {
+        let mut out = vec![];
+        let korean = latin.korean && crate::korean::is_romanization(r);
+        if korean {
+            for s in crate::korean::syllables_of(r) {
+                for f in initial_sound_forms(s) {
+                    push(&mut out, f.to_string());
+                }
+            }
+        }
+        // what isn't romanization (`xīng`, `xing1`) is pinyin all the same
+        if latin.pinyin || !korean {
+            for f in query_forms(r) {
+                push(&mut out, f);
+            }
+        }
+        return out;
+    }
+    if !r.chars().any(is_hangul_syllable) && r.chars().any(is_kana_or_katakana) {
+        let h: String = fold_kana(r)
+            .chars()
+            .filter(|c| !c.is_whitespace() && *c != '.')
+            .collect();
+        return if h.is_empty() { vec![] } else { vec![h] };
+    }
+    query_forms(r)
+}
+
+/// How [`lookup_forms`] reads Latin letters: as pinyin, as Korean romanization, or both (with
+/// no search language chosen)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Latin {
+    pub pinyin: bool,
+    pub korean: bool,
+}
+
+impl Latin {
+    pub const PINYIN: Latin = Latin {
+        pinyin: true,
+        korean: false,
+    };
+    pub const KOREAN: Latin = Latin {
+        pinyin: false,
+        korean: true,
+    };
+    pub const ANY: Latin = Latin {
+        pinyin: true,
+        korean: true,
+    };
+}
+
 fn push(out: &mut Vec<String>, s: String) {
     if !s.is_empty() && !out.contains(&s) {
         out.push(s);
@@ -384,6 +471,47 @@ mod tests {
         );
         assert_eq!(align("마당劇", " 마당극 ", &k), pairs(&[("劇", "극")]));
         assert!(align("麻袋", " 마 ", &k).is_empty());
+    }
+
+    #[test]
+    fn a_characters_readings_are_stored_by_script() {
+        assert_eq!(stored_forms("コウ キョウ"), ["こう", "きょう"]);
+        assert_eq!(stored_forms("おこ.る -び"), ["おこ", "おこる", "び"]);
+        assert_eq!(stored_forms("yǔ, yù"), ["YU3", "YU4"]);
+        assert_eq!(stored_forms("xing1"), ["XING1"]);
+        assert_eq!(stored_forms("악 락"), ["악", "락"]);
+        // neither kana, Hangul nor pinyin
+        assert!(stored_forms("jouyou").is_empty());
+    }
+
+    #[test]
+    fn a_typed_reading_looks_characters_up_as_stored() {
+        assert_eq!(lookup_forms("キョウ", Latin::PINYIN), ["きょう"]);
+        assert_eq!(lookup_forms("ぎょう", Latin::PINYIN), ["ぎょう"]);
+        assert_eq!(lookup_forms("おこ.る", Latin::PINYIN), ["おこる"]);
+        assert_eq!(lookup_forms("xīng", Latin::PINYIN), ["XING1"]);
+        assert_eq!(lookup_forms("xing", Latin::PINYIN).len(), 5);
+        assert!(lookup_forms("이", Latin::PINYIN).contains(&"리".to_string()));
+        assert!(lookup_forms("", Latin::PINYIN).is_empty());
+        // Korean romanization, loosely as in Words, and the initial-sound rule
+        // eu and u alike
+        assert_eq!(lookup_forms("heung", Latin::KOREAN), ["훙", "흥"]);
+        assert_eq!(lookup_forms("hung", Latin::KOREAN), ["훙", "흥"]);
+        for (typed, hangul) in [("lim", "림"), ("rim", "림"), ("i", "리"), ("ri", "이")] {
+            assert!(
+                lookup_forms(typed, Latin::KOREAN).contains(&hangul.to_string()),
+                "{typed}: {hangul}"
+            );
+        }
+        assert!(lookup_forms("qqq", Latin::KOREAN).is_empty());
+        // kana and Hangul are themselves
+        assert_eq!(lookup_forms("きょう", Latin::KOREAN), ["きょう"]);
+        // with Korean, what isn't romanization is pinyin
+        assert_eq!(lookup_forms("xīng", Latin::KOREAN), ["XING1"]);
+        // with no search language, both
+        let any = lookup_forms("san", Latin::ANY);
+        assert!(any.contains(&"산".to_string()) && any.contains(&"SAN1".to_string()));
+        assert!(!lookup_forms("san", Latin::PINYIN).contains(&"산".to_string()));
     }
 
     #[test]

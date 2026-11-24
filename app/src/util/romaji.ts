@@ -1,4 +1,4 @@
-import { toKana, toKatakana } from "wanakana";
+import { isKana, toHiragana, toKana, toKatakana } from "wanakana";
 
 const LETTERS = [..."abcdefghijklmnopqrstuvwxyz"];
 const VOWELS = [..."aiueo"];
@@ -75,4 +75,32 @@ export function romajiTailGlob(term: string): string | null {
   let glob = "";
   for (let i = 0; i < len; i++) glob += globClass(row.map((k) => k[i]));
   return term.slice(0, m.index) + glob;
+}
+
+/** Hepburn's long vowels, as they are spelled in kana */
+const MACRONS: Record<string, string> = {
+  ā: "aa",
+  ī: "ii",
+  ū: "uu",
+  ē: "ei",
+  ō: "ou",
+  â: "aa",
+  î: "ii",
+  û: "uu",
+  ê: "ei",
+  ô: "ou",
+};
+
+/**
+ * Romaji as a reading in hiragana: `kyou` and `kyō` -> きょう, `okoru` -> おこる; null unless it
+ * all converts. A long vowel's macron (or circumflex) is spelled as kana spell it: ō -> おう.
+ */
+export function romajiReading(text: string): string | null {
+  const t = text
+    .trim()
+    .toLowerCase()
+    .replace(/[āīūēōâîûêô]/g, (c) => MACRONS[c]);
+  if (!/^[a-z][a-z'\-]*$/.test(t)) return null;
+  const kana = toHiragana(t);
+  return isKana(kana) ? kana : null;
 }

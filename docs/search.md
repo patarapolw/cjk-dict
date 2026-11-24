@@ -98,6 +98,34 @@ In both:
 - A radical also matches the forms it takes as a component: 水 finds 河, written with 氵.
 - Kangxi radicals (`⼝`) are read as the ideograph.
 
+### By reading
+
+A reading instead of characters lists the characters read so, each in full, as a card, the most used first, 20 at a time: `きょう` shows 京, 強, 教, ...
+
+- Text without Han characters is a reading; `{}` around it works too: `{xing}`.
+- Kana: on, kun and name readings, katakana and hiragana alike.
+  - A kun reading matches with or without its okurigana: `おこ` and `おこる` find 興.
+  - As typed, not as a compound's sound change: `ぎょう` finds 行, not 京.
+- Pinyin: `xīng`, `xing1`; without a tone, every tone.
+- Hangul, with the initial-sound rule either way: `이` finds 李, listed as 리.
+- Latin letters, by the search language:
+
+  | Search language | Latin letters are                            | e.g.                                     |
+  | --------------- | -------------------------------------------- | ---------------------------------------- |
+  | Auto-detect     | romaji, pinyin and Korean romanization alike | `kyou` finds 京, `heung` finds 興        |
+  | Japanese        | romaji, or else pinyin                       | `kyou` finds 京, `okoru` finds 興        |
+  | Chinese         | pinyin                                       | `xing` finds 興                          |
+  | Korean          | Korean romanization, or else pinyin          | `heung` finds 興, `xīng` is still pinyin |
+  - Romaji is looked up in hiragana. A long vowel's macron is spelled as kana spell it: `kyō` is きょう.
+  - Korean romanization is Revised Romanization, as in [Words](#korean):
+    - with the same loose spellings: `eu`/`u`, `r`/`l`, ...; `hung` finds 興 too;
+    - with the initial-sound rule: `i` finds 李.
+  - The hint says what the reading was taken as: "Characters read kyou as きょう, pinyin or Korean romanization".
+  - With Auto-detect, the characters of every way are listed together, the most used first.
+
+- The readings are the kanji dictionaries' (KANJIDIC, CC-CEDICT.Hanzi) and the cards' Hangul readings, whichever dictionaries are ticked.
+- With a `search.db` from before this, the view says to update the library.
+
 ## Korean
 
 - With Korean selected, typing Revised Romanization finds Hangul: `hangugeo`, `hangukeo` or `hangug-eo` → 한국어.
@@ -120,6 +148,11 @@ Optional, below the search box:
   - `にほんg` is `にほん[がぎぐげごっ]`;
   - `{にほn` is `{にほ[なにぬねのん]`;
   - `<食>{たb}べる` is `<食>{た[っばびぶべぼ]}べる`.
+  - Words doesn't otherwise match romaji to kana, unlike the Characters view's [search by reading](#by-reading):
+    - Latin letters mean something in Words: a Latin headword, Korean romanization or pinyin (`sake`, `rin`); matching them to kana would quietly change what a search means.
+    - This option already does it, and shows the kana in the search box.
+    - Romaji leaves long vowels unclear (`kyo`: きょ or きょう; `ono`: おの or おおの): cheap for a character's few readings, but many unwanted results across words.
+    - Korean romanization is matched (see [Korean](#korean)), since Hangul has no input method as common as a Japanese IME.
 - **Get reading from IME**: a Japanese IME's reading is kept as `<漢字>{かんじ}` when you convert.
 - **Clipboard monitor**: checks the clipboard every second, and searches copied text that starts with Chinese, Japanese or Korean.
   - It searches in the normal mode: it turns off `~`, `=` and `{}`.
