@@ -20,7 +20,7 @@ How the app's search works. The [README](../README.md#app) has how to run the ap
   - an exact search for itself;
   - `~` words containing it;
   - words with the same reading;
-  - its characters.
+  - **Characters** of it: its Han characters in the Characters view.
 - In-dictionary links and the back button keep a search history.
 
 ## Readings
@@ -67,7 +67,23 @@ Without the term's index to narrow it, a search starting with a wildcard walks t
 
 ## Characters
 
-The Characters view (`#/kanji?q=<characters>`) shows, for each Han character:
+The Characters view (`#/kanji?q=<characters>`) shows each Han character as a card, collapsed as Words' results are:
+
+- Outside, always shown:
+  - the character, tapped to open or close the card;
+  - the first 3 meanings of its first kanji dictionary entry shown;
+  - how many words use it;
+  - Hangul readings;
+  - **= 日**: 日 as a word (exact search);
+  - **\*日\***: the words with 日 anywhere in them;
+  - **Variants**.
+- Inside: the rest, below.
+- Open at first:
+  - a single character's card (`日`, or a list of one);
+  - none of a list's: `木口`, `*口`, a reading.
+- The cards open are kept per query while the app runs: going to Words and back shows them as they were.
+
+A card shows, for its character:
 
 - **Variants**, from Unihan, each linking to its own page, with how it relates: 学 lists 學 (traditional, kyūjitai); 広 lists 廣 (kyūjitai);
   - traditional, simplified, kyūjitai or shinjitai; "semantic" (the same meaning, not always interchangeable) and "other" only when a variant is none of those;
@@ -76,13 +92,11 @@ The Characters view (`#/kanji?q=<characters>`) shows, for each Han character:
 - **Used in**: up to 30 characters made directly of it (one level up), the most used first: 口 lists 可, 呆, ... but not 河, made of 可;
   - "5 more" after them when there are more;
   - a radical also lists the characters written with its component forms: 水 lists 河;
-  - **Search `*口`** below it searches `*口`, which shows them all, each in full (see below);
+  - **All characters made of 口** below it searches `*口`, which shows them all, each in full (see below);
 - its kanji dictionary entries: readings, meanings, and stats with the dictionary's own notes;
   - of the kanji dictionaries [chosen](#choosing-dictionaries), and only those of the search language and those that don't say theirs: KANJIDIC (Japanese, Chinese and Korean readings) in every language, CC-CEDICT.Hanzi (Chinese) with Chinese or all, Hanja (Korean) with Korean or all;
   - the search language's first;
   - with none shown, its variants' entries, each marked with the variant and how it relates, e.g. 钟 with Japanese shows 鍾's and 鐘's KANJIDIC entries; their readings search the words with the variant;
-- Hangul readings;
-- its single-character word entries.
 
 Each reading searches the words with the character read so, anywhere in the word:
 

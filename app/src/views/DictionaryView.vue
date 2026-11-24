@@ -232,7 +232,7 @@
               v-tooltip="'Its characters: components, readings and meanings'"
               @click="toCharacters(headTerm(it))"
             >
-              字 {{ hanChars(headTerm(it)).join("") }}
+              Characters {{ hanChars(headTerm(it)).join("") }}
             </button>
           </div>
           <PitchAccents

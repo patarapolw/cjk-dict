@@ -86,7 +86,26 @@
         :data-char="c.ch"
       >
         <header class="char-header">
-          <span class="glyph" :lang="lang || undefined">{{ c.ch }}</span>
+          <button
+            type="button"
+            class="char-toggle"
+            :aria-expanded="isOpen(c.ch)"
+            v-tooltip="isOpen(c.ch) ? 'Show less' : 'Show more'"
+            @click="toggle(c.ch)"
+          >
+            <span class="glyph" :lang="lang || undefined">{{ c.ch }}</span>
+            <span class="char-gist">
+              <span
+                v-if="gist(c)"
+                class="gist-meanings"
+                :lang="gist(c)!.lang"
+                >{{ gist(c)!.text }}</span
+              >
+              <span v-if="c.uses" class="uses"
+                >in {{ c.uses.toLocaleString() }} words</span
+              >
+            </span>
+          </button>
           <div class="char-summary">
             <p v-if="c.hangul.length" class="hangul" lang="ko">
               <template v-for="(r, k) in c.hangul" :key="r">
@@ -101,10 +120,7 @@
                 </button>
               </template>
             </p>
-            <p class="uses">
-              {{ c.uses ? `in ${c.uses.toLocaleString()} words` : "" }}
-            </p>
-            <div class="item-actions">
+            <div class="item-actions" :lang="lang || undefined">
               <button
                 type="button"
                 class="link-button"
@@ -116,20 +132,10 @@
               <button
                 type="button"
                 class="link-button"
-                :disabled="tokenizerPending"
-                v-tooltip="'Words containing it'"
-                @click="toWords(c.ch, 'fts')"
+                v-tooltip="`Words with ${c.ch} anywhere`"
+                @click="toWords(`*${c.ch}*`, '')"
               >
-                ~ {{ c.ch }}
-              </button>
-              <button
-                v-if="found.length > 1 || paged"
-                type="button"
-                class="link-button"
-                v-tooltip="'This character only'"
-                @click="go(c.ch)"
-              >
-                字 {{ c.ch }}
+                *{{ c.ch }}*
               </button>
             </div>
           </div>
@@ -153,208 +159,198 @@
           </ul>
         </div>
 
-        <div v-if="c.ids.length" class="breakdown">
-          <h3>Components</h3>
-          <ul class="ids-list">
-            <li v-for="(ids, i) in sortIds(c.ids, lang)" :key="i">
-              <span class="ids" :lang="lang || undefined">
-                <template v-for="(t, j) in idsTokens(ids.ids)" :key="j">
-                  <button
-                    v-if="t.kind === 'component' && t.text !== c.ch"
-                    type="button"
-                    class="component"
-                    v-tooltip="`Look up ${t.text}`"
-                    @click="go(t.text)"
-                  >
-                    {{ t.text }}
-                  </button>
-                  <span v-else-if="t.kind === 'component'">{{ t.text }}</span>
-                  <span v-else class="idc" v-tooltip="t.title">{{
-                    t.text
-                  }}</span>
-                </template>
-              </span>
-              <span
-                v-if="ids.regions"
-                class="regions"
-                v-tooltip="regionTitle(ids.regions)"
-                >{{ ids.regions }}</span
+        <div v-if="isOpen(c.ch)" class="char-details">
+          <div v-if="c.ids.length" class="breakdown">
+            <h3>Components</h3>
+            <ul class="ids-list">
+              <li v-for="(ids, i) in sortIds(c.ids, lang)" :key="i">
+                <span class="ids" :lang="lang || undefined">
+                  <template v-for="(t, j) in idsTokens(ids.ids)" :key="j">
+                    <button
+                      v-if="t.kind === 'component' && t.text !== c.ch"
+                      type="button"
+                      class="component"
+                      v-tooltip="`Look up ${t.text}`"
+                      @click="go(t.text)"
+                    >
+                      {{ t.text }}
+                    </button>
+                    <span v-else-if="t.kind === 'component'">{{ t.text }}</span>
+                    <span v-else class="idc" v-tooltip="t.title">{{
+                      t.text
+                    }}</span>
+                  </template>
+                </span>
+                <span
+                  v-if="ids.regions"
+                  class="regions"
+                  v-tooltip="regionTitle(ids.regions)"
+                  >{{ ids.regions }}</span
+                >
+              </li>
+            </ul>
+            <p v-if="!c.components.length" class="muted">
+              Does not break down further.
+            </p>
+            <p
+              v-else-if="c.all_components.length > c.components.length"
+              class="all-components"
+            >
+              <span class="muted">All the way down:</span>
+              <button
+                v-for="comp in c.all_components"
+                :key="comp"
+                type="button"
+                class="component"
+                :lang="lang || undefined"
+                v-tooltip="`Look up ${comp}`"
+                @click="go(comp)"
               >
-            </li>
-          </ul>
-          <p v-if="!c.components.length" class="muted">
-            Does not break down further.
-          </p>
-          <p
-            v-else-if="c.all_components.length > c.components.length"
-            class="all-components"
-          >
-            <span class="muted">All the way down:</span>
-            <button
-              v-for="comp in c.all_components"
-              :key="comp"
-              type="button"
-              class="component"
-              :lang="lang || undefined"
-              v-tooltip="`Look up ${comp}`"
-              @click="go(comp)"
-            >
-              {{ comp }}
-            </button>
-          </p>
-        </div>
+                {{ comp }}
+              </button>
+            </p>
+          </div>
 
-        <div v-if="usedIn[c.ch]" class="used-in">
-          <h3>Used in</h3>
-          <p v-if="!usedIn[c.ch].items.length" class="muted">
-            Not a component of another character.
-          </p>
-          <p v-else class="used-in-list" :lang="lang || undefined">
+          <div v-if="usedIn[c.ch]" class="used-in">
+            <h3>Used in</h3>
+            <p v-if="!usedIn[c.ch].items.length" class="muted">
+              Not a component of another character.
+            </p>
+            <p v-else class="used-in-list" :lang="lang || undefined">
+              <button
+                v-for="it in usedIn[c.ch].items"
+                :key="it.ch"
+                type="button"
+                class="component"
+                v-tooltip="usedInTitle(it)"
+                @click="go(it.ch)"
+              >
+                {{ it.ch }}
+              </button>
+              <span
+                v-if="usedIn[c.ch].total > usedIn[c.ch].items.length"
+                class="muted used-in-more"
+                >{{ usedIn[c.ch].total - usedIn[c.ch].items.length }} more</span
+              >
+            </p>
             <button
-              v-for="it in usedIn[c.ch].items"
-              :key="it.ch"
+              v-if="usedIn[c.ch].items.length"
               type="button"
-              class="component"
-              v-tooltip="usedInTitle(it)"
-              @click="go(it.ch)"
+              class="super-search"
+              v-tooltip="superTitle(c.ch)"
+              @click="go(`*${c.ch}`)"
             >
-              {{ it.ch }}
+              All characters made of
+              <span class="super-query" :lang="lang || undefined">{{
+                c.ch
+              }}</span>
             </button>
-            <span
-              v-if="usedIn[c.ch].total > usedIn[c.ch].items.length"
-              class="muted used-in-more"
-              >{{ usedIn[c.ch].total - usedIn[c.ch].items.length }} more</span
-            >
-          </p>
-          <button
-            v-if="usedIn[c.ch].items.length"
-            type="button"
-            class="super-search"
-            v-tooltip="superTitle(c.ch)"
-            @click="go(`*${c.ch}`)"
-          >
-            Search
-            <span class="super-query" :lang="lang || undefined"
-              >*{{ c.ch }}</span
-            >
-          </button>
-        </div>
+          </div>
 
-        <p v-if="cardEntries(c).some((it) => it.via)" class="muted via-note">
-          No entry for {{ c.ch }}; its variants':
-        </p>
-        <article
-          v-for="({ e, via, of: ech }, i) in cardEntries(c)"
-          :key="i"
-          class="kanji-entry"
-          :data-via="via?.ch"
-        >
-          <header>
-            <button
-              v-if="via"
-              type="button"
-              class="via-variant"
-              v-tooltip="`Look up ${variantTitle(via)}`"
-              @click="go(via.ch)"
-            >
-              <span :lang="lang || undefined">{{ via.ch }}</span>
-              {{ variantLabel(via.kinds) }}
-            </button>
-            <span
-              class="tag"
-              data-category="dictionary"
-              :lang="e.lang || undefined"
-              >{{ e.dict_path }}</span
-            >
-            <span
-              v-for="t in splitTags(e.tags)"
-              :key="t"
-              class="tag"
-              v-tooltip="e.tag_meta[t]?.notes || undefined"
-              >{{ t }}</span
-            >
-          </header>
-          <dl class="readings">
-            <template v-if="e.onyomi">
-              <dt>{{ readingLabel(e.onyomi) }}</dt>
-              <dd :lang="e.lang || undefined">
-                <template v-for="(r, k) in splitReadings(e.onyomi)" :key="k">
-                  <template v-if="k">、</template>
-                  <button
-                    type="button"
-                    class="link-button reading"
-                    v-tooltip="readingTitle(ech, r)"
-                    @click="toReading(ech, r)"
-                  >
-                    {{ r }}
-                  </button>
-                </template>
-              </dd>
-            </template>
-            <template v-if="e.kunyomi">
-              <dt>{{ readingLabel(e.kunyomi) }}</dt>
-              <dd :lang="e.lang || undefined">
-                <template v-for="(r, k) in splitReadings(e.kunyomi)" :key="k">
-                  <template v-if="k">、</template>
-                  <button
-                    type="button"
-                    class="link-button reading"
-                    v-tooltip="readingTitle(ech, r)"
-                    @click="toReading(ech, r)"
-                  >
-                    {{ r }}
-                  </button>
-                </template>
-              </dd>
-            </template>
-            <!-- other languages' readings, e.g. KANJIDIC's pinyin and Korean -->
-            <template v-for="[name, value] in readingStats(e)" :key="name">
-              <dt v-tooltip="name">{{ e.tag_meta[name].notes || name }}</dt>
-              <dd :lang="STAT_LANGS[name]">
-                <template v-if="READING_STAT_LANGS[name]">
-                  <template v-for="(r, k) in value.split(/,\s*/)" :key="k">
-                    <template v-if="k">, </template>
+          <p v-if="cardEntries(c).some((it) => it.via)" class="muted via-note">
+            No entry for {{ c.ch }}; its variants':
+          </p>
+          <article
+            v-for="({ e, via, of: ech }, i) in cardEntries(c)"
+            :key="i"
+            class="kanji-entry"
+            :data-via="via?.ch"
+          >
+            <header>
+              <button
+                v-if="via"
+                type="button"
+                class="via-variant"
+                v-tooltip="`Look up ${variantTitle(via)}`"
+                @click="go(via.ch)"
+              >
+                <span :lang="lang || undefined">{{ via.ch }}</span>
+                {{ variantLabel(via.kinds) }}
+              </button>
+              <span
+                class="tag"
+                data-category="dictionary"
+                :lang="e.lang || undefined"
+                >{{ e.dict_path }}</span
+              >
+              <span
+                v-for="t in splitTags(e.tags)"
+                :key="t"
+                class="tag"
+                v-tooltip="e.tag_meta[t]?.notes || undefined"
+                >{{ t }}</span
+              >
+            </header>
+            <dl class="readings">
+              <template v-if="e.onyomi">
+                <dt>{{ readingLabel(e.onyomi) }}</dt>
+                <dd :lang="e.lang || undefined">
+                  <template v-for="(r, k) in splitReadings(e.onyomi)" :key="k">
+                    <template v-if="k">、</template>
                     <button
                       type="button"
                       class="link-button reading"
                       v-tooltip="readingTitle(ech, r)"
-                      @click="toReading(ech, r, READING_STAT_LANGS[name])"
+                      @click="toReading(ech, r)"
                     >
                       {{ r }}
                     </button>
                   </template>
-                </template>
-                <template v-else>{{ value }}</template>
-              </dd>
-            </template>
-          </dl>
-          <ol v-if="e.meanings.length" class="meanings" :lang="glossLang(e)">
-            <li v-for="(m, j) in e.meanings" :key="j">{{ m }}</li>
-          </ol>
-          <details v-if="sortedStats(e).length" class="stats">
-            <summary>Details</summary>
-            <table>
-              <tr v-for="[name, value] in sortedStats(e)" :key="name">
-                <th v-tooltip="name">{{ e.tag_meta[name]?.notes || name }}</th>
-                <td>{{ value }}</td>
-              </tr>
-            </table>
-          </details>
-        </article>
-
-        <details class="word-entries" @toggle="onWordsToggle(c.ch, $event)">
-          <summary>Dictionary entries for {{ c.ch }}</summary>
-          <p v-if="words[c.ch] === undefined" class="muted">Loading…</p>
-          <p v-else-if="!words[c.ch].length" class="muted">None</p>
-          <Term
-            v-for="(ent, j) in words[c.ch]"
-            :key="j"
-            :row="ent"
-            show-term
-            :get-asset-src="getAssetSrc"
-            @anchor-clicked="onAnchorClicked"
-          />
-        </details>
+                </dd>
+              </template>
+              <template v-if="e.kunyomi">
+                <dt>{{ readingLabel(e.kunyomi) }}</dt>
+                <dd :lang="e.lang || undefined">
+                  <template v-for="(r, k) in splitReadings(e.kunyomi)" :key="k">
+                    <template v-if="k">、</template>
+                    <button
+                      type="button"
+                      class="link-button reading"
+                      v-tooltip="readingTitle(ech, r)"
+                      @click="toReading(ech, r)"
+                    >
+                      {{ r }}
+                    </button>
+                  </template>
+                </dd>
+              </template>
+              <!-- other languages' readings, e.g. KANJIDIC's pinyin and Korean -->
+              <template v-for="[name, value] in readingStats(e)" :key="name">
+                <dt v-tooltip="name">{{ e.tag_meta[name].notes || name }}</dt>
+                <dd :lang="STAT_LANGS[name]">
+                  <template v-if="READING_STAT_LANGS[name]">
+                    <template v-for="(r, k) in value.split(/,\s*/)" :key="k">
+                      <template v-if="k">, </template>
+                      <button
+                        type="button"
+                        class="link-button reading"
+                        v-tooltip="readingTitle(ech, r)"
+                        @click="toReading(ech, r, READING_STAT_LANGS[name])"
+                      >
+                        {{ r }}
+                      </button>
+                    </template>
+                  </template>
+                  <template v-else>{{ value }}</template>
+                </dd>
+              </template>
+            </dl>
+            <ol v-if="e.meanings.length" class="meanings" :lang="glossLang(e)">
+              <li v-for="(m, j) in e.meanings" :key="j">{{ m }}</li>
+            </ol>
+            <details v-if="sortedStats(e).length" class="stats">
+              <summary>Details</summary>
+              <table>
+                <tr v-for="[name, value] in sortedStats(e)" :key="name">
+                  <th v-tooltip="name">
+                    {{ e.tag_meta[name]?.notes || name }}
+                  </th>
+                  <td>{{ value }}</td>
+                </tr>
+              </table>
+            </details>
+          </article>
+        </div>
       </section>
 
       <button
@@ -405,6 +401,28 @@
   </main>
 </template>
 
+<script lang="ts">
+/** queries whose open cards are remembered */
+const OPENED_KEPT = 50;
+
+/**
+ * The cards open per query, kept while the app runs: going to Words and back mounts the
+ * view again, with the cards as they were
+ */
+const openedByQuery = new Map<string, string[]>();
+
+function rememberOpened(query: string, chs: string[]) {
+  const key = query.trim();
+  openedByQuery.delete(key);
+  openedByQuery.set(key, chs);
+  // the oldest first
+  for (const k of openedByQuery.keys()) {
+    if (openedByQuery.size <= OPENED_KEPT) break;
+    openedByQuery.delete(k);
+  }
+}
+</script>
+
 <script setup lang="ts">
 import {
   computed,
@@ -417,14 +435,12 @@ import {
 import { useRoute, useRouter } from "vue-router";
 
 import DictFilter from "../components/DictFilter.vue";
-import Term from "../components/yomitan/Term.vue";
 import {
   IHanChar,
   IHanList,
   IHanVariant,
   IKanjiEntry,
   ILatin,
-  ITerm,
   searchDB,
 } from "../db/search";
 import {
@@ -449,7 +465,7 @@ import {
 import { isRomanization } from "../util/furigana";
 import { glossLang } from "../util/lang";
 import { romajiReading } from "../util/romaji";
-import { dictsVersion, toBeLoaded } from "../util/loading";
+import { dictsVersion } from "../util/loading";
 import { scrollToStart } from "../util/scroll";
 import { lang } from "../util/settings";
 import { touchScreen, vTooltip } from "../util/tooltip";
@@ -459,6 +475,12 @@ const MAX_CHARS = 20;
 const PAGE = 60;
 /** characters made directly of a character, shown on its card */
 const USED_IN_PAGE = 30;
+/** meanings shown on a collapsed card */
+const GIST_MEANINGS = 3;
+/** a query's open cards: as they were left, else a single character's */
+function initialOpened(query: string, cs: IHanChar[]) {
+  return openedByQuery.get(query.trim()) ?? (cs.length === 1 ? [cs[0].ch] : []);
+}
 
 const q = ref("");
 /**
@@ -525,10 +547,31 @@ const usedIn = ref<Record<string, IHanList>>({});
 const superNext = ref<number | null>(null);
 /** a reading that no character has */
 const noneFound = ref(false);
-/** single-character word entries, loaded when their section is opened */
-const words = ref<Record<string, ITerm[]>>({});
+/** the characters whose cards are open */
+const opened = ref<string[]>([]);
 
-const tokenizerPending = computed(() => toBeLoaded.value.some((d) => !d.dict));
+const isOpen = (ch: string) => opened.value.includes(ch);
+
+function toggle(ch: string) {
+  opened.value = isOpen(ch)
+    ? opened.value.filter((c) => c !== ch)
+    : [...opened.value, ch];
+  rememberOpened(q.value, opened.value);
+}
+
+/**
+ * A collapsed card's gist: the first meanings of its first entry shown, or with none,
+ * of its variants'
+ */
+function gist(c: IHanChar) {
+  const first = cardEntries(c)[0];
+  if (!first?.e.meanings.length) return null;
+  const ms = first.e.meanings;
+  const text =
+    ms.slice(0, GIST_MEANINGS).join("; ") +
+    (ms.length > GIST_MEANINGS ? "; …" : "");
+  return { text, lang: glossLang(first.e) };
+}
 
 /** the kanji dictionaries of the search language, to choose from */
 const shownDicts = computed(() => charDicts(dictList.value, lang.value));
@@ -608,7 +651,6 @@ async function load() {
   const text = chars.value.join("");
   const reading = readingQ.value;
   const { readings, latin } = lookup.value;
-  words.value = {};
   if (!text && !reading) {
     clear();
     return;
@@ -619,6 +661,7 @@ async function load() {
       if (id !== requestId) return;
       clear();
       found.value = page.found;
+      opened.value = initialOpened(q.value, page.found);
       usedIn.value = page.usedIn;
       superNext.value = page.next;
       noneFound.value = !!reading && !page.found.length;
@@ -633,6 +676,7 @@ async function load() {
       if (id !== requestId) return;
       clear();
       found.value = cs;
+      opened.value = initialOpened(q.value, cs);
       usedIn.value = direct;
       containing.value = list.items;
       containingNext.value = list.next;
@@ -649,6 +693,7 @@ async function load() {
 
 function clear() {
   found.value = [];
+  opened.value = [];
   variantChars.value = {};
   variantsAsked = new Set();
   usedIn.value = {};
@@ -734,30 +779,7 @@ async function loadContaining() {
 const usedInTitle = (it: { ch: string; uses: number }) =>
   it.uses ? `${it.ch}, in ${it.uses.toLocaleString()} words` : it.ch;
 const superTitle = (components: string) =>
-  `Every character made directly of ${components}, each in full`;
-
-async function onWordsToggle(ch: string, e: Event) {
-  if (!(e.target as HTMLDetailsElement).open || words.value[ch]) return;
-  const id = requestId;
-  try {
-    const result = await searchDB.search({
-      term: ch,
-      reading: "",
-      readingGlob: "",
-      limit: 5,
-      offset: 0,
-      type: "exact",
-    });
-    if (id !== requestId) return;
-    words.value = {
-      ...words.value,
-      [ch]: result.items.flatMap((it) => it.entries),
-    };
-  } catch (err) {
-    console.error(err);
-    if (id === requestId) words.value = { ...words.value, [ch]: [] };
-  }
-}
+  `Every character made directly of ${components}, each in full: *${components}`;
 
 /** wait for typing to pause */
 const DEBOUNCE_MS = 200;
@@ -804,15 +826,6 @@ async function clearQuery() {
   if (q.value) await setRouteQuery();
   q.value = "";
   elSearchInput.value?.focus();
-}
-
-function onAnchorClicked(href: string) {
-  const query = new URLSearchParams(href.slice(1)).get("query");
-  if (query) toWords(query, "exact");
-}
-
-function getAssetSrc(dict: string, src: string) {
-  return searchDB.assetSrc(dict, src);
 }
 
 const splitTags = (tags: string) => tags.split(/\s+/).filter(Boolean);
@@ -957,8 +970,50 @@ button:focus-visible {
 
 .char-header {
   display: flex;
-  gap: 1rem;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
   align-items: center;
+}
+
+/* as Words' accordion header */
+.char-toggle {
+  display: flex;
+  flex: 1 1 12rem;
+  min-width: 0;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--app-text);
+  text-align: start;
+  font: inherit;
+  cursor: pointer;
+}
+
+.char-toggle::before {
+  content: "›";
+  transition: transform 150ms ease;
+}
+
+.char-toggle[aria-expanded="true"]::before {
+  transform: rotate(90deg);
+}
+
+.char-gist {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.gist-meanings {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.char-toggle[aria-expanded="true"] .gist-meanings {
+  white-space: normal;
 }
 
 .glyph {
@@ -1113,8 +1168,7 @@ h3 {
   padding-inline-start: 1.5rem;
 }
 
-.stats summary,
-.word-entries summary {
+.stats summary {
   cursor: pointer;
   color: var(--app-link);
   font-size: 0.875rem;
@@ -1130,14 +1184,6 @@ h3 {
   text-align: start;
   font-weight: normal;
   color: var(--app-text-muted);
-}
-
-.word-entries {
-  margin-top: 0.75rem;
-}
-
-.word-entries[open] summary {
-  margin-bottom: 0.5rem;
 }
 
 .containing {
