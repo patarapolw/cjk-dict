@@ -360,8 +360,8 @@ async function planDicts() {
   justify-content: flex-end;
   align-items: center;
   box-sizing: border-box;
-  min-height: 4rem;
-  padding: 0.5rem;
+  /* no padding below: the views' own top padding is the gap */
+  padding: 0.5rem 0.5rem 0;
   gap: 0.5rem 0.75rem;
 }
 
@@ -475,8 +475,7 @@ async function planDicts() {
   }
 
   .header {
-    min-height: 3rem;
-    padding-block: 0.25rem;
+    padding-top: 0.25rem;
   }
 }
 </style>
