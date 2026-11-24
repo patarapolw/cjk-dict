@@ -63,7 +63,7 @@ How the app gets the library and shows entries. The [README](../README.md#app) h
 
 Notes:
 
-- A license is given only as its source states it; a dictionary whose source doesn't say gets "see its source".
+- Each default's license is the one its source states, linked to the page that says so; e.g. Pixiv's is pixiv's terms of use, not an open license.
 - `credits.ts` lists every default dictionary, as `dict-admin/src/defaults.rs` does; a test checks that the two agree.
 - Links open in the system's browser.
 

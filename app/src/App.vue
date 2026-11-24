@@ -363,8 +363,9 @@ async function loadAll() {
   padding: 0.25rem 0.5rem;
 }
 
-/* too narrow to be anything but cut off */
-@media (max-width: 24rem) {
+/* too narrow for the whole title beside the views and the select: hide it rather than
+   leave a stub such as "CJK Di…" (most phones) */
+@media (max-width: 29rem) {
   .header-title {
     display: none;
   }

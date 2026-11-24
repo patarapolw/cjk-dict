@@ -52,12 +52,9 @@
             </template>
             <dt>License</dt>
             <dd>
-              <ExternalLink
-                v-if="DEFAULT_CREDITS[d.name].license"
-                :url="DEFAULT_CREDITS[d.name].license!.url"
-                >{{ DEFAULT_CREDITS[d.name].license!.name }}</ExternalLink
-              >
-              <template v-else>see its source</template>
+              <ExternalLink :url="DEFAULT_CREDITS[d.name].license.url">{{
+                DEFAULT_CREDITS[d.name].license.name
+              }}</ExternalLink>
             </dd>
           </template>
           <template v-if="d.credits?.author">

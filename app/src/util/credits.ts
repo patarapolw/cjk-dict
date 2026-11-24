@@ -1,10 +1,9 @@
 /**
  * Credits for the About page: where the default dictionaries and the other data the app
- * uses come from, and their licenses where their sources state one.
+ * uses come from, and their licenses as their sources state them.
  *
  * Keep in step with `dict-admin/src/defaults.rs` and docs/dict-admin.md's table. Give a
- * license only as its source states it: a dictionary whose source doesn't say has none
- * here, and the page links to the source instead.
+ * license as the source itself states it, linked to the page that says so.
  */
 
 export interface ILink {
@@ -17,7 +16,7 @@ export interface ICredit {
   source: ILink;
   /** the project that converts it to Yomitan, if not dict-admin */
   conversion?: ILink;
-  license?: ILink;
+  license: ILink;
   /** the credit the source asks for, word for word */
   credit?: string;
 }
@@ -25,6 +24,11 @@ export interface ICredit {
 const CC_BY_SA_4 = {
   name: "CC BY-SA 4.0",
   url: "https://creativecommons.org/licenses/by-sa/4.0/",
+};
+
+const CC_BY_SA_4_GFDL = {
+  name: "CC BY-SA 4.0 and GFDL",
+  url: "https://kaikki.org/dictionary/",
 };
 
 const WIKIPEDIA: ICredit = {
@@ -35,6 +39,11 @@ const WIKIPEDIA: ICredit = {
   conversion: {
     name: "MarvNC/wikipedia-yomitan",
     url: "https://github.com/MarvNC/wikipedia-yomitan",
+  },
+  // DBpedia's, for its releases; Wikipedia's own text is CC BY-SA 4.0 and GFDL now
+  license: {
+    name: "CC BY-SA 3.0 and GFDL",
+    url: "https://www.dbpedia.org/about/",
   },
 };
 
@@ -47,6 +56,8 @@ const WIKTIONARY: ICredit = {
     name: "yomidevs/wiktionary-to-yomitan",
     url: "https://github.com/yomidevs/wiktionary-to-yomitan",
   },
+  // "the same licenses as Wiktionary - both CC-BY-SA and GFDL"
+  license: CC_BY_SA_4_GFDL,
 };
 
 /** The default dictionaries, by name in the library */
@@ -82,6 +93,11 @@ export const DEFAULT_CREDITS: Record<string, ICredit> = {
       name: "MarvNC/pixiv-yomitan",
       url: "https://github.com/MarvNC/pixiv-yomitan",
     },
+    // not an open license: article 21-2 of pixiv's terms lets users reuse its text
+    license: {
+      name: "pixiv's terms of use (not an open license)",
+      url: "https://policies.pixiv.net/",
+    },
   },
   "ja.Wikipedia": WIKIPEDIA,
   "zh.Wikipedia": WIKIPEDIA,
@@ -92,6 +108,8 @@ export const DEFAULT_CREDITS: Record<string, ICredit> = {
       name: "MarvNC/cc-cedict-yomitan",
       url: "https://github.com/MarvNC/cc-cedict-yomitan",
     },
+    // the source's; cc-cedict-yomitan's README says 3.0
+    license: CC_BY_SA_4,
   },
   "KO-EN.KRDICT": {
     source: {
@@ -101,6 +119,11 @@ export const DEFAULT_CREDITS: Record<string, ICredit> = {
     conversion: {
       name: "Lyroxide/yomitan-ko-dic",
       url: "https://github.com/Lyroxide/yomitan-ko-dic",
+    },
+    // its copyright terms give no version
+    license: {
+      name: "CC BY-SA",
+      url: "https://krdict.korean.go.kr/eng/kboardPolicy/copyRightTermsInfo",
     },
   },
   "wty-ja-en": WIKTIONARY,

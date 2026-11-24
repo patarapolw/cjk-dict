@@ -75,12 +75,13 @@ describe("AboutView", () => {
     w.unmount();
   });
 
-  it("links a default without a stated license to its source", async () => {
+  it("gives pixiv's terms, which aren't an open license", async () => {
     dicts = [dict("Pixiv", credits(null))];
     const w = await mountView();
     const a = article(w, "Pixiv");
-    expect(a.text()).toContain("see its source");
+    expect(a.text()).toContain("not an open license");
     expect(a.find('a[href="https://dic.pixiv.net/"]').exists()).toBe(true);
+    expect(a.find('a[href="https://policies.pixiv.net/"]').exists()).toBe(true);
     w.unmount();
   });
 
