@@ -62,6 +62,13 @@ const readingButton = (wrapper: Awaited<ReturnType<typeof mountView>>) =>
     .findAll("button")
     .find((b) => describedText(b.element).startsWith("Reading search"))!;
 
+/** the search sent once typing pauses, as typed: before any search the other way */
+async function firstSearch() {
+  await vi.waitFor(() => expect(searches.length).toBeGreaterThan(0));
+  await flushPromises();
+  return searches[0];
+}
+
 /** the search sent once typing pauses */
 async function lastSearch() {
   await vi.waitFor(() => expect(searches.length).toBeGreaterThan(0));
@@ -97,22 +104,28 @@ describe("DictionaryView", () => {
     expect(readingButton(wrapper).attributes("aria-pressed")).toBe("true");
 
     await wrapper.get("input.search-input").setValue("にほんご");
-    expect(await lastSearch()).toMatchObject({
+    expect(await firstSearch()).toMatchObject({
       term: "",
       reading: "にほんご",
       reading_glob: "",
     });
     expect(wrapper.get(".search-hint").text()).toContain("by reading");
+    // nothing found by reading: then as a word
+    await vi.waitFor(() => expect(searches).toHaveLength(2));
+    expect(searches[1]).toMatchObject({ term: "にほんご", reading: "" });
     wrapper.unmount();
   });
 
   it("searches the term without the {} toggle", async () => {
     const wrapper = await mountView();
     await wrapper.get("input.search-input").setValue("にほんご");
-    expect(await lastSearch()).toMatchObject({
+    expect(await firstSearch()).toMatchObject({
       term: "にほんご",
       reading: "",
     });
+    // nothing found as a word: then by reading
+    await vi.waitFor(() => expect(searches).toHaveLength(2));
+    expect(searches[1]).toMatchObject({ term: "", reading: "にほんご" });
     wrapper.unmount();
   });
 
@@ -346,13 +359,133 @@ describe("DictionaryView", () => {
     const wrapper = await mountView();
     await readingButton(wrapper).trigger("click");
     await wrapper.get("input.search-input").setValue("광속");
-    expect(await lastSearch()).toMatchObject({
+    expect(await firstSearch()).toMatchObject({
       lang: "ko-KR",
       term: "",
       reading: "광속",
     });
     wrapper.unmount();
   });
+  describe("searching the other way when nothing matches", () => {
+    /** the `search` command finds a word for `found(req)` only */
+    function findWhen(
+      found: (req: Record<string, unknown>) => boolean,
+      segment: string[] = [],
+    ) {
+      mockIPC((cmd, args) => {
+        if (cmd === "search") {
+          const req = (args as { req: Record<string, unknown> }).req;
+          searches.push(req);
+          const items = found(req)
+            ? [{ id: 1, term: "中国", reading: " ZHONG1 GUO2 ", entries: [] }]
+            : [];
+          return { items, next: null };
+        }
+        if (cmd === "segment") return segment.map((w) => [w, []]);
+        if (cmd === "dicts") return dicts;
+        throw new Error(`unexpected command: ${cmd}`);
+      });
+    }
+    const hint = (w: Awaited<ReturnType<typeof mountView>>) =>
+      w.get(".search-hint").text().replace(/\s+/g, " ");
+
+    // with Japanese, auto-convert to kana turns it into kana; with Korean, Latin letters
+    // are romanization, a reading already
+    it.each(["", "zh"])(
+      "searches a word that isn't found by reading, before splitting it (%s)",
+      async (l) => {
+        lang.value = l;
+        findWhen((req) => req.reading === "zhongguo");
+        const wrapper = await mountView();
+        await wrapper.get("input.search-input").setValue("zhongguo");
+        await vi.waitFor(() =>
+          expect(wrapper.findAll(".accordion-item")).toHaveLength(1),
+        );
+        expect(searches[0]).toMatchObject({ term: "zhongguo", reading: "" });
+        expect(searches[1]).toMatchObject({ term: "", reading: "zhongguo" });
+        expect(hint(wrapper)).toContain(
+          "No words zhongguo: searching it by reading",
+        );
+        wrapper.unmount();
+      },
+    );
+
+    it("splits a text into words when neither way finds it", async () => {
+      findWhen(() => false, ["にほんご", "です"]);
+      const wrapper = await mountView();
+      await wrapper.get("input.search-input").setValue("にほんごです");
+      await vi.waitFor(() =>
+        expect(
+          (wrapper.get("input.search-input").element as HTMLInputElement).value,
+        ).toBe("にほんご です"),
+      );
+      expect(searches.slice(0, 2)).toMatchObject([
+        { term: "にほんごです", reading: "" },
+        { term: "", reading: "にほんごです" },
+      ]);
+      wrapper.unmount();
+    });
+
+    it("searches a reading that isn't found as a word", async () => {
+      findWhen((req) => req.term === "sake");
+      const wrapper = await mountView();
+      await readingButton(wrapper).trigger("click");
+      await wrapper.get("input.search-input").setValue("sake");
+      await vi.waitFor(() =>
+        expect(wrapper.findAll(".accordion-item")).toHaveLength(1),
+      );
+      expect(searches.slice(0, 2)).toMatchObject([
+        { term: "", reading: "sake" },
+        { term: "sake", reading: "" },
+      ]);
+      expect(hint(wrapper)).toContain(
+        "Nothing read sake: searching it as a word",
+      );
+      wrapper.unmount();
+    });
+
+    it("searches a reading with Han characters as a word, at once", async () => {
+      findWhen((req) => req.term === "日本");
+      const wrapper = await mountView();
+      await readingButton(wrapper).trigger("click");
+      await wrapper.get("input.search-input").setValue("日本");
+      expect(await firstSearch()).toMatchObject({ term: "日本", reading: "" });
+      expect(hint(wrapper)).toContain(
+        "日本 has Han characters, so isn't a reading: searching it as a word",
+      );
+      // typed in {} by hand too
+      searches = [];
+      readingButton(wrapper).trigger("click");
+      await wrapper.get("input.search-input").setValue("{日本語}");
+      expect(await firstSearch()).toMatchObject({
+        term: "日本語",
+        reading: "",
+      });
+      wrapper.unmount();
+    });
+
+    it("searches Korean romanization in {} as romanization", async () => {
+      lang.value = "ko-KR";
+      findWhen(() => false);
+      const wrapper = await mountView();
+      await readingButton(wrapper).trigger("click");
+      await wrapper.get("input.search-input").setValue("gwangsok");
+      expect(await firstSearch()).toMatchObject({
+        term: "gwangsok",
+        reading: "",
+        romanized: true,
+      });
+      expect(hint(wrapper)).toContain(
+        "by reading gwangsok as Korean romanization",
+      );
+      // not searched another way: it is a reading already
+      await new Promise((r) => setTimeout(r, 50));
+      await flushPromises();
+      expect(searches).toHaveLength(1);
+      wrapper.unmount();
+    });
+  });
+
   it("marks terms with their language and definitions with the dictionary's", async () => {
     const glossary = JSON.stringify([
       {
