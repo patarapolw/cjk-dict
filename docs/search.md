@@ -139,6 +139,11 @@ Optional, below the search box:
   - `にほんg` is `にほん[がぎぐげごっ]`;
   - `{にほn` is `{にほ[なにぬねのん]`;
   - `<食>{たb}べる` is `<食>{た[っばびぶべぼ]}べる`.
+  - Words doesn't otherwise match romaji to kana, unlike the Characters view's [search by reading](#by-reading):
+    - Latin letters mean something in Words: a Latin headword, Korean romanization or pinyin (`sake`, `rin`); matching them to kana would quietly change what a search means.
+    - This option already does it, and shows the kana in the search box.
+    - Romaji leaves long vowels unclear (`kyo`: きょ or きょう; `ono`: おの or おおの): cheap for a character's few readings, but many unwanted results across words.
+    - Korean romanization is matched (see [Korean](#korean)), since Hangul has no input method as common as a Japanese IME.
 - **Get reading from IME**: a Japanese IME's reading is kept as `<漢字>{かんじ}` when you convert.
 - **Clipboard monitor**: checks the clipboard every second, and searches copied text that starts with Chinese, Japanese or Korean.
   - It searches in the normal mode: it turns off `~`, `=` and `{}`.
