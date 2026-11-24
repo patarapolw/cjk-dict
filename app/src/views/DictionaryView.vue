@@ -70,18 +70,14 @@
           Searching words with <code>{{ charReading.ch }}</code> read
           <code>{{ charReading.reading }}</code>
         </template>
-        <!-- searched the other way, as nothing matched, or it can't be a reading -->
+        <!-- searched the other way, as nothing matched as typed -->
         <template v-else-if="otherWayHint">
           <template v-if="otherWayHint.as === 'reading'">
             No words <code>{{ otherWayHint.text }}</code
             >: searching it by reading
           </template>
-          <template v-else-if="otherWayHint.han">
-            <code>{{ otherWayHint.text }}</code> has Han characters, so isn't a
-            reading: searching it as a word
-          </template>
           <template v-else>
-            Nothing read <code>{{ otherWayHint.text }}</code
+            No readings <code>{{ otherWayHint.text }}</code
             >: searching it as a word
           </template>
           <template v-if="qState === 'exact'"> (exact)</template>
@@ -384,33 +380,22 @@ const romanizedQuery = computed(() => {
   return isRomanization(reading);
 });
 
-/**
- * A reading alone with Han characters (typed with `{}` on, or in `{}` by hand) can't be a
- * reading: it is searched as a word
- */
-const hanReading = computed(() => {
-  const { term, reading, readingGlob } = parsed.value;
-  return !term && !readingGlob && /\p{sc=Han}/u.test(reading);
-});
-
 /** how a query is searched: as typed, or the other way, as a reading or as a word */
 type SearchAs = "reading" | "term" | null;
 /** a query that found nothing as typed, searched the other way, which found something */
 const searchedAs = ref<SearchAs>(null);
 
 /**
- * The other way to search a query that found nothing: a word (with no Han characters) by
- * reading, a reading alone as a word. Not a pattern, `~`, nor a query with a reading of its
- * own, Korean romanization (a reading already), or an incomplete romaji syllable.
+ * The other way to search a query that found nothing: a word by reading, a reading alone
+ * as a word (e.g. 日本 typed with `{}` on). Not a pattern, `~`, nor a query with a reading
+ * of its own, Korean romanization (a reading already), or an incomplete romaji syllable.
  */
 function otherWay(query: ParsedQuery, type: string | null): SearchAs {
   if (type === "fts" || query.incomplete || query.readingGlob) return null;
   if (romanizedQuery.value || charReading.value) return null;
   const pattern = /[*?[\]]/u;
   if (query.term && !query.reading) {
-    return /\p{sc=Han}/u.test(query.term) || pattern.test(query.term)
-      ? null
-      : "reading";
+    return pattern.test(query.term) ? null : "reading";
   }
   if (!query.term && query.reading) {
     return pattern.test(query.reading) ? null : "term";
@@ -453,10 +438,9 @@ function queryAs(query: ParsedQuery, as: SearchAs) {
   };
 }
 
-/** for the hint: the query searched the other way, and why */
+/** for the hint: the query searched the other way */
 const otherWayHint = computed(() => {
   const { term, reading } = parsed.value;
-  if (hanReading.value) return { as: "term", text: reading, han: true };
   if (searchedAs.value === "reading")
     return { as: "reading", text: term.trim() };
   if (searchedAs.value === "term") return { as: "term", text: reading };
@@ -735,12 +719,8 @@ async function loadMore(isNew?: boolean) {
 
   let segmented: string[] = [];
 
-  /** a reading with Han characters is a word; a later page, the way the first was searched */
-  let as: SearchAs = hanReading.value
-    ? "term"
-    : isNew
-      ? null
-      : searchedAs.value;
+  /** as typed; a later page, the way the first was searched */
+  let as: SearchAs = isNew ? null : searchedAs.value;
   const search = (way: SearchAs) =>
     searchDB.search({
       ...queryAs(query, way),
@@ -769,7 +749,7 @@ async function loadMore(isNew?: boolean) {
           as = other;
         }
       }
-      if (isNew) searchedAs.value = hanReading.value ? null : as;
+      if (isNew) searchedAs.value = as;
 
       // Nothing matches a longer text, e.g. a sentence from the clipboard: look up its
       // first word instead (and offer the rest as "Next").
@@ -1026,6 +1006,11 @@ onBeforeUnmount(() => {
     margin: 0.25rem 0;
     font-size: 0.8125rem;
     color: var(--app-text-muted);
+  }
+
+  /* "Next: ..." apart from what is searched, which a template's whitespace doesn't keep */
+  .search-hint .link-button {
+    margin-inline-start: 0.75em;
   }
 
   .search-modes {

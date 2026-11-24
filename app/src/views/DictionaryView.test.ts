@@ -164,7 +164,7 @@ describe("DictionaryView", () => {
       );
       expect(modeButton.attributes("aria-pressed")).toBe("false");
       expect(readingButton(wrapper).attributes("aria-pressed")).toBe("false");
-      expect(await lastSearch()).toMatchObject({
+      expect(await firstSearch()).toMatchObject({
         term: "日本語",
         reading: "",
         type: null,
@@ -439,28 +439,26 @@ describe("DictionaryView", () => {
         { term: "sake", reading: "" },
       ]);
       expect(hint(wrapper)).toContain(
-        "Nothing read sake: searching it as a word",
+        "No readings sake: searching it as a word",
       );
       wrapper.unmount();
     });
 
-    it("searches a reading with Han characters as a word, at once", async () => {
+    it("searches a reading with Han characters as a word, after as a reading", async () => {
       findWhen((req) => req.term === "日本");
       const wrapper = await mountView();
       await readingButton(wrapper).trigger("click");
       await wrapper.get("input.search-input").setValue("日本");
-      expect(await firstSearch()).toMatchObject({ term: "日本", reading: "" });
-      expect(hint(wrapper)).toContain(
-        "日本 has Han characters, so isn't a reading: searching it as a word",
+      await vi.waitFor(() =>
+        expect(wrapper.findAll(".accordion-item")).toHaveLength(1),
       );
-      // typed in {} by hand too
-      searches = [];
-      readingButton(wrapper).trigger("click");
-      await wrapper.get("input.search-input").setValue("{日本語}");
-      expect(await firstSearch()).toMatchObject({
-        term: "日本語",
-        reading: "",
-      });
+      expect(searches.slice(0, 2)).toMatchObject([
+        { term: "", reading: "日本" },
+        { term: "日本", reading: "" },
+      ]);
+      expect(hint(wrapper)).toContain(
+        "No readings 日本: searching it as a word",
+      );
       wrapper.unmount();
     });
 

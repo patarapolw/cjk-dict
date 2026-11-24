@@ -12,10 +12,9 @@ How the app's search works. The [README](../README.md#app) has how to run the ap
 - The `{}` button searches by reading only: type the reading, no `{}` needed.
 - A space marks a word boundary: only the first word is looked up, and "Next" moves on to the rest.
 - When nothing matches, the search is tried the other way, in every search language; the hint says so:
-  - a word without Han characters, by reading: `zhongguo` finds 中国, `にほんご` finds 日本語;
-  - a reading alone (`{}`, or the `{}` button), as a word: `{sake}` finds sake.
+  - a word, by reading: `zhongguo` finds 中国, `にほんご` finds 日本語;
+  - a reading alone (`{}`, or the `{}` button), as a word: `{sake}` finds sake, and `日本` typed with the `{}` button on finds 日本.
   - Not a pattern (`*`, `?`, `[...]`), `~`, a word with a reading of its own (`<日本>{にほん}`), nor Korean romanization, a reading already.
-- A reading alone with Han characters isn't a reading: it is searched as a word at once, e.g. `日本` with the `{}` button on.
 - When neither way matches a longer text (e.g. a copied sentence), it is split into words with the tokenizer.
 - Each result links to:
   - an exact search for itself;
