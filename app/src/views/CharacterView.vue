@@ -28,7 +28,10 @@
         </button>
       </div>
       <p class="search-hint">
-        <template v-if="superQuery && chars.length">
+        <template v-if="readingQ">
+          Characters read <code>{{ readingQ }}</code>
+        </template>
+        <template v-else-if="superQuery && chars.length">
           Characters made directly of <code>{{ chars.join(" + ") }}</code>
         </template>
         <template v-else-if="chars.length">
@@ -39,9 +42,13 @@
           Type or paste characters, e.g. <code>語</code>. Several, e.g.
           <code>木口</code>, also find the characters made of all of them: 呆,
           杏, …; <code>*口</code> shows the characters made directly of 口, each
-          in full.
+          in full. A reading, e.g. <code>きょう</code>, <code>xing</code> or
+          <code>흥</code>, finds the characters read so.
         </template>
-        <span v-if="touchScreen && !chars.length" class="touch-help">
+        <span
+          v-if="touchScreen && !chars.length && !readingQ"
+          class="touch-help"
+        >
           Long-press a button or option to see what it does.
         </span>
       </p>
@@ -57,6 +64,10 @@
 
     <div class="scroller" ref="scroller">
       <p v-if="error" class="no-results">{{ error }}</p>
+      <p v-else-if="noneFound" class="no-results">
+        No characters read
+        <span :lang="readingLang(readingQ)">{{ readingQ }}</span>
+      </p>
 
       <section
         v-for="c in found"
@@ -102,7 +113,7 @@
                 ~ {{ c.ch }}
               </button>
               <button
-                v-if="found.length > 1 || superQuery"
+                v-if="found.length > 1 || paged"
                 type="button"
                 class="link-button"
                 v-tooltip="'This character only'"
@@ -301,7 +312,7 @@
       </section>
 
       <button
-        v-if="superQuery && superNext !== null"
+        v-if="paged && superNext !== null"
         type="button"
         class="more-button super-more"
         :disabled="loadingMore"
@@ -311,7 +322,7 @@
       </button>
 
       <!-- one character's are under "Used in" on its card -->
-      <section v-if="!superQuery && chars.length > 1" class="containing">
+      <section v-if="!paged && chars.length > 1" class="containing">
         <h2>
           Characters made of
           <span :lang="lang || undefined">{{ chars.join(" + ") }}</span>
@@ -392,9 +403,23 @@ const PAGE = 60;
 const USED_IN_PAGE = 30;
 
 const q = ref("");
-const chars = computed(() => hanChars(q.value).slice(0, MAX_CHARS));
+/**
+ * `{きょう}`, or what has no Han characters (`きょう`, `xing`, `흥`): the characters read so,
+ * each shown in full
+ */
+const readingQ = computed(() => {
+  const t = q.value.trim();
+  const m = /^[{｛]([^}｝]*)[}｝]?$/u.exec(t);
+  if (m) return m[1].trim();
+  return /^[*＊]/.test(t) || hanChars(t).length ? "" : t;
+});
+const chars = computed(() =>
+  readingQ.value ? [] : hanChars(q.value).slice(0, MAX_CHARS),
+);
 /** `*木口`: the characters made directly of all of them, each shown in full */
-const superQuery = computed(() => /^\s*[*＊]/.test(q.value));
+const superQuery = computed(() => !readingQ.value && /^\s*[*＊]/.test(q.value));
+/** characters listed a page at a time, each in full: `*木口` or a reading */
+const paged = computed(() => superQuery.value || !!readingQ.value);
 
 const found = ref<IHanChar[]>([]);
 const error = ref("");
@@ -403,8 +428,10 @@ const containingNext = ref<number | null>(null);
 const loadingMore = ref(false);
 /** each character's characters made directly of it (super-characters) */
 const usedIn = ref<Record<string, IHanList>>({});
-/** with a `*` query, the offset of its next page of characters */
+/** with a `*` query or a reading, the offset of its next page of characters */
 const superNext = ref<number | null>(null);
+/** a reading that no character has */
+const noneFound = ref(false);
 /** single-character word entries, loaded when their section is opened */
 const words = ref<Record<string, ITerm[]>>({});
 
@@ -440,19 +467,21 @@ let requestId = 0;
 async function load() {
   const id = ++requestId;
   const text = chars.value.join("");
+  const reading = readingQ.value;
   words.value = {};
-  if (!text) {
+  if (!text && !reading) {
     clear();
     return;
   }
   try {
-    if (superQuery.value) {
-      const page = await superPage(text, 0);
+    if (paged.value) {
+      const page = await superPage(text, reading, 0);
       if (id !== requestId) return;
       clear();
       found.value = page.found;
       usedIn.value = page.usedIn;
       superNext.value = page.next;
+      noneFound.value = !!reading && !page.found.length;
     } else {
       const [cs, list, direct] = await Promise.all([
         searchDB.hanChars(text),
@@ -484,6 +513,7 @@ function clear() {
   superNext.value = null;
   containing.value = [];
   containingNext.value = null;
+  noneFound.value = false;
   error.value = "";
 }
 
@@ -495,14 +525,14 @@ async function usedInOf(chs: string[]): Promise<Record<string, IHanList>> {
   return Object.fromEntries(chs.map((ch, i) => [ch, lists[i]]));
 }
 
-/** A page of the characters made directly of all of `components`, each in full */
-async function superPage(components: string, offset: number) {
-  const list = await searchDB.hanContaining(
-    components,
-    MAX_CHARS,
-    offset,
-    true,
-  );
+/**
+ * A page of the characters read `reading`, or else made directly of all of `components`,
+ * each in full
+ */
+async function superPage(components: string, reading: string, offset: number) {
+  const list = reading
+    ? await searchDB.hanByReading(reading, MAX_CHARS, offset)
+    : await searchDB.hanContaining(components, MAX_CHARS, offset, true);
   const chs = list.items.map((it) => it.ch);
   const [cs, direct] = chs.length
     ? await Promise.all([searchDB.hanChars(chs.join("")), usedInOf(chs)])
@@ -516,7 +546,7 @@ async function loadSuper() {
   const id = requestId;
   loadingMore.value = true;
   try {
-    const page = await superPage(chars.value.join(""), offset);
+    const page = await superPage(chars.value.join(""), readingQ.value, offset);
     if (id !== requestId) return;
     found.value = [...found.value, ...page.found];
     usedIn.value = { ...usedIn.value, ...page.usedIn };
@@ -580,7 +610,7 @@ async function onWordsToggle(ch: string, e: Event) {
 /** wait for typing to pause */
 const DEBOUNCE_MS = 200;
 let timer: ReturnType<typeof setTimeout> | undefined;
-watch([chars, dictsVersion], () => {
+watch([chars, readingQ, dictsVersion], () => {
   clearTimeout(timer);
   timer = setTimeout(load, DEBOUNCE_MS);
 });

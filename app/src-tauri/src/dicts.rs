@@ -615,6 +615,21 @@ pub async fn han_containing(
     .map_err(AppError::from)
 }
 
+/// Characters read `reading` (kana, pinyin or Hangul), the most used first.
+#[tauri::command]
+pub async fn han_by_reading(
+    state: State<'_, DictState>,
+    reading: String,
+    limit: Option<u32>,
+    offset: Option<u32>,
+) -> Result<HanList, AppError> {
+    let db = state.get()?;
+    tauri::async_runtime::spawn_blocking(move || db.han_by_reading(&reading, limit, offset))
+        .await
+        .map_err(|e| AppError::Error(e.to_string()))?
+        .map_err(AppError::from)
+}
+
 /// A dictionary's `styles.css`, if its zip has one. The view scopes it to that
 /// dictionary's entries, as Yomitan does.
 #[tauri::command]

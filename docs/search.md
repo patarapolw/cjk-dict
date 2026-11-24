@@ -98,6 +98,19 @@ In both:
 - A radical also matches the forms it takes as a component: 水 finds 河, written with 氵.
 - Kangxi radicals (`⼝`) are read as the ideograph.
 
+### By reading
+
+A reading instead of characters lists the characters read so, each in full, as a card, the most used first, 20 at a time: `きょう` shows 京, 強, 教, ...
+
+- Text without Han characters is a reading; `{}` around it works too: `{xing}`.
+- Kana: on, kun and name readings, katakana and hiragana alike.
+  - A kun reading matches with or without its okurigana: `おこ` and `おこる` find 興.
+  - As typed, not as a compound's sound change: `ぎょう` finds 行, not 京.
+- Pinyin: `xīng`, `xing1`; without a tone, every tone.
+- Hangul, with the initial-sound rule either way: `이` finds 李, listed as 리.
+- The readings are the kanji dictionaries' (KANJIDIC, CC-CEDICT.Hanzi) and the cards' Hangul readings, whichever dictionaries are ticked.
+- With a `search.db` from before this, the view says to update the library.
+
 ## Korean
 
 - With Korean selected, typing Revised Romanization finds Hangul: `hangugeo`, `hangukeo` or `hangug-eo` → 한국어.

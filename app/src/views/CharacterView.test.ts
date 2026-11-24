@@ -132,6 +132,14 @@ beforeEach(() => {
       if (a.components === "木" && a.direct) return page(MADE_OF_MU);
       return page([]);
     }
+    if (cmd === "han_by_reading") {
+      const all = a.reading === "りん" ? ["林", "森"] : [];
+      return {
+        items: all.map((ch) => ({ ch, uses: 1 })),
+        next: null,
+        total: all.length,
+      };
+    }
     if (cmd === "search") return { items: [], next: null };
     if (cmd === "dicts") return dicts;
     throw new Error(`unexpected command: ${cmd}`);
@@ -349,6 +357,50 @@ describe("CharacterView", () => {
     expect(calls.find((c) => c.cmd === "han_chars")?.args).toEqual({
       text: "林",
     });
+    wrapper.unmount();
+  });
+
+  it("shows the characters read so for a reading, each in full", async () => {
+    const { wrapper } = await mountView("/kanji");
+    await wrapper.get("input.search-input").setValue("りん");
+    await loaded(wrapper);
+    expect(calls.find((c) => c.cmd === "han_by_reading")?.args).toEqual({
+      reading: "りん",
+      limit: 20,
+      offset: 0,
+    });
+    expect(calls.find((c) => c.cmd === "han_chars")?.args).toEqual({
+      text: "林森",
+    });
+    expect(wrapper.get(".search-hint").text()).toBe("Characters read りん");
+    expect(
+      wrapper.findAll(".char-card").map((c) => c.attributes("data-char")),
+    ).toEqual(["林", "森"]);
+    expect(wrapper.find(".containing").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("takes a reading in braces, and says when no character has it", async () => {
+    const { wrapper } = await mountView("/kanji");
+    await wrapper.get("input.search-input").setValue("{xing}");
+    await vi.waitFor(() =>
+      expect(calls.some((c) => c.cmd === "han_by_reading")).toBe(true),
+    );
+    await flushPromises();
+    expect(calls.find((c) => c.cmd === "han_by_reading")?.args.reading).toBe(
+      "xing",
+    );
+    expect(wrapper.get(".no-results").text()).toBe("No characters read xing");
+
+    // `*` and Han characters are not readings
+    calls = [];
+    await wrapper.get("input.search-input").setValue("*林");
+    await vi.waitFor(() =>
+      expect(calls.some((c) => c.cmd === "han_containing")).toBe(true),
+    );
+    await flushPromises();
+    expect(calls.some((c) => c.cmd === "han_by_reading")).toBe(false);
+    expect(wrapper.find(".no-results").exists()).toBe(false);
     wrapper.unmount();
   });
 

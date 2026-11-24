@@ -193,6 +193,19 @@ class SearchDatabase {
     });
   }
 
+  /**
+   * Characters read `reading`, the most used first: kana (`きょう`; a kun reading with or
+   * without its okurigana, `おこ` or `おこる`), pinyin (`xing`, every tone without one) or
+   * Hangul (`흥`).
+   */
+  async hanByReading(
+    reading: string,
+    limit: number,
+    offset: number,
+  ): Promise<IHanList> {
+    return await invoke<IHanList>("han_by_reading", { reading, limit, offset });
+  }
+
   /** URL of a media file inside a dictionary zip, for a plain `<img src>` (dict:// protocol). */
   assetSrc(dict: string, path: string): string {
     return convertFileSrc(`${dict}/${path}`, "dict");

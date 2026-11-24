@@ -56,6 +56,7 @@ pub fn run() {
             dicts::dicts,
             dicts::han_chars,
             dicts::han_containing,
+            dicts::han_by_reading,
             dicts::dict_styles,
             sync_service::set_sync_status,
         ])
