@@ -31,6 +31,16 @@ const CC_BY_SA_4_GFDL = {
   url: "https://kaikki.org/dictionary/",
 };
 
+const CC_CEDICT: ICredit = {
+  source: { name: "CC-CEDICT", url: "https://cc-cedict.org/wiki/" },
+  conversion: {
+    name: "MarvNC/cc-cedict-yomitan",
+    url: "https://github.com/MarvNC/cc-cedict-yomitan",
+  },
+  // the source's; cc-cedict-yomitan's README says 3.0
+  license: CC_BY_SA_4,
+};
+
 const WIKIPEDIA: ICredit = {
   source: {
     name: "Wikipedia, via DBpedia's short abstracts",
@@ -102,15 +112,9 @@ export const DEFAULT_CREDITS: Record<string, ICredit> = {
   "ja.Wikipedia": WIKIPEDIA,
   "zh.Wikipedia": WIKIPEDIA,
   "ko.Wikipedia": WIKIPEDIA,
-  "CC-CEDICT": {
-    source: { name: "CC-CEDICT", url: "https://cc-cedict.org/wiki/" },
-    conversion: {
-      name: "MarvNC/cc-cedict-yomitan",
-      url: "https://github.com/MarvNC/cc-cedict-yomitan",
-    },
-    // the source's; cc-cedict-yomitan's README says 3.0
-    license: CC_BY_SA_4,
-  },
+  "CC-CEDICT": CC_CEDICT,
+  // the same data, as a kanji dictionary of single characters
+  "CC-CEDICT.Hanzi": CC_CEDICT,
   "KO-EN.KRDICT": {
     source: {
       name: "Basic Korean Dictionary, National Institute of Korean Language",
