@@ -107,19 +107,27 @@
             </span>
           </button>
           <div class="char-summary">
-            <p v-if="c.hangul.length" class="hangul" lang="ko">
-              <template v-for="(r, k) in c.hangul" :key="r">
-                <template v-if="k"> · </template>
-                <button
-                  type="button"
-                  class="link-button reading"
-                  v-tooltip="readingTitle(c.ch, r)"
-                  @click="toReading(c.ch, r, 'ko-KR')"
-                >
-                  {{ r }}
-                </button>
+            <!-- every reading but kun and name readings, of every entry shown -->
+            <dl v-if="cardReadings(c).length" class="readings card-readings">
+              <template v-for="row in cardReadings(c)" :key="row.key">
+                <dt v-tooltip="row.title">{{ row.label }}</dt>
+                <dd :lang="row.lang">
+                  <template v-for="(it, k) in row.items" :key="k">
+                    <template v-if="k">{{ row.sep }}</template>
+                    <button
+                      v-if="it.searchIn"
+                      type="button"
+                      class="link-button reading"
+                      v-tooltip="readingTitle(it.of, it.r)"
+                      @click="toReading(it.of, it.r, it.searchIn)"
+                    >
+                      {{ it.r }}
+                    </button>
+                    <template v-else>{{ it.r }}</template>
+                  </template>
+                </dd>
               </template>
-            </p>
+            </dl>
             <div class="item-actions" :lang="lang || undefined">
               <button
                 type="button"
@@ -281,57 +289,24 @@
                 >{{ t }}</span
               >
             </header>
-            <dl class="readings">
-              <template v-if="e.onyomi">
-                <dt>{{ readingLabel(e.onyomi) }}</dt>
-                <dd :lang="e.lang || undefined">
-                  <template v-for="(r, k) in splitReadings(e.onyomi)" :key="k">
-                    <template v-if="k">、</template>
+            <!-- what the card's header leaves out: kun and name readings -->
+            <dl v-if="innerReadings(e, ech).length" class="readings">
+              <template v-for="row in innerReadings(e, ech)" :key="row.key">
+                <dt v-tooltip="row.title">{{ row.label }}</dt>
+                <dd :lang="row.lang">
+                  <template v-for="(it, k) in row.items" :key="k">
+                    <template v-if="k">{{ row.sep }}</template>
                     <button
+                      v-if="it.searchIn"
                       type="button"
                       class="link-button reading"
-                      v-tooltip="readingTitle(ech, r)"
-                      @click="toReading(ech, r)"
+                      v-tooltip="readingTitle(it.of, it.r)"
+                      @click="toReading(it.of, it.r, it.searchIn)"
                     >
-                      {{ r }}
+                      {{ it.r }}
                     </button>
+                    <template v-else>{{ it.r }}</template>
                   </template>
-                </dd>
-              </template>
-              <template v-if="e.kunyomi">
-                <dt>{{ readingLabel(e.kunyomi) }}</dt>
-                <dd :lang="e.lang || undefined">
-                  <template v-for="(r, k) in splitReadings(e.kunyomi)" :key="k">
-                    <template v-if="k">、</template>
-                    <button
-                      type="button"
-                      class="link-button reading"
-                      v-tooltip="readingTitle(ech, r)"
-                      @click="toReading(ech, r)"
-                    >
-                      {{ r }}
-                    </button>
-                  </template>
-                </dd>
-              </template>
-              <!-- other languages' readings, e.g. KANJIDIC's pinyin and Korean -->
-              <template v-for="[name, value] in readingStats(e)" :key="name">
-                <dt v-tooltip="name">{{ e.tag_meta[name].notes || name }}</dt>
-                <dd :lang="STAT_LANGS[name]">
-                  <template v-if="READING_STAT_LANGS[name]">
-                    <template v-for="(r, k) in value.split(/,\s*/)" :key="k">
-                      <template v-if="k">, </template>
-                      <button
-                        type="button"
-                        class="link-button reading"
-                        v-tooltip="readingTitle(ech, r)"
-                        @click="toReading(ech, r, READING_STAT_LANGS[name])"
-                      >
-                        {{ r }}
-                      </button>
-                    </template>
-                  </template>
-                  <template v-else>{{ value }}</template>
                 </dd>
               </template>
             </dl>
@@ -865,6 +840,118 @@ function byOrder(e: IKanjiEntry, stats: [string, string][]) {
   );
 }
 
+/** a reading, searching the words with `of` read so in `searchIn`; with none, text */
+type ReadingItem = { r: string; of: string; searchIn?: string };
+/** a row of readings of one kind: On, Pinyin, Hangul, a dictionary's own */
+type ReadingRow = {
+  key: string;
+  label: string;
+  title?: string;
+  lang?: string;
+  sep: string;
+  items: ReadingItem[];
+};
+
+/** the kinds a card's header lists first, in this order */
+const READING_KINDS: Record<string, { label: string; lang: string }> = {
+  on: { label: "On", lang: "ja" },
+  pinyin: { label: "Pinyin", lang: "zh" },
+  hangul: { label: "Hangul", lang: "ko" },
+};
+/** readings in the on and kun fields of a kind above, by their language */
+const FIELD_KINDS: Record<string, string> = {
+  "ja-JP": "on",
+  "ko-KR": "hangul",
+};
+/** reading stats of a kind above */
+const STAT_KINDS: Record<string, string> = {
+  pinyin: "pinyin",
+  korean_h: "hangul",
+};
+/** readings left inside the card: kun and name readings, often many */
+const INNER_STATS = new Set(["nanori"]);
+
+const kindRow = (key: string, items: ReadingItem[]): ReadingRow => ({
+  key,
+  ...READING_KINDS[key],
+  sep: key === "on" ? "、" : ", ",
+  items,
+});
+
+/**
+ * An entry's readings, split into those of the card's header (`outer`) and those left
+ * inside (`inner`): kun readings, and name readings
+ */
+function entryReadings(e: IKanjiEntry, of: string) {
+  const outer: ReadingRow[] = [];
+  const inner: ReadingRow[] = [];
+  for (const field of [e.onyomi, e.kunyomi]) {
+    const rs = splitReadings(field);
+    if (!rs.length) continue;
+    const items = rs.map((r) => ({ r, of, searchIn: readingLang(r) }));
+    const label = readingLabel(field);
+    if (label === "Kun") {
+      inner.push({ key: "kun", label, lang: e.lang || "ja", sep: "、", items });
+      continue;
+    }
+    // on, or another language's in those fields: CC-CEDICT.Hanzi's pinyin, Hanja's Hangul
+    const kind = FIELD_KINDS[items[0].searchIn] ?? "pinyin";
+    outer.push(kindRow(kind, items));
+  }
+  for (const [name, value] of readingStats(e)) {
+    const searchIn = READING_STAT_LANGS[name];
+    const items = value
+      .split(/,\s*/)
+      .filter(Boolean)
+      .map((r) => ({ r, of, searchIn }));
+    const kind = STAT_KINDS[name];
+    if (kind) outer.push(kindRow(kind, items));
+    else
+      (INNER_STATS.has(name) ? inner : outer).push({
+        key: name,
+        label: e.tag_meta[name]?.notes || name,
+        title: name,
+        lang: STAT_LANGS[name],
+        sep: ", ",
+        items,
+      });
+  }
+  return { outer, inner };
+}
+
+const innerReadings = (e: IKanjiEntry, of: string) =>
+  entryReadings(e, of).inner;
+
+/**
+ * A card's readings for its header, of every entry shown, one row per kind: On, Pinyin,
+ * Hangul (its own Hangul readings too), then the dictionaries' others
+ */
+function cardReadings(c: IHanChar): ReadingRow[] {
+  const rows = new Map<string, ReadingRow>();
+  const add = (row: ReadingRow) => {
+    const had = rows.get(row.key);
+    if (!had) return rows.set(row.key, { ...row, items: [...row.items] });
+    for (const it of row.items) {
+      if (!had.items.some((x) => x.r === it.r && x.of === it.of))
+        had.items.push(it);
+    }
+  };
+  if (c.hangul.length)
+    add(
+      kindRow(
+        "hangul",
+        c.hangul.map((r) => ({ r, of: c.ch, searchIn: "ko-KR" })),
+      ),
+    );
+  for (const { e, of } of cardEntries(c))
+    entryReadings(e, of).outer.forEach(add);
+  const order = Object.keys(READING_KINDS);
+  const rank = (key: string) =>
+    order.includes(key) ? order.indexOf(key) : order.length;
+  // stable: the dictionaries' others as they come
+  return [...rows.values()].sort((a, b) => rank(a.key) - rank(b.key));
+}
+
 const readingStats = (e: IKanjiEntry) =>
   byOrder(
     e,
@@ -1027,8 +1114,8 @@ button:focus-visible {
   margin: 0 0 0.25rem;
 }
 
-.hangul {
-  font-size: 1.125rem;
+.card-readings {
+  margin: 0 0 0.25rem;
 }
 
 .uses {

@@ -30,11 +30,15 @@ const HAN: Record<string, IHanChar> = {
         meanings: ["grove", "forest"],
         stats: [
           ["freq", "1000"],
+          ["korean_h", "림"],
+          ["nanori", "しげ"],
           ["pinyin", "lín"],
           ["strokes", "8"],
         ],
         tag_meta: {
           pinyin: { category: "reading", order: 0, notes: "Pinyin" },
+          korean_h: { category: "reading", order: 1, notes: "Korean" },
+          nanori: { category: "reading", order: 2, notes: "Name readings" },
           jouyou: { category: "frequent", order: 0, notes: "regular-use" },
           strokes: { category: "misc", order: -1, notes: "Stroke count" },
           freq: { category: "misc", order: 0, notes: "Frequency" },
@@ -262,22 +266,27 @@ describe("CharacterView", () => {
 
     const card = wrapper.get('[data-char="林"]');
     expect(card.get(".glyph").text()).toBe("林");
-    expect(card.get(".hangul").text()).toBe("림");
     expect(card.get(".ids").text().replace(/\s/g, "")).toBe("⿰木木");
-    expect(card.get(".readings").text()).toContain("リン");
-    // on and kun by their script, KANJIDIC having no one language
-    expect(card.findAll(".readings dt").map((dt) => dt.text())).toEqual([
-      "On",
-      "Kun",
-      "Pinyin",
+    // in the header, every reading but kun and name readings, one row per kind: on by
+    // its script, KANJIDIC having no one language; its Hangul with the card's own
+    const rows = (sel: string) =>
+      card
+        .findAll(`${sel} dt`)
+        .map((dt) => [dt.text(), dt.element.nextElementSibling!.textContent!]);
+    expect(rows(".card-readings")).toEqual([
+      ["On", "リン"],
+      ["Pinyin", "lín"],
+      ["Hangul", "림"],
+    ]);
+    // inside, the rest
+    expect(rows(".kanji-entry .readings")).toEqual([
+      ["Kun", "はやし"],
+      ["Name readings", "しげ"],
     ]);
     expect(card.findAll(".meanings li").map((li) => li.text())).toEqual([
       "grove",
       "forest",
     ]);
-    // other languages' readings go with the readings
-    expect(card.get(".readings").text()).toContain("Pinyin");
-    expect(card.get(".readings").text()).toContain("lín");
     // the rest by the tag bank's order
     expect(card.findAll(".stats th").map((th) => th.text())).toEqual([
       "Stroke count",
@@ -338,8 +347,8 @@ describe("CharacterView", () => {
     expect(entry.get(".via-variant").text()).toBe("學 traditional, kyūjitai");
     expect(entry.get(".meanings").text()).toBe("learning");
 
-    // its readings are 學's
-    await entry.get("button.reading").trigger("click");
+    // its readings, in the header, are 學's
+    await card.get(".card-readings button.reading").trigger("click");
     await flushPromises();
     expect(router.currentRoute.value.query.q).toBe("*<學>{ガク}");
     wrapper.unmount();
@@ -450,10 +459,11 @@ describe("CharacterView", () => {
     const toggle = card.get(".char-toggle");
     expect(toggle.attributes("aria-expanded")).toBe("false");
     expect(card.find(".char-details").exists()).toBe(false);
-    // outside: the first meanings, how many words use it, the Hangul readings
+    // outside: the first meanings, how many words use it, the readings but kun
     expect(card.get(".gist-meanings").text()).toBe("grove; forest");
     expect(card.get(".uses").text()).toBe("in 120 words");
-    expect(card.get(".hangul").text()).toBe("림");
+    expect(card.get(".card-readings").text()).toContain("リン");
+    expect(card.get(".card-readings").text()).not.toContain("はやし");
 
     await toggle.trigger("click");
     expect(toggle.attributes("aria-expanded")).toBe("true");
