@@ -602,6 +602,7 @@ dependencies = [
  "url",
  "yomitan-parser",
  "zip",
+ "zstd",
 ]
 
 [[package]]

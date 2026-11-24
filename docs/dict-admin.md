@@ -79,6 +79,9 @@ Options and behavior:
   - It indexes new or changed dictionaries, and removes deleted ones.
   - It hashes the zips against the previous manifest to detect replacements.
 - `rebuild` discards the current index and rebuilds it from scratch.
+- Both write `search.db.zst`, `search.db` zstd-compressed (level 19), for the app to download:
+  - compressed again only when `search.db` changed since the last one (the manifest has its unpacked checksum);
+  - about a minute for a 1.3 GB `search.db`, which becomes \~310 MB.
 - Only terms, and where kanji entries are, are indexed. Definitions, kanji meta, frequencies and media stay in the zips.
 - Pitch accents (term meta of mode `pitch`, e.g. Kanjium's) are copied into `search.db`'s `term_pitch`, every entry, with its term and reading as the dictionary has them, so a search returns them with the words. An existing `search.db` gets those of the dictionaries it has on the next `build`.
 - Terms are tokenized with [lindera](https://github.com/lindera/lindera), so that `~` finds words containing them.
@@ -139,6 +142,7 @@ Korean headwords written in Hanja get Hangul readings when `search.db` is built 
 ## `upload`
 
 - Refuses a stale build.
-- Copies the zips first, then `search.db`, then `manifest.json`, so the app never sees a manifest pointing at missing files.
+- Copies the zips first, then `search.db.zst`, then `manifest.json`, so the app never sees a manifest pointing at missing files.
+- `search.db` itself isn't uploaded.
 - Then deletes from R2 what was removed from the library.
 - Behind a TLS-intercepting proxy, set `SSL_CERT_FILE`.

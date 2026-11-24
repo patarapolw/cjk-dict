@@ -54,6 +54,7 @@ library/
   dicts.json      [{ name, lang?, target_lang?, source? }]: build order and language overrides
   search.db       written by `build`: terms, tokens, readings, tags, and where each entry is in its zip;
                   character decomposition, and where each kanji entry is; pitch accents
+  search.db.zst   written by `build`: search.db, zstd-compressed, which the app downloads
   manifest.json   written by `build`: file sizes and sha256; the app compares these to download only what changed
 ```
 
@@ -63,7 +64,7 @@ To start a library and publish it:
 
 ```bash
 pnpm admin defaults                        # download the default dictionaries
-pnpm admin build                           # search.db + manifest.json
+pnpm admin build                           # search.db + search.db.zst + manifest.json
 pnpm admin upload --remote r2:cjk-dict     # rclone; or set CJK_DICT_REMOTE
 ```
 
@@ -84,7 +85,7 @@ pnpm admin list                            # with L1, L2 (* set in dicts.json), 
 pnpm admin size                            # estimated R2 mirror size by language
 pnpm admin size --lang ja-JP               # only Japanese dictionary zips
 
-pnpm admin build                           # search.db + manifest.json
+pnpm admin build                           # search.db + search.db.zst + manifest.json
 pnpm admin rebuild                         # discard and rebuild the complete search index
 pnpm admin upload --remote r2:cjk-dict     # rclone; or set CJK_DICT_REMOTE
 ```

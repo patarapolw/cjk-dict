@@ -40,6 +40,7 @@ pub fn run() {
                 tokenizer_mapper: TokenizerMapper::new(app_data_dir.join("lindera")),
             });
             app.manage(dicts::DictState::new(&app_data_dir));
+            app.manage(fonts::FontsDir(app_data_dir.join(fonts::FONTS_DIR)));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

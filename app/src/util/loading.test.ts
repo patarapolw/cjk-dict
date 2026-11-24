@@ -31,6 +31,21 @@ describe("syncStatus", () => {
     ).toEqual({ text: "Verifying search.db", percent: 29 });
   });
 
+  it("shows search.db being unpacked", () => {
+    expect(
+      syncStatus({
+        ...idle,
+        checking: true,
+        verifying: {
+          file: "search.db",
+          hashed: 500,
+          size: 1000,
+          unpacking: true,
+        },
+      }),
+    ).toEqual({ text: "Unpacking search.db", percent: 50 });
+  });
+
   it("shows the current download's progress and what's left", () => {
     expect(
       syncStatus({

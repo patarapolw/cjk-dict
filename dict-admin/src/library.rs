@@ -13,7 +13,12 @@ use sha2::{Digest, Sha256};
 
 pub const DICTS_JSON: &str = "dicts.json";
 pub const SEARCH_DB: &str = "search.db";
+/// `search.db`, zstd-compressed: what the app downloads
+pub const SEARCH_DB_ZST: &str = "search.db.zst";
 pub const MANIFEST: &str = "manifest.json";
+/// 2: `search_db_zst` in place of `search_db`, which apps that read only version 1 need,
+/// so that they keep what they have rather than download a file they can't read
+pub const MANIFEST_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DictEntry {
@@ -33,8 +38,19 @@ pub struct DictEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
     pub version: u32,
-    pub search_db: FileInfo,
+    /// absent in version 1, which had `search_db`, uncompressed (ignored)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search_db_zst: Option<PackedFile>,
     pub dicts: Vec<ManifestDict>,
+}
+
+/// A compressed file, and what it unpacks to
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PackedFile {
+    #[serde(flatten)]
+    pub file: FileInfo,
+    pub unpacked_size: u64,
+    pub unpacked_sha256: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -147,6 +163,11 @@ impl Library {
                 bail!("{}.zip changed since the last build: run `build`", d.name);
             }
         }
+        let zst_size = std::fs::metadata(self.dir.join(SEARCH_DB_ZST)).map(|m| m.len());
+        match &m.search_db_zst {
+            Some(z) if zst_size.as_ref().ok() == Some(&z.file.size) => {}
+            _ => bail!("{SEARCH_DB_ZST} is missing or out of date: run `build`"),
+        }
         Ok(m)
     }
 }
@@ -173,6 +194,43 @@ pub fn file_info(path: &Path, file: &str) -> Result<FileInfo> {
         file: file.to_string(),
         size,
         sha256,
+    })
+}
+
+/// zstd level of `search.db.zst`: compressing is done once per build, unpacking on every
+/// device, and takes about as long at any level. 19 makes search.db (1.2 GB) 270 MB, about
+/// 60 MB less than level 9.
+const ZSTD_LEVEL: i32 = 19;
+
+/// `zst`, the zstd-compressed `db`, compressed again unless `previous` says it is of `db`
+/// as it is now
+pub fn pack_search_db(db: &Path, zst: &Path, previous: Option<&PackedFile>) -> Result<PackedFile> {
+    let unpacked = file_info(db, SEARCH_DB)?;
+    let file_name = zst
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if let Some(p) = previous.filter(|p| p.unpacked_sha256 == unpacked.sha256) {
+        if std::fs::metadata(zst).is_ok_and(|m| m.len() == p.file.size) {
+            return Ok(p.clone());
+        }
+    }
+    let tmp = zst.with_extension("zst.tmp");
+    {
+        let mut out = std::io::BufWriter::new(File::create(&tmp)?);
+        let mut enc = zstd::Encoder::new(&mut out, ZSTD_LEVEL)?;
+        let threads = std::thread::available_parallelism().map_or(1, |n| n.get()) as u32;
+        enc.multithread(threads)?;
+        enc.include_checksum(true)?;
+        std::io::copy(&mut File::open(db)?, &mut enc)?;
+        enc.finish()?;
+        std::io::Write::flush(&mut out)?;
+    }
+    std::fs::rename(&tmp, zst)?;
+    Ok(PackedFile {
+        file: file_info(zst, &file_name)?,
+        unpacked_size: unpacked.size,
+        unpacked_sha256: unpacked.sha256,
     })
 }
 

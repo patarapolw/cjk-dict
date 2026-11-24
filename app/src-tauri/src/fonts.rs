@@ -2,6 +2,8 @@
 //! rules (`app/src/util/fonts.ts`). Only a font file's name is served, nothing else from
 //! the app data folder.
 
+use std::path::PathBuf;
+
 use tauri::{
     AppHandle, Manager,
     http::{Request, Response, StatusCode},
@@ -9,6 +11,11 @@ use tauri::{
 
 /// the folder in the app data folder that the fonts are downloaded to
 pub const FONTS_DIR: &str = "fonts";
+
+/// `<app data>/fonts/`, resolved once at startup. On Android, resolving a path goes through
+/// a plugin call on the main thread; a font request that did so could wait on a main
+/// thread waiting on the webview to draw, which waits on the font: the page froze.
+pub struct FontsDir(pub PathBuf);
 
 /// The font's MIME type, if `name` is a plain font file name: `HanaMinA.otf`, not
 /// `../search.db` or `sub/HanaMinA.otf`.
@@ -41,10 +48,10 @@ pub fn font_protocol(app: &AppHandle, request: Request<Vec<u8>>) -> Response<Vec
     let Some(mime) = font_mime(name) else {
         return not_found();
     };
-    let Ok(dir) = app.path().app_data_dir() else {
+    let Some(dir) = app.try_state::<FontsDir>() else {
         return not_found();
     };
-    match std::fs::read(dir.join(FONTS_DIR).join(name)) {
+    match std::fs::read(dir.0.join(name)) {
         Ok(bytes) => Response::builder()
             .header("Content-Type", mime)
             .header("Cache-Control", "max-age=31536000, immutable")

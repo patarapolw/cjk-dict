@@ -1,14 +1,15 @@
-//! Dictionaries: sync the library (Yomitan zips + search.db + manifest.json) from R2,
+//! Dictionaries: sync the library (Yomitan zips + search.db.zst + manifest.json) from R2,
 //! search it, and serve media from the zips.
 //!
-//! Files land in `<app data>/dicts/incoming/` (via the `download_url` command, resumable)
-//! and are moved into `<app data>/dicts/` by `dict_commit` once all of them are there,
-//! with the open database closed first (Windows can't replace open files).
+//! Files land in `<app data>/dicts/incoming/` (via the `download_url` command, resumable).
+//! Once all of them are there, `dict_commit` checks them, unpacks search.db.zst, and moves
+//! everything into `<app data>/dicts/`, with the open database closed first (Windows can't
+//! replace open files).
 
 use std::{
     collections::HashMap,
     fs::File,
-    io::Read,
+    io::{BufWriter, Read, Write},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::{Duration, SystemTime},
@@ -51,16 +52,48 @@ struct ManifestDict {
     file: FileInfo,
 }
 
+/// A compressed file, and what it unpacks to
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PackedFile {
+    #[serde(flatten)]
+    file: FileInfo,
+    unpacked_size: u64,
+    unpacked_sha256: String,
+}
+
+/// dict-admin's `manifest.json`. Version 2 lists `search_db_zst`; version 1, `search_db`,
+/// uncompressed. A remote one must be version 2; the committed one may be version 1, from
+/// before, which still vouches for the files in place.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Manifest {
     version: u32,
-    search_db: FileInfo,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    search_db: Option<FileInfo>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    search_db_zst: Option<PackedFile>,
     dicts: Vec<ManifestDict>,
 }
 
 impl Manifest {
-    fn files(&self) -> impl Iterator<Item = &FileInfo> {
-        std::iter::once(&self.search_db).chain(self.dicts.iter().map(|d| &d.file))
+    fn zips(&self) -> impl Iterator<Item = &FileInfo> {
+        self.dicts.iter().map(|d| &d.file)
+    }
+
+    /// search.db's SHA-256, unpacked
+    fn search_db_sha256(&self) -> Option<&str> {
+        self.search_db_zst
+            .as_ref()
+            .map(|z| z.unpacked_sha256.as_str())
+            .or(self.search_db.as_ref().map(|f| f.sha256.as_str()))
+    }
+
+    fn zst(&self) -> Result<&PackedFile, AppError> {
+        self.search_db_zst.as_ref().ok_or_else(|| {
+            AppError::Error(
+                "the library is from before search.db.zst: build and upload it again with                  dict-admin"
+                    .into(),
+            )
+        })
     }
 }
 
@@ -199,16 +232,23 @@ impl DictState {
         serde_json::from_str(&s).ok()
     }
 
-    /// file -> sha256, for files in place that the committed manifest vouches for
+    /// file -> sha256, for files in place that the committed manifest vouches for:
+    /// the zips, and search.db (unpacked)
     fn committed(&self) -> HashMap<String, String> {
-        self.local_manifest()
-            .map(|m| {
-                m.files()
-                    .filter(|f| self.dir.join(&f.file).exists())
-                    .map(|f| (f.file.clone(), f.sha256.clone()))
-                    .collect()
-            })
-            .unwrap_or_default()
+        let Some(m) = self.local_manifest() else {
+            return HashMap::new();
+        };
+        let mut out: HashMap<String, String> = m
+            .zips()
+            .filter(|f| self.dir.join(&f.file).exists())
+            .map(|f| (f.file.clone(), f.sha256.clone()))
+            .collect();
+        if let Some(sum) = m.search_db_sha256() {
+            if self.dir.join(SEARCH_DB).exists() {
+                out.insert(SEARCH_DB.into(), sum.into());
+            }
+        }
+        out
     }
 
     /// `path`'s SHA-256, reusing this run's checksum if the file is unchanged since.
@@ -237,6 +277,7 @@ impl DictState {
                     file: &file,
                     hashed,
                     size: before.len,
+                    unpacking: false,
                 },
             );
         })?;
@@ -248,23 +289,50 @@ impl DictState {
         }
         Ok(sum)
     }
+}
 
-    /// Whether `path` holds exactly `f`. Sizes are compared first, so most mismatches
-    /// are cheap.
-    fn has_file(&self, app: &AppHandle, path: &Path, f: &FileInfo) -> Result<bool, AppError> {
-        match std::fs::metadata(path) {
-            Ok(m) if m.is_file() && m.len() == f.size => Ok(self.sha256(app, path)? == f.sha256),
-            _ => Ok(false),
-        }
-    }
+/// Whether `path` is a file of `f`'s size. `dict_plan` checks no more: checksums take
+/// minutes on a phone, so `dict_commit` checks them, once every download is done.
+fn has_size(path: &Path, f: &FileInfo) -> bool {
+    std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.len() == f.size)
 }
 
 #[derive(Clone, Serialize)]
 struct VerifyProgress<'a> {
     file: &'a str,
-    /// bytes hashed so far
+    /// bytes hashed so far (unpacked, when `unpacking`)
     hashed: u64,
     size: u64,
+    /// unpacking search.db rather than checking a file
+    unpacking: bool,
+}
+
+/// Unpack `zst` into `out`, returning the SHA-256 of what was written, and calling
+/// `report` with the bytes written so far every 16 MiB and at the end.
+fn unpack(zst: &Path, out: &Path, mut report: impl FnMut(u64)) -> Result<String, AppError> {
+    const CHUNK: usize = 1 << 20;
+    const REPORT_EVERY: u64 = 16 << 20;
+    let mut dec = zstd::Decoder::new(File::open(zst)?)?;
+    let mut w = BufWriter::new(File::create(out)?);
+    let mut h = Sha256::new();
+    let mut buf = vec![0u8; CHUNK];
+    let mut written = 0u64;
+    loop {
+        let n = dec.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        w.write_all(&buf[..n])?;
+        h.update(&buf[..n]);
+        let before = written;
+        written += n as u64;
+        if before / REPORT_EVERY != written / REPORT_EVERY {
+            report(written);
+        }
+    }
+    w.flush()?;
+    report(written);
+    Ok(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
 /// SHA-256 of a file, calling `progress` with the bytes hashed so far every 16 MiB and
@@ -314,31 +382,40 @@ pub async fn dict_plan(app: AppHandle) -> Result<Vec<PlannedFile>, AppError> {
     }
     let text = res.text().await?;
     let remote_manifest: Manifest = serde_json::from_str(&text)?;
+    let zst = remote_manifest.zst()?.clone();
 
-    // hashing files and committing is blocking work
+    // reading the library and committing is blocking work
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<DictState>();
         let committed = state.committed();
         let incoming = state.dir.join(INCOMING);
         std::fs::create_dir_all(&incoming)?;
 
-        let mut out = vec![];
-        for f in remote_manifest.files() {
+        let mut wanted: Vec<&FileInfo> = vec![];
+        for f in remote_manifest.zips() {
             if committed.get(&f.file) == Some(&f.sha256) {
                 continue;
             }
+            // moved into place by a commit that failed partway, before the manifest
+            if has_size(&state.dir.join(&f.file), f) {
+                continue;
+            }
+            wanted.push(f);
+        }
+        if committed.get(SEARCH_DB) != Some(&zst.unpacked_sha256) {
+            wanted.push(&zst.file);
+        }
+
+        let mut out = vec![];
+        for f in wanted {
             // Downloaded by an earlier run that was closed before the rest finished (or
             // whose commit failed): nothing is committed until every file is there.
             let new = incoming.join(&f.file);
             if new.exists() {
-                if state.has_file(&app, &new, f)? {
+                if has_size(&new, f) {
                     continue;
                 }
                 let _ = std::fs::remove_file(&new);
-            }
-            // moved into place by a commit that failed partway, before the manifest
-            if state.has_file(&app, &state.dir.join(&f.file), f)? {
-                continue;
             }
             out.push(PlannedFile {
                 filename: format!("dicts/{INCOMING}/{}", f.file),
@@ -353,71 +430,117 @@ pub async fn dict_plan(app: AppHandle) -> Result<Vec<PlannedFile>, AppError> {
             let _ = std::fs::remove_file(state.dir.join(PENDING));
             return Ok(out);
         }
+        // `dict_commit` once these are downloaded, and every other download (the page
+        // waits for all of them); right away if there are none, e.g. when dictionaries
+        // were only removed
         std::fs::write(state.dir.join(PENDING), &text)?;
-        // nothing to download, but dicts may have been removed: commit right away
-        if out.is_empty() {
-            commit(&app, &state)?;
-        }
         Ok(out)
     })
     .await
     .map_err(|e| AppError::Error(e.to_string()))?
 }
 
-/// Verify downloaded files, move them into place, drop removed dictionaries, reopen.
+#[derive(Serialize)]
+pub struct CommitResult {
+    /// whether a plan was committed: the dictionaries changed
+    committed: bool,
+    /// Files that failed their checksum, now deleted: nothing was committed. `dict_plan`
+    /// lists them to download again; then commit again.
+    corrupt: Vec<String>,
+}
+
+/// Verify downloaded files, unpack search.db.zst, move them into place, drop removed
+/// dictionaries, reopen. Nothing to do without a plan (`dict_plan`) to commit.
 #[tauri::command]
-pub async fn dict_commit(app: AppHandle) -> Result<Vec<String>, AppError> {
+pub async fn dict_commit(app: AppHandle) -> Result<CommitResult, AppError> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<DictState>();
-        commit(&app, &state)?;
-        Ok(state.get().map(|db| db.dict_names()).unwrap_or_default())
+        let committed = state.dir.join(PENDING).exists();
+        let corrupt = commit(&app, &state)?;
+        Ok(CommitResult {
+            committed: committed && corrupt.is_empty(),
+            corrupt,
+        })
     })
     .await
     .map_err(|e| AppError::Error(e.to_string()))?
 }
 
-fn commit(app: &AppHandle, state: &DictState) -> Result<(), AppError> {
+/// The files that failed their checksum, if any: then nothing was committed.
+fn commit(app: &AppHandle, state: &DictState) -> Result<Vec<String>, AppError> {
     let pending = state.dir.join(PENDING);
     let Ok(text) = std::fs::read_to_string(&pending) else {
-        return Ok(());
+        return Ok(vec![]);
     };
     let m: Manifest = serde_json::from_str(&text)?;
+    let zst = m.zst()?;
     let incoming = state.dir.join(INCOMING);
     let committed = state.committed();
 
-    // everything must be present and intact before anything is replaced
-    for f in m.files() {
-        let new = incoming.join(&f.file);
-        let path = if new.exists() {
-            new
-        } else {
-            // in place and already verified by an earlier commit
-            if committed.get(&f.file) == Some(&f.sha256) {
-                continue;
-            }
-            state.dir.join(&f.file)
-        };
+    // everything must be present and intact before anything is replaced: check every file,
+    // so that all the corrupt ones download again at once
+    let mut corrupt = vec![];
+    let mut check = |path: PathBuf, f: &FileInfo| -> Result<(), AppError> {
         if !path.exists() {
             return Err(AppError::Error(format!("{} was not downloaded", f.file)));
         }
         if state.sha256(app, &path)? != f.sha256 {
             let _ = std::fs::remove_file(&path);
-            return Err(AppError::Error(format!(
-                "{} is corrupt (checksum mismatch); it will be downloaded again",
-                f.file
-            )));
+            corrupt.push(f.file.clone());
+        }
+        Ok(())
+    };
+    for f in m.zips() {
+        let new = incoming.join(&f.file);
+        if new.exists() {
+            check(new, f)?;
+        } else if committed.get(&f.file) != Some(&f.sha256) {
+            check(state.dir.join(&f.file), f)?;
+        }
+        // else in place and already verified by an earlier commit
+    }
+    let db_current = committed.get(SEARCH_DB) == Some(&zst.unpacked_sha256);
+    let zst_path = incoming.join(&zst.file.file);
+    if !db_current {
+        check(zst_path.clone(), &zst.file)?;
+    }
+    if !corrupt.is_empty() {
+        return Ok(corrupt);
+    }
+
+    // the new search.db, next to the files downloaded, while the one in use stays open
+    let new_db = incoming.join(SEARCH_DB);
+    if !db_current {
+        let sum = unpack(&zst_path, &new_db, |written| {
+            let _ = app.emit(
+                "dict-verify-progress",
+                VerifyProgress {
+                    file: SEARCH_DB,
+                    hashed: written,
+                    size: zst.unpacked_size,
+                    unpacking: true,
+                },
+            );
+        })?;
+        if sum != zst.unpacked_sha256 {
+            let _ = std::fs::remove_file(&new_db);
+            let _ = std::fs::remove_file(&zst_path);
+            return Ok(vec![zst.file.file.clone()]);
         }
     }
 
     // close search.db and the zips before replacing them
     state.close()?;
-    for f in m.files() {
+    for f in m.zips() {
         let new = incoming.join(&f.file);
         if new.exists() {
             std::fs::rename(&new, state.dir.join(&f.file))?;
         }
     }
-    let keep: Vec<&str> = m.files().map(|f| f.file.as_str()).collect();
+    if !db_current {
+        std::fs::rename(&new_db, state.dir.join(SEARCH_DB))?;
+    }
+    let keep: Vec<&str> = m.zips().map(|f| f.file.as_str()).collect();
     for e in std::fs::read_dir(&state.dir)?.flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
         if name.ends_with(".zip") && !keep.contains(&name.as_str()) {
@@ -425,9 +548,12 @@ fn commit(app: &AppHandle, state: &DictState) -> Result<(), AppError> {
         }
     }
     std::fs::rename(&pending, state.dir.join(MANIFEST))?;
+    // unpacked and in place: the manifest vouches for search.db from now on
+    let _ = std::fs::remove_file(&zst_path);
     // the files moved: `committed()` vouches for them from now on
     state.hashed.lock()?.clear();
-    state.reopen()
+    state.reopen()?;
+    Ok(vec![])
 }
 
 #[tauri::command]
@@ -572,5 +698,89 @@ mod tests {
             .map(|b| format!("{b:02x}"))
             .collect();
         assert_eq!(sum, expected);
+    }
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("cjk-dict-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn unpack_writes_what_was_packed_and_its_checksum() {
+        let dir = temp_dir("unpack");
+        // 20 MiB that compress
+        let data: Vec<u8> = (0..20u32 << 20).map(|i| (i % 251) as u8).collect();
+        let zst = dir.join("search.db.zst");
+        std::fs::write(&zst, zstd::encode_all(&data[..], 3).unwrap()).unwrap();
+
+        let out = dir.join("search.db");
+        let mut reports = vec![];
+        let sum = unpack(&zst, &out, |n| reports.push(n)).unwrap();
+
+        assert_eq!(std::fs::read(&out).unwrap(), data);
+        // reads end where the decoder's do: once past 16 MiB, then at the end
+        assert_eq!(reports.len(), 2, "{reports:?}");
+        assert!(reports[0] >= 16 << 20 && reports[0] < 20 << 20);
+        assert_eq!(reports[1], 20 << 20);
+        let expected: String = Sha256::digest(&data)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        assert_eq!(sum, expected);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn unpack_fails_on_a_corrupt_file() {
+        let dir = temp_dir("unpack-corrupt");
+        let zst = dir.join("search.db.zst");
+        std::fs::write(&zst, b"not zstd").unwrap();
+        assert!(unpack(&zst, &dir.join("search.db"), |_| {}).is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    const V1: &str = r#"{"version":1,
+        "search_db":{"file":"search.db","size":5,"sha256":"db1"},
+        "dicts":[{"name":"A","title":"A","revision":"1","lang":null,"term_count":1,
+                  "file":"A.zip","size":1,"sha256":"a"}]}"#;
+    const V2: &str = r#"{"version":2,
+        "search_db_zst":{"file":"search.db.zst","size":2,"sha256":"z",
+                         "unpacked_size":5,"unpacked_sha256":"db2"},
+        "dicts":[{"name":"A","title":"A","revision":"1","lang":null,"term_count":1,
+                  "file":"A.zip","size":1,"sha256":"a"}]}"#;
+
+    #[test]
+    fn manifests_of_either_version_say_what_search_db_is() {
+        let v1: Manifest = serde_json::from_str(V1).unwrap();
+        assert_eq!(v1.search_db_sha256(), Some("db1"));
+        assert!(v1.zst().is_err(), "a remote version 1 manifest is refused");
+
+        let v2: Manifest = serde_json::from_str(V2).unwrap();
+        assert_eq!(v2.search_db_sha256(), Some("db2"));
+        assert_eq!(v2.zst().unwrap().file.file, "search.db.zst");
+        assert_eq!(
+            v2.zips().map(|f| f.file.as_str()).collect::<Vec<_>>(),
+            ["A.zip"]
+        );
+    }
+
+    #[test]
+    fn a_version_1_manifest_still_vouches_for_the_files_in_place() {
+        let app_data = temp_dir("committed");
+        let state = DictState::new(&app_data);
+        std::fs::create_dir_all(&state.dir).unwrap();
+        std::fs::write(state.dir.join(MANIFEST), V1).unwrap();
+        // no files in place: nothing is vouched for
+        assert!(state.committed().is_empty());
+
+        std::fs::write(state.dir.join("A.zip"), b"a").unwrap();
+        std::fs::write(state.dir.join(SEARCH_DB), b"12345").unwrap();
+        let committed = state.committed();
+        assert_eq!(committed.get("A.zip").map(String::as_str), Some("a"));
+        // search.db by its unpacked checksum, which a version 2 manifest compares with
+        assert_eq!(committed.get(SEARCH_DB).map(String::as_str), Some("db1"));
+        std::fs::remove_dir_all(&app_data).unwrap();
     }
 }
