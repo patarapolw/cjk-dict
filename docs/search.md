@@ -108,12 +108,21 @@ A reading instead of characters lists the characters read so, each in full, as a
   - As typed, not as a compound's sound change: `ぎょう` finds 行, not 京.
 - Pinyin: `xīng`, `xing1`; without a tone, every tone.
 - Hangul, with the initial-sound rule either way: `이` finds 李, listed as 리.
-- With Japanese selected, Latin letters are romaji, looked up in hiragana: `kyou` finds 京, `okoru` finds 興.
-  - A long vowel's macron is spelled as kana spell it: `kyō` is きょう.
-  - Romaji that doesn't all become kana is taken as pinyin.
-- With Korean selected, Latin letters are Revised Romanization rather than pinyin, as in [Words](#korean): `heung` finds 興.
-  - With the same loose spellings: `eu`/`u`, `r`/`l`, ...; `hung` finds 興 too.
-  - With the initial-sound rule: `i` finds 李.
+- Latin letters, by the search language:
+
+  | Search language | Latin letters are                     | e.g.                                     |
+  | --------------- | ------------------------------------- | ---------------------------------------- |
+  | Auto-detect     | romaji, pinyin and romanization alike | `kyou` finds 京, `heung` finds 興        |
+  | Japanese        | romaji, or else pinyin                | `kyou` finds 京, `okoru` finds 興        |
+  | Chinese         | pinyin                                | `xing` finds 興                          |
+  | Korean          | romanization, or else pinyin          | `heung` finds 興, `xīng` is still pinyin |
+  - Romaji is looked up in hiragana. A long vowel's macron is spelled as kana spell it: `kyō` is きょう.
+  - Romanization is Revised Romanization, as in [Words](#korean):
+    - with the same loose spellings: `eu`/`u`, `r`/`l`, ...; `hung` finds 興 too;
+    - with the initial-sound rule: `i` finds 李.
+  - The hint says what the reading was taken as: "Characters read kyou as きょう, pinyin or romanization".
+  - With Auto-detect, the characters of every way are listed together, the most used first.
+
 - The readings are the kanji dictionaries' (KANJIDIC, CC-CEDICT.Hanzi) and the cards' Hangul readings, whichever dictionaries are ticked.
 - With a `search.db` from before this, the view says to update the library.
 

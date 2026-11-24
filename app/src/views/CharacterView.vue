@@ -30,9 +30,13 @@
       <p class="search-hint">
         <template v-if="readingQ">
           Characters read <code>{{ readingQ }}</code>
-          <template v-if="romanizedQ"> as romanization</template>
-          <template v-else-if="romajiQ">
-            as <code lang="ja">{{ romajiQ }}</code></template
+          <template v-if="readingAs.length">
+            as
+            <template v-for="(a, i) in readingAs" :key="i"
+              >{{ i ? (i < readingAs.length - 1 ? ", " : " or ") : ""
+              }}<code v-if="a.kana" lang="ja">{{ a.text }}</code
+              ><template v-else>{{ a.text }}</template></template
+            ></template
           >
         </template>
         <template v-else-if="superQuery && chars.length">
@@ -378,7 +382,14 @@ import { useRoute, useRouter } from "vue-router";
 
 import DictFilter from "../components/DictFilter.vue";
 import Term from "../components/yomitan/Term.vue";
-import { IHanChar, IHanList, IKanjiEntry, ITerm, searchDB } from "../db/search";
+import {
+  IHanChar,
+  IHanList,
+  IKanjiEntry,
+  ILatin,
+  ITerm,
+  searchDB,
+} from "../db/search";
 import {
   READING_STAT_LANGS,
   REGION_NAMES,
@@ -426,16 +437,41 @@ const chars = computed(() =>
 );
 /** `*木口`: the characters made directly of all of them, each shown in full */
 const superQuery = computed(() => !readingQ.value && /^\s*[*＊]/.test(q.value));
-/** with Korean selected, a reading in Latin letters is romanization (`heung`: 흥), as in Words */
-const romanizedQ = computed(
-  () => lang.value === "ko-KR" && isRomanization(readingQ.value),
-);
-/** with Japanese selected, a reading in romaji is looked up in kana: `kyou` as きょう */
-const romajiQ = computed(() =>
-  lang.value === "ja-JP" ? romajiReading(readingQ.value) : null,
-);
-/** the reading to look up: kana for romaji */
-const lookupReading = computed(() => romajiQ.value ?? readingQ.value);
+/**
+ * How to look the reading up, by the search language. A reading in Latin letters is:
+ * - with Japanese, romaji, looked up in kana (`kyou` as きょう), or else pinyin;
+ * - with Korean, romanization as in Words (`heung`: 흥);
+ * - with Chinese, pinyin;
+ * - with Auto-detect, all of them at once.
+ */
+const lookup = computed(() => {
+  const r = readingQ.value;
+  const auto = !lang.value;
+  const kana = auto || lang.value === "ja-JP" ? romajiReading(r) : null;
+  return {
+    readings: kana ? (auto ? [r, kana] : [kana]) : [r],
+    latin: {
+      pinyin: lang.value !== "ko-KR",
+      korean: auto || lang.value === "ko-KR",
+    },
+    kana,
+    /** Latin letters, read as more than one thing, or as other than pinyin */
+    romanized: isRomanization(r),
+  };
+});
+/** what the reading was taken as, for the hint: きょう, pinyin, romanization */
+const readingAs = computed(() => {
+  const { kana, latin, romanized } = lookup.value;
+  const out: { text: string; kana?: boolean }[] = [];
+  if (kana) out.push({ text: kana, kana: true });
+  if (!romanized) return out;
+  // with Auto-detect: every way
+  if (latin.pinyin && latin.korean) out.push({ text: "pinyin" });
+  if (latin.korean) out.push({ text: "romanization" });
+  return out;
+});
+/** the key of what a reading looks up, to search again when it changes */
+const lookupKey = computed(() => JSON.stringify(lookup.value));
 /** characters listed a page at a time, each in full: `*木口` or a reading */
 const paged = computed(() => superQuery.value || !!readingQ.value);
 
@@ -485,8 +521,8 @@ let requestId = 0;
 async function load() {
   const id = ++requestId;
   const text = chars.value.join("");
-  const reading = lookupReading.value;
-  const romanized = romanizedQ.value;
+  const reading = readingQ.value;
+  const { readings, latin } = lookup.value;
   words.value = {};
   if (!text && !reading) {
     clear();
@@ -494,7 +530,7 @@ async function load() {
   }
   try {
     if (paged.value) {
-      const page = await superPage(text, reading, romanized, 0);
+      const page = await superPage(text, reading ? readings : [], latin, 0);
       if (id !== requestId) return;
       clear();
       found.value = page.found;
@@ -545,17 +581,17 @@ async function usedInOf(chs: string[]): Promise<Record<string, IHanList>> {
 }
 
 /**
- * A page of the characters read `reading`, or else made directly of all of `components`,
- * each in full
+ * A page of the characters read any of `readings`, or else made directly of all of
+ * `components`, each in full
  */
 async function superPage(
   components: string,
-  reading: string,
-  romanized: boolean,
+  readings: string[],
+  latin: ILatin,
   offset: number,
 ) {
-  const list = reading
-    ? await searchDB.hanByReading(reading, MAX_CHARS, offset, romanized)
+  const list = readings.length
+    ? await searchDB.hanByReading(readings, latin, MAX_CHARS, offset)
     : await searchDB.hanContaining(components, MAX_CHARS, offset, true);
   const chs = list.items.map((it) => it.ch);
   const [cs, direct] = chs.length
@@ -572,8 +608,8 @@ async function loadSuper() {
   try {
     const page = await superPage(
       chars.value.join(""),
-      lookupReading.value,
-      romanizedQ.value,
+      readingQ.value ? lookup.value.readings : [],
+      lookup.value.latin,
       offset,
     );
     if (id !== requestId) return;
@@ -639,7 +675,7 @@ async function onWordsToggle(ch: string, e: Event) {
 /** wait for typing to pause */
 const DEBOUNCE_MS = 200;
 let timer: ReturnType<typeof setTimeout> | undefined;
-watch([chars, lookupReading, romanizedQ, dictsVersion], () => {
+watch([chars, lookupKey, dictsVersion], () => {
   clearTimeout(timer);
   timer = setTimeout(load, DEBOUNCE_MS);
 });
