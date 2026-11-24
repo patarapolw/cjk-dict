@@ -196,14 +196,21 @@ class SearchDatabase {
   /**
    * Characters read `reading`, the most used first: kana (`きょう`; a kun reading with or
    * without its okurigana, `おこ` or `おこる`), pinyin (`xing`, every tone without one) or
-   * Hangul (`흥`).
+   * Hangul (`흥`). With `romanized`, Latin letters are Korean romanization (`heung`), as
+   * Words matches it, rather than pinyin.
    */
   async hanByReading(
     reading: string,
     limit: number,
     offset: number,
+    romanized = false,
   ): Promise<IHanList> {
-    return await invoke<IHanList>("han_by_reading", { reading, limit, offset });
+    return await invoke<IHanList>("han_by_reading", {
+      reading,
+      romanized,
+      limit,
+      offset,
+    });
   }
 
   /** URL of a media file inside a dictionary zip, for a plain `<img src>` (dict:// protocol). */

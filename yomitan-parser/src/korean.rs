@@ -313,6 +313,27 @@ pub fn is_romanization(text: &str) -> bool {
             .all(|c| c.is_ascii_alphabetic() || matches!(c, '-' | '\'' | '’' | '.' | ' '))
 }
 
+/// The Hangul syllables `typed` romanizes, as Hangul terms are matched ([`keys`], so with
+/// the loose spellings of [`loosen`]): `heung` is 흥, `rim` and `lim` are 림. Empty unless
+/// `typed` is [`is_romanization`].
+pub fn syllables_of(typed: &str) -> Vec<char> {
+    use std::{collections::HashMap, sync::OnceLock};
+    static BY_KEY: OnceLock<HashMap<String, Vec<char>>> = OnceLock::new();
+    if !is_romanization(typed) {
+        return vec![];
+    }
+    let by_key = BY_KEY.get_or_init(|| {
+        let mut m: HashMap<String, Vec<char>> = HashMap::new();
+        for c in '\u{AC00}'..='\u{D7A3}' {
+            for k in keys(&c.to_string()) {
+                m.entry(k).or_default().push(c);
+            }
+        }
+        m
+    });
+    by_key.get(&loosen(typed)).cloned().unwrap_or_default()
+}
+
 /// A romanized query, ready to match against Hangul terms.
 #[derive(Debug, Clone)]
 pub struct RomanQuery {

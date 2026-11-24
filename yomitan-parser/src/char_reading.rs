@@ -285,9 +285,20 @@ pub fn stored_forms(readings: &str) -> Vec<String> {
 
 /// The readings to look characters up by, for a reading typed: as [`stored_forms`] keeps
 /// them. Unlike [`query_forms`], kana are taken as typed, not as a compound's sound change
-/// (ぎょう finds 行, not 京); Hangul and pinyin are as there.
-pub fn lookup_forms(reading: &str) -> Vec<String> {
+/// (ぎょう finds 行, not 京); Hangul and pinyin are as there. With `romanized`, Latin letters
+/// are Korean romanization rather than pinyin: `heung` is 흥, `i` is 이 and 리
+/// ([`crate::korean::syllables_of`]).
+pub fn lookup_forms(reading: &str, romanized: bool) -> Vec<String> {
     let r = reading.trim().trim_matches(['-', '‐']);
+    if romanized && crate::korean::is_romanization(r) {
+        let mut out = vec![];
+        for s in crate::korean::syllables_of(r) {
+            for f in initial_sound_forms(s) {
+                push(&mut out, f.to_string());
+            }
+        }
+        return out;
+    }
     if !r.chars().any(is_hangul_syllable) && r.chars().any(is_kana_or_katakana) {
         let h: String = fold_kana(r)
             .chars()
@@ -442,13 +453,26 @@ mod tests {
 
     #[test]
     fn a_typed_reading_looks_characters_up_as_stored() {
-        assert_eq!(lookup_forms("キョウ"), ["きょう"]);
-        assert_eq!(lookup_forms("ぎょう"), ["ぎょう"]);
-        assert_eq!(lookup_forms("おこ.る"), ["おこる"]);
-        assert_eq!(lookup_forms("xīng"), ["XING1"]);
-        assert_eq!(lookup_forms("xing").len(), 5);
-        assert!(lookup_forms("이").contains(&"리".to_string()));
-        assert!(lookup_forms("").is_empty());
+        assert_eq!(lookup_forms("キョウ", false), ["きょう"]);
+        assert_eq!(lookup_forms("ぎょう", false), ["ぎょう"]);
+        assert_eq!(lookup_forms("おこ.る", false), ["おこる"]);
+        assert_eq!(lookup_forms("xīng", false), ["XING1"]);
+        assert_eq!(lookup_forms("xing", false).len(), 5);
+        assert!(lookup_forms("이", false).contains(&"리".to_string()));
+        assert!(lookup_forms("", false).is_empty());
+        // Korean romanization, loosely as in Words, and the initial-sound rule
+        // eu and u alike
+        assert_eq!(lookup_forms("heung", true), ["훙", "흥"]);
+        assert_eq!(lookup_forms("hung", true), ["훙", "흥"]);
+        for (typed, hangul) in [("lim", "림"), ("rim", "림"), ("i", "리"), ("ri", "이")] {
+            assert!(
+                lookup_forms(typed, true).contains(&hangul.to_string()),
+                "{typed}: {hangul}"
+            );
+        }
+        assert!(lookup_forms("qqq", true).is_empty());
+        // kana and Hangul are themselves
+        assert_eq!(lookup_forms("きょう", true), ["きょう"]);
     }
 
     #[test]

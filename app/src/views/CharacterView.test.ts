@@ -133,7 +133,12 @@ beforeEach(() => {
       return page([]);
     }
     if (cmd === "han_by_reading") {
-      const all = a.reading === "りん" ? ["林", "森"] : [];
+      const all =
+        a.reading === "りん"
+          ? ["林", "森"]
+          : a.reading === "lim" && a.romanized
+            ? ["林"]
+            : [];
       return {
         items: all.map((ch) => ({ ch, uses: 1 })),
         next: null,
@@ -366,6 +371,7 @@ describe("CharacterView", () => {
     await loaded(wrapper);
     expect(calls.find((c) => c.cmd === "han_by_reading")?.args).toEqual({
       reading: "りん",
+      romanized: false,
       limit: 20,
       offset: 0,
     });
@@ -377,6 +383,34 @@ describe("CharacterView", () => {
       wrapper.findAll(".char-card").map((c) => c.attributes("data-char")),
     ).toEqual(["林", "森"]);
     expect(wrapper.find(".containing").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("takes Latin letters as Korean romanization with Korean selected", async () => {
+    lang.value = "ko-KR";
+    const { wrapper } = await mountView("/kanji");
+    await wrapper.get("input.search-input").setValue("lim");
+    await loaded(wrapper);
+    expect(calls.find((c) => c.cmd === "han_by_reading")?.args).toMatchObject({
+      reading: "lim",
+      romanized: true,
+    });
+    expect(wrapper.get(".search-hint").text()).toBe(
+      "Characters read lim as romanization",
+    );
+    expect(
+      wrapper.findAll(".char-card").map((c) => c.attributes("data-char")),
+    ).toEqual(["林"]);
+
+    // otherwise pinyin
+    lang.value = "";
+    calls = [];
+    await vi.waitFor(() =>
+      expect(calls.some((c) => c.cmd === "han_by_reading")).toBe(true),
+    );
+    expect(calls.find((c) => c.cmd === "han_by_reading")?.args.romanized).toBe(
+      false,
+    );
     wrapper.unmount();
   });
 

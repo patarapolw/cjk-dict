@@ -108,6 +108,9 @@ A reading instead of characters lists the characters read so, each in full, as a
   - As typed, not as a compound's sound change: `ぎょう` finds 行, not 京.
 - Pinyin: `xīng`, `xing1`; without a tone, every tone.
 - Hangul, with the initial-sound rule either way: `이` finds 李, listed as 리.
+- With Korean selected, Latin letters are Revised Romanization rather than pinyin, as in [Words](#korean): `heung` finds 興.
+  - With the same loose spellings: `eu`/`u`, `r`/`l`, ...; `hung` finds 興 too.
+  - With the initial-sound rule: `i` finds 李.
 - The readings are the kanji dictionaries' (KANJIDIC, CC-CEDICT.Hanzi) and the cards' Hangul readings, whichever dictionaries are ticked.
 - With a `search.db` from before this, the view says to update the library.
 

@@ -2956,10 +2956,14 @@ impl SearchDb {
     /// reading with or without its okurigana (おこ, おこる); pinyin without a tone in every
     /// tone; Hangul by the initial-sound rule either way (이 finds 李, listed as 리).
     ///
+    /// With `romanized`, Latin letters are Korean romanization, as Words matches them
+    /// (`heung`: 흥), rather than pinyin.
+    ///
     /// An error for a search.db from before `han_reading`: it must be built again.
     pub fn han_by_reading(
         &self,
         reading: &str,
+        romanized: bool,
         limit: Option<u32>,
         offset: Option<u32>,
     ) -> Result<HanList, YomitanError> {
@@ -2970,7 +2974,7 @@ impl SearchDb {
         }
         let limit = limit.unwrap_or(60).clamp(1, MAX_HAN_LIST);
         let offset = offset.unwrap_or(0);
-        let forms = char_reading::lookup_forms(reading);
+        let forms = char_reading::lookup_forms(reading, romanized);
         if forms.is_empty() {
             return Ok(HanList::default());
         }
@@ -3430,7 +3434,9 @@ mod han_tests {
         // and found by it, by the initial-sound rule too
         #[cfg(feature = "hangul-readings")]
         for r in ["리", "이"] {
-            assert!(chars(db.han_by_reading(r, None, None).unwrap()).contains(&"李".to_string()));
+            assert!(
+                chars(db.han_by_reading(r, false, None, None).unwrap()).contains(&"李".to_string())
+            );
         }
 
         drop(db);
@@ -3545,7 +3551,7 @@ mod han_tests {
         assert_eq!(find(&db, "", "林", "リン").len(), 1);
 
         // the characters read so (Characters view)
-        let read = |r: &str| chars(db.han_by_reading(r, None, None).unwrap());
+        let read = |r: &str| chars(db.han_by_reading(r, false, None, None).unwrap());
         assert_eq!(read("りん"), ["林"]);
         assert_eq!(read("リン"), ["林"]);
         assert_eq!(read("はやし"), ["林"]);
@@ -3556,8 +3562,12 @@ mod han_tests {
         assert_eq!(read("SEN1"), ["森"]);
         assert!(read("sen4").is_empty());
         assert_eq!(read("삼"), ["森"]);
+        // Korean romanization, with Korean selected
+        let roman = |r: &str| chars(db.han_by_reading(r, true, None, None).unwrap());
+        assert_eq!(roman("sam"), ["森"]);
+        assert!(roman("sen").is_empty());
         assert!(read("きょう").is_empty());
-        let page = db.han_by_reading("りん", Some(1), None).unwrap();
+        let page = db.han_by_reading("りん", false, Some(1), None).unwrap();
         assert_eq!((page.total, page.next), (1, None));
         drop(db);
         std::fs::remove_dir_all(dir).unwrap();
@@ -3582,7 +3592,7 @@ mod han_tests {
         let db = SearchDb::open(&db_path, &dir).unwrap();
         assert!(db.han_chars("林").unwrap()[0].entries.is_empty());
         // no han_reading: it says the library needs an update
-        assert!(db.han_by_reading("りん", None, None).is_err());
+        assert!(db.han_by_reading("りん", false, None, None).is_err());
         assert!(
             db.han_containing("木", None, None, false)
                 .unwrap()

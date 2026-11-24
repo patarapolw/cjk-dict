@@ -30,6 +30,7 @@
       <p class="search-hint">
         <template v-if="readingQ">
           Characters read <code>{{ readingQ }}</code>
+          <template v-if="romanizedQ"> as romanization</template>
         </template>
         <template v-else-if="superQuery && chars.length">
           Characters made directly of <code>{{ chars.join(" + ") }}</code>
@@ -43,7 +44,8 @@
           <code>木口</code>, also find the characters made of all of them: 呆,
           杏, …; <code>*口</code> shows the characters made directly of 口, each
           in full. A reading, e.g. <code>きょう</code>, <code>xing</code> or
-          <code>흥</code>, finds the characters read so.
+          <code>흥</code>, finds the characters read so; with Korean selected,
+          romanization does too: <code>heung</code>.
         </template>
         <span
           v-if="touchScreen && !chars.length && !readingQ"
@@ -390,6 +392,7 @@ import {
   isOfLang,
   loadDicts,
 } from "../util/dicts";
+import { isRomanization } from "../util/furigana";
 import { glossLang } from "../util/lang";
 import { dictsVersion, toBeLoaded } from "../util/loading";
 import { scrollToStart } from "../util/scroll";
@@ -418,6 +421,10 @@ const chars = computed(() =>
 );
 /** `*木口`: the characters made directly of all of them, each shown in full */
 const superQuery = computed(() => !readingQ.value && /^\s*[*＊]/.test(q.value));
+/** with Korean selected, a reading in Latin letters is romanization (`heung`: 흥), as in Words */
+const romanizedQ = computed(
+  () => lang.value === "ko-KR" && isRomanization(readingQ.value),
+);
 /** characters listed a page at a time, each in full: `*木口` or a reading */
 const paged = computed(() => superQuery.value || !!readingQ.value);
 
@@ -468,6 +475,7 @@ async function load() {
   const id = ++requestId;
   const text = chars.value.join("");
   const reading = readingQ.value;
+  const romanized = romanizedQ.value;
   words.value = {};
   if (!text && !reading) {
     clear();
@@ -475,7 +483,7 @@ async function load() {
   }
   try {
     if (paged.value) {
-      const page = await superPage(text, reading, 0);
+      const page = await superPage(text, reading, romanized, 0);
       if (id !== requestId) return;
       clear();
       found.value = page.found;
@@ -529,9 +537,14 @@ async function usedInOf(chs: string[]): Promise<Record<string, IHanList>> {
  * A page of the characters read `reading`, or else made directly of all of `components`,
  * each in full
  */
-async function superPage(components: string, reading: string, offset: number) {
+async function superPage(
+  components: string,
+  reading: string,
+  romanized: boolean,
+  offset: number,
+) {
   const list = reading
-    ? await searchDB.hanByReading(reading, MAX_CHARS, offset)
+    ? await searchDB.hanByReading(reading, MAX_CHARS, offset, romanized)
     : await searchDB.hanContaining(components, MAX_CHARS, offset, true);
   const chs = list.items.map((it) => it.ch);
   const [cs, direct] = chs.length
@@ -546,7 +559,12 @@ async function loadSuper() {
   const id = requestId;
   loadingMore.value = true;
   try {
-    const page = await superPage(chars.value.join(""), readingQ.value, offset);
+    const page = await superPage(
+      chars.value.join(""),
+      readingQ.value,
+      romanizedQ.value,
+      offset,
+    );
     if (id !== requestId) return;
     found.value = [...found.value, ...page.found];
     usedIn.value = { ...usedIn.value, ...page.usedIn };
@@ -610,7 +628,7 @@ async function onWordsToggle(ch: string, e: Event) {
 /** wait for typing to pause */
 const DEBOUNCE_MS = 200;
 let timer: ReturnType<typeof setTimeout> | undefined;
-watch([chars, readingQ, dictsVersion], () => {
+watch([chars, readingQ, romanizedQ, dictsVersion], () => {
   clearTimeout(timer);
   timer = setTimeout(load, DEBOUNCE_MS);
 });
