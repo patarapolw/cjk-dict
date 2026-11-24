@@ -386,6 +386,24 @@ describe("CharacterView", () => {
     wrapper.unmount();
   });
 
+  it("looks romaji up in kana with Japanese selected", async () => {
+    lang.value = "ja-JP";
+    const { wrapper } = await mountView("/kanji");
+    await wrapper.get("input.search-input").setValue("rin");
+    await loaded(wrapper);
+    expect(calls.find((c) => c.cmd === "han_by_reading")?.args).toMatchObject({
+      reading: "りん",
+      romanized: false,
+    });
+    expect(wrapper.get(".search-hint").text().replace(/\s+/g, " ")).toBe(
+      "Characters read rin as りん",
+    );
+    expect(
+      wrapper.findAll(".char-card").map((c) => c.attributes("data-char")),
+    ).toEqual(["林", "森"]);
+    wrapper.unmount();
+  });
+
   it("takes Latin letters as Korean romanization with Korean selected", async () => {
     lang.value = "ko-KR";
     const { wrapper } = await mountView("/kanji");

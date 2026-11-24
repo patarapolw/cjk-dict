@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { kanaRow, romajiTailGlob } from "./romaji";
+import { kanaRow, romajiReading, romajiTailGlob } from "./romaji";
 
 describe("kanaRow", () => {
   it("gives every kana an incomplete syllable can become, by extended rules", () => {
@@ -54,5 +54,27 @@ describe("romajiTailGlob", () => {
     // pinyin, or other words with vowels
     expect(romajiTailGlob("zhong")).toBeNull();
     expect(romajiTailGlob("ni3 hao")).toBeNull();
+  });
+});
+
+describe("romajiReading", () => {
+  it("converts romaji that all becomes kana", () => {
+    expect(romajiReading("kyou")).toBe("きょう");
+    expect(romajiReading("Rin")).toBe("りん");
+    expect(romajiReading("okoru")).toBe("おこる");
+    expect(romajiReading("kan'i")).toBe("かんい");
+  });
+
+  it("spells long vowels' macrons as kana do", () => {
+    expect(romajiReading("kyō")).toBe("きょう");
+    expect(romajiReading("kūki")).toBe("くうき");
+  });
+
+  it("is null for what is not romaji", () => {
+    expect(romajiReading("st")).toBeNull();
+    expect(romajiReading("x")).toBeNull();
+    expect(romajiReading("xing1")).toBeNull();
+    expect(romajiReading("きょう")).toBeNull();
+    expect(romajiReading("")).toBeNull();
   });
 });

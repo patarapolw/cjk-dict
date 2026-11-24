@@ -31,6 +31,9 @@
         <template v-if="readingQ">
           Characters read <code>{{ readingQ }}</code>
           <template v-if="romanizedQ"> as romanization</template>
+          <template v-else-if="romajiQ">
+            as <code lang="ja">{{ romajiQ }}</code></template
+          >
         </template>
         <template v-else-if="superQuery && chars.length">
           Characters made directly of <code>{{ chars.join(" + ") }}</code>
@@ -44,8 +47,9 @@
           <code>木口</code>, also find the characters made of all of them: 呆,
           杏, …; <code>*口</code> shows the characters made directly of 口, each
           in full. A reading, e.g. <code>きょう</code>, <code>xing</code> or
-          <code>흥</code>, finds the characters read so; with Korean selected,
-          romanization does too: <code>heung</code>.
+          <code>흥</code>, finds the characters read so; with Japanese or Korean
+          selected, romaji or romanization does too: <code>kyou</code>,
+          <code>heung</code>.
         </template>
         <span
           v-if="touchScreen && !chars.length && !readingQ"
@@ -394,6 +398,7 @@ import {
 } from "../util/dicts";
 import { isRomanization } from "../util/furigana";
 import { glossLang } from "../util/lang";
+import { romajiReading } from "../util/romaji";
 import { dictsVersion, toBeLoaded } from "../util/loading";
 import { scrollToStart } from "../util/scroll";
 import { lang } from "../util/settings";
@@ -425,6 +430,12 @@ const superQuery = computed(() => !readingQ.value && /^\s*[*＊]/.test(q.value))
 const romanizedQ = computed(
   () => lang.value === "ko-KR" && isRomanization(readingQ.value),
 );
+/** with Japanese selected, a reading in romaji is looked up in kana: `kyou` as きょう */
+const romajiQ = computed(() =>
+  lang.value === "ja-JP" ? romajiReading(readingQ.value) : null,
+);
+/** the reading to look up: kana for romaji */
+const lookupReading = computed(() => romajiQ.value ?? readingQ.value);
 /** characters listed a page at a time, each in full: `*木口` or a reading */
 const paged = computed(() => superQuery.value || !!readingQ.value);
 
@@ -474,7 +485,7 @@ let requestId = 0;
 async function load() {
   const id = ++requestId;
   const text = chars.value.join("");
-  const reading = readingQ.value;
+  const reading = lookupReading.value;
   const romanized = romanizedQ.value;
   words.value = {};
   if (!text && !reading) {
@@ -561,7 +572,7 @@ async function loadSuper() {
   try {
     const page = await superPage(
       chars.value.join(""),
-      readingQ.value,
+      lookupReading.value,
       romanizedQ.value,
       offset,
     );
@@ -628,7 +639,7 @@ async function onWordsToggle(ch: string, e: Event) {
 /** wait for typing to pause */
 const DEBOUNCE_MS = 200;
 let timer: ReturnType<typeof setTimeout> | undefined;
-watch([chars, readingQ, romanizedQ, dictsVersion], () => {
+watch([chars, lookupReading, romanizedQ, dictsVersion], () => {
   clearTimeout(timer);
   timer = setTimeout(load, DEBOUNCE_MS);
 });

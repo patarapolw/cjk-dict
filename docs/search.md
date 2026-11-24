@@ -108,6 +108,9 @@ A reading instead of characters lists the characters read so, each in full, as a
   - As typed, not as a compound's sound change: `ぎょう` finds 行, not 京.
 - Pinyin: `xīng`, `xing1`; without a tone, every tone.
 - Hangul, with the initial-sound rule either way: `이` finds 李, listed as 리.
+- With Japanese selected, Latin letters are romaji, looked up in hiragana: `kyou` finds 京, `okoru` finds 興.
+  - A long vowel's macron is spelled as kana spell it: `kyō` is きょう.
+  - Romaji that doesn't all become kana is taken as pinyin.
 - With Korean selected, Latin letters are Revised Romanization rather than pinyin, as in [Words](#korean): `heung` finds 興.
   - With the same loose spellings: `eu`/`u`, `r`/`l`, ...; `hung` finds 興 too.
   - With the initial-sound rule: `i` finds 李.
