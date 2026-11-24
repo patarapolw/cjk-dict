@@ -101,13 +101,25 @@ pub fn char_readings(c: char) -> Vec<String> {
             all.push(r);
         }
     }
-    // The initial-sound rule goes one way (ㄹ → ㄴ → ㅇ), so a reading it makes from another
-    // is left out (樂: 낙, from 락), unless it is the main reading. An ㄹ or ㄴ reading beside
-    // an ㄴ or ㅇ main reading is kept: the rule can't make it, so it is another reading,
-    // such as a customary one (諾: 낙, and 락 in 受諾 수락).
-    all.iter()
-        .filter(|&&r| Some(r) == main || !all.iter().any(|&k| k != r && dueum(k) == r))
-        .map(|&r| String::from(r))
+    keep_eum(main, &all).into_iter().map(String::from).collect()
+}
+
+/// hanja_hangul's main reading of a Hanja (a compatibility Hanja read as its unified form)
+pub fn main_reading(c: char) -> Option<char> {
+    Converter::global().char_reading(c)
+}
+
+/// Of a Hanja's `readings`, those a character dictionary lists, in their order.
+///
+/// The initial-sound rule goes one way (ㄹ → ㄴ → ㅇ), so a reading it makes from another
+/// is left out (樂: 낙, from 락), unless it is the `main` reading. An ㄹ or ㄴ reading beside
+/// an ㄴ or ㅇ main reading is kept: the rule can't make it, so it is another reading, such
+/// as a customary one (諾: 낙, and 락 in 受諾 수락).
+pub fn keep_eum(main: Option<char>, readings: &[char]) -> Vec<char> {
+    readings
+        .iter()
+        .copied()
+        .filter(|&r| Some(r) == main || !readings.iter().any(|&k| k != r && dueum(k) == r))
         .collect()
 }
 
