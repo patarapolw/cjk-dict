@@ -404,7 +404,7 @@ describe("DictionaryView", () => {
         expect(searches[0]).toMatchObject({ term: "zhongguo", reading: "" });
         expect(searches[1]).toMatchObject({ term: "", reading: "zhongguo" });
         expect(hint(wrapper)).toContain(
-          "No words zhongguo: searching it by reading",
+          "Nothing as a word. Searching zhongguo by reading",
         );
         wrapper.unmount();
       },
@@ -439,7 +439,7 @@ describe("DictionaryView", () => {
         { term: "sake", reading: "" },
       ]);
       expect(hint(wrapper)).toContain(
-        "No readings sake: searching it as a word",
+        "Nothing by reading. Searching sake as a word",
       );
       wrapper.unmount();
     });
@@ -457,7 +457,7 @@ describe("DictionaryView", () => {
         { term: "日本", reading: "" },
       ]);
       expect(hint(wrapper)).toContain(
-        "No readings 日本: searching it as a word",
+        "Nothing by reading. Searching 日本 as a word",
       );
       wrapper.unmount();
     });

@@ -73,12 +73,12 @@
         <!-- searched the other way, as nothing matched as typed -->
         <template v-else-if="otherWayHint">
           <template v-if="otherWayHint.as === 'reading'">
-            No words <code>{{ otherWayHint.text }}</code
-            >: searching it by reading
+            Nothing as a word. Searching
+            <code>{{ otherWayHint.text }}</code> by reading
           </template>
           <template v-else>
-            No readings <code>{{ otherWayHint.text }}</code
-            >: searching it as a word
+            Nothing by reading. Searching
+            <code>{{ otherWayHint.text }}</code> as a word
           </template>
           <template v-if="qState === 'exact'"> (exact)</template>
           <button
