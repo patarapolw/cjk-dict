@@ -3,7 +3,8 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryHistory, createRouter } from "vue-router";
 
-import type { IHanChar } from "../db/search";
+import type { IHanChar, IKanjiEntry } from "../db/search";
+import { type IDictInfo, excludedCharDicts } from "../util/dicts";
 import { lang } from "../util/settings";
 import { touchScreen } from "../util/tooltip";
 import CharacterView from "./CharacterView.vue";
@@ -51,6 +52,41 @@ const HAN: Record<string, IHanChar> = {
   },
 };
 
+/** an entry of 道 in a kanji dictionary of `lang` */
+const daoEntry = (dict_path: string, lang: string | null): IKanjiEntry => ({
+  dict_id: 1,
+  dict_path,
+  lang,
+  character: "道",
+  onyomi: "",
+  kunyomi: "",
+  tags: "",
+  meanings: [`${dict_path} meaning`],
+  stats: [],
+  tag_meta: {},
+});
+
+HAN["道"] = {
+  ch: "道",
+  ids: [],
+  components: [],
+  all_components: [],
+  hangul: ["도"],
+  uses: 10,
+  entries: [daoEntry("KANJIDIC", null), daoEntry("CC-CEDICT.Hanzi", "zh")],
+};
+
+/** what the `dicts` command returns */
+let dicts: Partial<IDictInfo>[] = [];
+
+const kanjiDict = (name: string, lang: string | null) => ({
+  name,
+  title: name,
+  lang,
+  term_count: 0,
+  char_count: 10,
+});
+
 /** the characters made directly of 木: more than "Used in" shows (30), and than a page
  * of `*木` (20) */
 const MADE_OF_MU = [
@@ -64,6 +100,7 @@ let calls: { cmd: string; args: Record<string, unknown> }[] = [];
 
 beforeEach(() => {
   calls = [];
+  dicts = [];
   mockIPC((cmd, args) => {
     const a = args as Record<string, unknown>;
     calls.push({ cmd, args: a });
@@ -96,12 +133,14 @@ beforeEach(() => {
       return page([]);
     }
     if (cmd === "search") return { items: [], next: null };
+    if (cmd === "dicts") return dicts;
     throw new Error(`unexpected command: ${cmd}`);
   });
 });
 
 afterEach(() => {
   lang.value = "";
+  excludedCharDicts.value = [];
   touchScreen.value = false;
 });
 
@@ -311,5 +350,78 @@ describe("CharacterView", () => {
       text: "林",
     });
     wrapper.unmount();
+  });
+
+  describe("kanji dictionaries", () => {
+    const meanings = (
+      wrapper: Awaited<ReturnType<typeof mountView>>["wrapper"],
+    ) =>
+      wrapper.findAll('[data-char="道"] .meanings li').map((li) => li.text());
+
+    it("shows those of the search language and of none, as Words does", async () => {
+      dicts = [kanjiDict("KANJIDIC", null), kanjiDict("CC-CEDICT.Hanzi", "zh")];
+      const { wrapper } = await mountView("/kanji?q=道");
+      await loaded(wrapper);
+      expect(meanings(wrapper)).toEqual([
+        "KANJIDIC meaning",
+        "CC-CEDICT.Hanzi meaning",
+      ]);
+      expect(
+        wrapper.findAll(".dict-filter-list span").map((s) => s.text()),
+      ).toEqual(["KANJIDIC", "CC-CEDICT.Hanzi"]);
+
+      // Japanese: CC-CEDICT.Hanzi is Chinese; KANJIDIC, of no one language, stays
+      lang.value = "ja-JP";
+      await flushPromises();
+      expect(meanings(wrapper)).toEqual(["KANJIDIC meaning"]);
+      // one dictionary: nothing to choose
+      expect(wrapper.find(".dict-filter").exists()).toBe(false);
+
+      // Chinese: its own first
+      lang.value = "zh";
+      await flushPromises();
+      expect(meanings(wrapper)).toEqual([
+        "CC-CEDICT.Hanzi meaning",
+        "KANJIDIC meaning",
+      ]);
+      wrapper.unmount();
+    });
+
+    it("leaves out the dictionaries unticked, keeps one ticked, and remembers them", async () => {
+      dicts = [kanjiDict("KANJIDIC", null), kanjiDict("CC-CEDICT.Hanzi", "zh")];
+      const { wrapper } = await mountView("/kanji?q=道");
+      await loaded(wrapper);
+      const boxes = wrapper.findAll(".dict-filter-list input");
+      await boxes[0].setValue(false);
+      expect(meanings(wrapper)).toEqual(["CC-CEDICT.Hanzi meaning"]);
+      expect(wrapper.get(".dict-filter-count").text()).toBe("(1 of 2)");
+      // the last one ticked can't be unticked
+      expect(boxes[1].attributes("disabled")).toBeDefined();
+      expect(
+        JSON.parse(localStorage.getItem("cjk-dict.excludedCharDicts")!),
+      ).toEqual(["KANJIDIC"]);
+
+      await wrapper.get(".dict-filter .link-button").trigger("click");
+      expect(excludedCharDicts.value).toEqual([]);
+      expect(meanings(wrapper)).toHaveLength(2);
+      wrapper.unmount();
+    });
+
+    it("warns when the search language's are all left out", async () => {
+      dicts = [kanjiDict("KANJIDIC", null), kanjiDict("CC-CEDICT.Hanzi", "zh")];
+      excludedCharDicts.value = ["KANJIDIC"];
+      lang.value = "ja-JP";
+      const { wrapper } = await mountView("/kanji?q=道");
+      await loaded(wrapper);
+      expect(meanings(wrapper)).toEqual([]);
+      expect(wrapper.get(".dict-filter-warning").text()).toContain(
+        "see its entries",
+      );
+      // listed even alone, so that it can be ticked again
+      await wrapper.get(".dict-filter-list input").setValue(true);
+      expect(meanings(wrapper)).toEqual(["KANJIDIC meaning"]);
+      expect(wrapper.find(".dict-filter-warning").exists()).toBe(false);
+      wrapper.unmount();
+    });
   });
 });

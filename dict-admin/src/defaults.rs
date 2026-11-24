@@ -69,13 +69,23 @@ const GITHUB: &[(&str, &[GhSource])] = &[
     ),
     (
         "MarvNC/cc-cedict-yomitan",
-        &[GhSource {
-            name: "CC-CEDICT",
-            pattern: r"^CC-CEDICT\.zip$",
-            // Mandarin, traditional and simplified alike
-            lang: Some("zh"),
-            target_lang: None,
-        }],
+        &[
+            GhSource {
+                name: "CC-CEDICT",
+                pattern: r"^CC-CEDICT\.zip$",
+                // Mandarin, traditional and simplified alike
+                lang: Some("zh"),
+                target_lang: None,
+            },
+            GhSource {
+                // the Hanzi edition: a kanji dictionary of single characters (pinyin, English
+                // meanings), for the Characters view. Its index.json names no source language
+                name: "CC-CEDICT.Hanzi",
+                pattern: r"^CC-CEDICT\.Hanzi\.zip$",
+                lang: Some("zh"),
+                target_lang: None,
+            },
+        ],
     ),
     (
         "Lyroxide/yomitan-ko-dic",
@@ -267,6 +277,7 @@ mod tests {
                 "ko.Wikipedia.2026-11-01.json",
             ),
             ("CC-CEDICT", "CC-CEDICT.zip", "CC-CEDICT.Hanzi.zip"),
+            ("CC-CEDICT.Hanzi", "CC-CEDICT.Hanzi.zip", "CC-CEDICT.zip"),
             (
                 "KANJIDIC",
                 "kanjidic2-en-3.6.2+20261116213322.json.zip",
@@ -292,6 +303,7 @@ mod tests {
         assert_eq!(langs.len(), names().len());
         assert!(langs.contains(&("Pixiv", None, Some("ja"))));
         assert!(langs.contains(&("CC-CEDICT", Some("zh"), None)));
+        assert!(langs.contains(&("CC-CEDICT.Hanzi", Some("zh"), None)));
         let r = resolve(&["wty-zh-en".to_string()]).unwrap();
         assert_eq!(r.len(), 1);
         assert_eq!(r[0].lang, Some("zh"));
@@ -300,6 +312,6 @@ mod tests {
         let r = resolve(&["Kanjium".to_string()]).unwrap();
         assert_eq!(r[0].lang, Some("ja-JP"));
         assert!(r[0].url.ends_with("/accents.txt"));
-        assert_eq!(names().len(), 11);
+        assert_eq!(names().len(), 12);
     }
 }

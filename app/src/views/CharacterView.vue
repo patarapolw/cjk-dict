@@ -45,6 +45,14 @@
           Long-press a button or option to see what it does.
         </span>
       </p>
+      <nav>
+        <DictFilter
+          :dicts="shownDicts"
+          v-model:excluded="excludedCharDicts"
+          all-label="Show all"
+          purpose="see its entries"
+        />
+      </nav>
     </header>
 
     <div class="scroller" ref="scroller">
@@ -193,11 +201,7 @@
           </button>
         </div>
 
-        <article
-          v-for="(e, i) in sortByLang(c.entries, lang)"
-          :key="i"
-          class="kanji-entry"
-        >
+        <article v-for="(e, i) in shownEntries(c)" :key="i" class="kanji-entry">
           <header>
             <span
               class="tag"
@@ -355,6 +359,7 @@ import {
 } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
+import DictFilter from "../components/DictFilter.vue";
 import Term from "../components/yomitan/Term.vue";
 import { IHanChar, IHanList, IKanjiEntry, ITerm, searchDB } from "../db/search";
 import {
@@ -367,6 +372,13 @@ import {
   sortByLang,
   sortIds,
 } from "../util/han";
+import {
+  charDicts,
+  dictList,
+  excludedCharDicts,
+  isOfLang,
+  loadDicts,
+} from "../util/dicts";
 import { glossLang } from "../util/lang";
 import { dictsVersion, toBeLoaded } from "../util/loading";
 import { scrollToStart } from "../util/scroll";
@@ -397,6 +409,25 @@ const superNext = ref<number | null>(null);
 const words = ref<Record<string, ITerm[]>>({});
 
 const tokenizerPending = computed(() => toBeLoaded.value.some((d) => !d.dict));
+
+/** the kanji dictionaries of the search language, to choose from */
+const shownDicts = computed(() => charDicts(dictList.value, lang.value));
+
+/**
+ * A character's kanji dictionary entries to show: those of the dictionaries chosen, and
+ * as in Words, of the search language or of none (KANJIDIC); the search language's first
+ */
+const shownEntries = (c: IHanChar) =>
+  sortByLang(
+    c.entries.filter(
+      (e) =>
+        isOfLang(e.lang, lang.value) &&
+        !excludedCharDicts.value.includes(e.dict_path),
+    ),
+    lang.value,
+  );
+
+watch(dictsVersion, () => loadDicts());
 
 const elSearchInput = useTemplateRef("searchInput");
 const elScroller = useTemplateRef("scroller");
@@ -654,6 +685,7 @@ const sortedStats = (e: IKanjiEntry) =>
 let removeRouterListener: (() => void) | undefined;
 
 onMounted(() => {
+  loadDicts();
   q.value = String(route.query.q ?? "");
   removeRouterListener = router.afterEach((to) => {
     if (to.path === "/kanji") q.value = String(to.query.q ?? "");
@@ -711,6 +743,13 @@ onBeforeUnmount(() => {
   margin: 0.25rem 0;
   font-size: 0.8125rem;
   color: var(--app-text-muted);
+}
+
+/* options wrap onto more lines in a narrow window, as in Words */
+nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25em 1em;
 }
 
 input:focus-visible,
