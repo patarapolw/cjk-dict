@@ -3,6 +3,8 @@
  * command returns them from the CJKVI IDS database. Mirrors yomitan-parser's `ids` module.
  */
 
+import type { IHanVariant, VariantKind } from "../db/search";
+
 /** CJK ideographs, radicals and strokes, including extensions and compatibility ideographs */
 const HAN = /[⺀-⿟々〇㇀-㇯㐀-䶿一-鿿豈-﫿\u{20000}-\u{323AF}]/u;
 
@@ -114,6 +116,46 @@ export function sortByLang<T extends { lang: string | null }>(
   const rank = (e: T) => (e.lang?.split("-")[0] === short ? 0 : 1);
   return [...entries].sort((a, b) => rank(a) - rank(b));
 }
+
+/** How a variant relates to its character: a short label, and what it means */
+export const VARIANT_KINDS: Record<
+  VariantKind,
+  { label: string; title: string }
+> = {
+  traditional: { label: "traditional", title: "traditional Chinese form" },
+  simplified: { label: "simplified", title: "simplified Chinese form" },
+  kyujitai: { label: "kyūjitai", title: "old Japanese form (kyūjitai)" },
+  shinjitai: { label: "shinjitai", title: "new Japanese form (shinjitai)" },
+  semantic: {
+    label: "semantic",
+    title: "same meaning, though not always interchangeable",
+  },
+  other: {
+    label: "other",
+    title: "same character drawn differently, or same meaning in some senses",
+  },
+};
+
+/** loose kinds, named only when a variant is nothing more definite */
+const LOOSE_KINDS: VariantKind[] = ["semantic", "other"];
+
+/** The kinds to name of a variant: 萬 is 万's traditional form and kyūjitai, not "semantic" */
+export function variantKinds(kinds: VariantKind[]): VariantKind[] {
+  const definite = kinds.filter((k) => !LOOSE_KINDS.includes(k));
+  return definite.length ? definite : kinds;
+}
+
+/** e.g. `traditional, kyūjitai` */
+export const variantLabel = (kinds: VariantKind[]) =>
+  variantKinds(kinds)
+    .map((k) => VARIANT_KINDS[k].label)
+    .join(", ");
+
+/** e.g. `學: traditional Chinese form; old Japanese form (kyūjitai)` */
+export const variantTitle = (v: IHanVariant) =>
+  `${v.ch}: ${variantKinds(v.kinds)
+    .map((k) => VARIANT_KINDS[k].title)
+    .join("; ")}`;
 
 /** KANJIDIC stats that are readings to search by, and their language */
 export const READING_STAT_LANGS: Record<string, string> = {

@@ -10,4 +10,5 @@ pub mod pinyin;
 #[cfg(feature = "search")]
 pub mod search;
 pub mod tokenize;
+pub mod unihan;
 pub mod util;

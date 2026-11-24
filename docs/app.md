@@ -66,7 +66,7 @@ How the app gets the library and shows entries. The [README](../README.md#app) h
   - for a default dictionary, its source, its Yomitan conversion and its license, from [`app/src/util/credits.ts`](../app/src/util/credits.ts), and the credit it asks for in its own words, e.g. Kanjium's and KANJIDIC's;
   - its `index.json`'s `author`, and its `attribution` where that says more than the default's credit;
   - for any other dictionary, its `index.json`'s `url` as its source;
-- the other data: lindera's tokenizer dictionaries, the HanaMin font, the CJKVI IDS database, and the Hangul reading tables `search.db` is built with.
+- the other data: lindera's tokenizer dictionaries, the HanaMin font, the CJKVI IDS database, Unihan's variants, and the Hangul reading tables `search.db` is built with.
 
 Notes:
 

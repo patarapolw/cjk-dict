@@ -113,7 +113,24 @@ export interface IHanChar {
   hangul: string[];
   /** terms with the character */
   uses: number;
+  /** its variant forms, from Unihan: 学's 學 (traditional, kyujitai) */
+  variants: IHanVariant[];
   entries: IKanjiEntry[];
+}
+
+/** How a variant relates to its character, in this order (yomitan-parser's `VariantKind`) */
+export type VariantKind =
+  | "traditional"
+  | "simplified"
+  | "kyujitai"
+  | "shinjitai"
+  | "semantic"
+  | "other";
+
+export interface IHanVariant {
+  ch: string;
+  /** every way it relates to the character */
+  kinds: VariantKind[];
 }
 
 export interface IHanList {

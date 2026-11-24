@@ -201,6 +201,17 @@ export const OTHER_CREDITS: (ICredit & { what: string })[] = [
     },
   },
   {
+    what: "Variants of characters (学, 學)",
+    source: {
+      name: "Unihan database",
+      url: "https://www.unicode.org/reports/tr38/",
+    },
+    license: {
+      name: "Unicode License v3",
+      url: "https://www.unicode.org/license.txt",
+    },
+  },
+  {
     what: "Hangul readings of Hanja words",
     source: {
       name: "hanja_hangul's tables, from the National Institute of Korean Language's Standard Korean Dictionary and Urimalsaem",
