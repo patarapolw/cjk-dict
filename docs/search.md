@@ -69,6 +69,8 @@ Without the term's index to narrow it, a search starting with a wildcard walks t
 
 The Characters view (`#/kanji?q=<characters>`) shows, for each Han character:
 
+- **Variants**, from Unihan, each linking to its own page, with how it relates: 学 lists 學 (traditional, kyūjitai); 広 lists 廣 (kyūjitai);
+  - traditional, simplified, kyūjitai or shinjitai; "semantic" (the same meaning, not always interchangeable) and "other" only when a variant is none of those;
 - how it breaks down: each IDS, by region, the one for the search language first;
 - every component, all the way down; components link to their own page;
 - **Used in**: up to 30 characters made directly of it (one level up), the most used first: 口 lists 可, 呆, ... but not 河, made of 可;
@@ -78,6 +80,7 @@ The Characters view (`#/kanji?q=<characters>`) shows, for each Han character:
 - its kanji dictionary entries: readings, meanings, and stats with the dictionary's own notes;
   - of the kanji dictionaries [chosen](#choosing-dictionaries), and only those of the search language and those that don't say theirs: KANJIDIC (Japanese, Chinese and Korean readings) in every language, CC-CEDICT.Hanzi (Chinese) with Chinese or all, Hanja (Korean) with Korean or all;
   - the search language's first;
+  - with none shown, its variants' entries, each marked with the variant and how it relates, e.g. 钟 with Japanese shows 鍾's and 鐘's KANJIDIC entries; their readings search the words with the variant;
 - Hangul readings;
 - its single-character word entries.
 

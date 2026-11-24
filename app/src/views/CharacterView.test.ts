@@ -17,6 +17,7 @@ const HAN: Record<string, IHanChar> = {
     all_components: ["木"],
     hangul: ["림"],
     uses: 120,
+    variants: [],
     entries: [
       {
         dict_id: 1,
@@ -48,6 +49,7 @@ const HAN: Record<string, IHanChar> = {
     all_components: [],
     hangul: ["목"],
     uses: 300,
+    variants: [],
     entries: [],
   },
 };
@@ -73,7 +75,40 @@ HAN["道"] = {
   all_components: [],
   hangul: ["도"],
   uses: 10,
+  variants: [],
   entries: [daoEntry("KANJIDIC", null), daoEntry("CC-CEDICT.Hanzi", "zh")],
+};
+
+/** 学 has no entry of its own, its traditional form 學 has */
+HAN["学"] = {
+  ch: "学",
+  ids: [],
+  components: [],
+  all_components: [],
+  hangul: [],
+  uses: 50,
+  variants: [
+    { ch: "學", kinds: ["traditional", "kyujitai"] },
+    { ch: "斈", kinds: ["semantic"] },
+  ],
+  entries: [],
+};
+HAN["學"] = {
+  ch: "學",
+  ids: [],
+  components: [],
+  all_components: [],
+  hangul: ["학"],
+  uses: 40,
+  variants: [{ ch: "学", kinds: ["simplified", "shinjitai", "semantic"] }],
+  entries: [
+    {
+      ...daoEntry("KANJIDIC", null),
+      character: "學",
+      onyomi: "ガク",
+      meanings: ["learning"],
+    },
+  ],
 };
 
 /** what the `dicts` command returns */
@@ -114,6 +149,7 @@ beforeEach(() => {
             all_components: [],
             hangul: [],
             uses: 0,
+            variants: [],
             entries: [],
           },
       );
@@ -244,6 +280,58 @@ describe("CharacterView", () => {
     expect(wrapper.find(".containing").exists()).toBe(false);
     // nothing but what is shown
     expect(wrapper.get(".search-hint").text()).toBe("Character 林");
+    wrapper.unmount();
+  });
+
+  it("lists a character's variants, each looked up when clicked", async () => {
+    const { wrapper, router } = await mountView("/kanji?q=學");
+    await loaded(wrapper);
+
+    const card = wrapper.get('[data-char="學"]');
+    // the loose kind only when there's nothing more definite
+    expect(
+      card
+        .findAll(".variant-list li")
+        .map((li) => [
+          li.get(".component").text(),
+          li.get(".variant-kind").text(),
+        ]),
+    ).toEqual([["学", "simplified, shinjitai"]]);
+    // it has its own entry: its variants' aren't looked up
+    expect(card.find(".via-note").exists()).toBe(false);
+    expect(
+      calls.filter((c) => c.cmd === "han_chars").map((c) => c.args.text),
+    ).toEqual(["學"]);
+
+    await card.get(".variant-list .component").trigger("click");
+    await flushPromises();
+    expect(router.currentRoute.value.query.q).toBe("学");
+    wrapper.unmount();
+  });
+
+  it("shows the variants' entries of a character with none, marked", async () => {
+    const { wrapper, router } = await mountView("/kanji?q=学");
+    await loaded(wrapper);
+
+    await vi.waitFor(() =>
+      expect(
+        calls.filter((c) => c.cmd === "han_chars").map((c) => c.args.text),
+      ).toEqual(["学", "學斈"]),
+    );
+    await flushPromises();
+    const card = wrapper.get('[data-char="学"]');
+    expect(card.get(".via-note").text()).toBe(
+      "No entry for 学; its variants':",
+    );
+    const entry = card.get(".kanji-entry");
+    expect(entry.attributes("data-via")).toBe("學");
+    expect(entry.get(".via-variant").text()).toBe("學 traditional, kyūjitai");
+    expect(entry.get(".meanings").text()).toBe("learning");
+
+    // its readings are 學's
+    await entry.get("button.reading").trigger("click");
+    await flushPromises();
+    expect(router.currentRoute.value.query.q).toBe("*<學>{ガク}");
     wrapper.unmount();
   });
 

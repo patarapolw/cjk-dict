@@ -118,11 +118,28 @@ It fills `search.db`'s character tables from the [CJKVI IDS database](https://gi
   - from the kanji dictionaries: on, kun and name readings in kana, KANJIDIC's pinyin and Korean, CC-CEDICT.Hanzi's pinyin;
   - and its Hangul readings above.
 
+It fills `han_variant` from [Unihan](https://www.unicode.org/reports/tr38/)'s `Unihan_Variants.txt`: each character's variant forms, for the Characters view.
+
+| Kind          | Unihan field                               | Example              |
+| ------------- | ------------------------------------------ | -------------------- |
+| `traditional` | `kTraditionalVariant`                      | 学 → 學, 钟 → 鍾, 鐘 |
+| `simplified`  | `kSimplifiedVariant`                       | 學 → 学              |
+| `kyujitai`    | `kJapaneseOldVariant`                      | 広 → 廣              |
+| `shinjitai`   | `kJapaneseNewVariant`                      | 廣 → 広              |
+| `semantic`    | `kSemanticVariant`                         | 學 → 斈              |
+| `other`       | `kSpecializedSemanticVariant`, `kZVariant` | 繪 → 繢              |
+
+- A pair related in several ways has a row for each: 學 is 学's `traditional` and `kyujitai`.
+- Left out: a character as its own variant (万's traditional forms are 万 and 萬), and `kSpoofingVariant` (characters that only look alike).
+- Semantic variants are loose: many pairs aren't interchangeable in a given language.
+
 Notes:
 
 - Japanese words' character readings need a kanji dictionary with Japanese readings. `build` warns when there is none; KANJIDIC is one of the defaults.
 - `ids.txt` is downloaded to `tmp/cjkvi-ids` (`--ids-dir`, `CJK_DICT_IDS_DIR`); delete it to get the latest.
-- The tables are refilled only when `ids.txt`, the dictionaries or how `dict-admin` fills them change, so an unchanged library keeps the same `search.db`.
+- `Unihan_Variants.txt` is taken from `Unihan.zip` (8 MB, the latest Unicode release on unicode.org) into `tmp/unihan` (`--unihan-dir`, `CJK_DICT_UNIHAN_DIR`); the zip isn't kept. Delete the file to get the latest.
+- The tables are refilled only when `ids.txt`, `Unihan_Variants.txt`, the dictionaries or how `dict-admin` fills them change, so an unchanged library keeps the same `search.db`.
+  - `han_variant` follows `Unihan_Variants.txt` only, not the dictionaries.
 
 ### Korean Hanja readings
 

@@ -5,7 +5,8 @@
 //! stay in the zips, which are read on demand.
 //!
 //! - [`build`] (dict-admin): zips -> `search.db`
-//! - [`build_chars`] (dict-admin): character decomposition ([`crate::ids`]) -> `search.db`
+//! - [`build_chars`] (dict-admin): character decomposition ([`crate::ids`]) and variants
+//!   ([`crate::unihan`]) -> `search.db`
 //! - [`SearchDb`] (app): query `search.db`, then read entries / media from the zips
 
 use std::{
@@ -28,6 +29,7 @@ use crate::{
     parser::{BankKind, YomitanIndex, YomitanZip},
     pinyin::{expand_pinyin, normalize_pinyin},
     tokenize::{Lang, TokenizerMapper},
+    unihan::{self, VariantKind},
     util::{NonEmpty, OptionNonEmpty, fold_kana, normalize_term, normalize_text},
 };
 
@@ -222,6 +224,22 @@ CREATE TABLE IF NOT EXISTS han_reading (
 /// `meta.han_reading`: how `han_reading` was filled. A build fills it again when this changes.
 const HAN_READING_VERSION: &str = "1";
 
+/// Each Han character's variant forms, from Unihan ([`crate::unihan`]): 学 → 學 (traditional,
+/// kyujitai). A pair related in several ways has a row for each. Filled by [`build_chars`].
+const HAN_VARIANT_SCHEMA: &str = r#"
+CREATE TABLE IF NOT EXISTS han_variant (
+  ch          TEXT NOT NULL,
+  variant     TEXT NOT NULL,
+  kind        TEXT NOT NULL,            -- traditional, simplified, kyujitai, shinjitai, semantic, other
+  pos         INTEGER NOT NULL DEFAULT 0, -- among the character's variants of the kind: 钟's 鍾 0, 鐘 1
+  PRIMARY KEY (ch, variant, kind)
+) WITHOUT ROWID;
+"#;
+
+/// Bumped when `han_variant` is filled differently from the same `Unihan_Variants.txt`, so
+/// that [`build_chars`] fills it again.
+const HAN_VARIANT_VERSION: &str = "variants-1";
+
 /// Facts about how search.db was built, e.g. `kana` = 1: terms and readings have katakana
 /// as hiragana ([`normalize_term`]).
 const META_SCHEMA: &str = r#"
@@ -291,6 +309,37 @@ pub fn needs_rebuild(db: &Path) -> Result<bool, YomitanError> {
     }
     let conn = Connection::open_with_flags(db, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     Ok(meta(&conn, "kana")?.is_none())
+}
+
+/// `ch`'s variants in `han_variant`, each with every way it relates to `ch`: those of the
+/// first kinds first ([`VariantKind`]'s order), then in Unihan's order
+fn han_variants(conn: &Connection, ch: &str) -> rusqlite::Result<Vec<HanVariant>> {
+    let mut rows: Vec<(VariantKind, i64, String)> = conn
+        .prepare_cached("SELECT kind, pos, variant FROM han_variant WHERE ch = ?1")?
+        .query_map([ch], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })?
+        .filter_map(|r| match r {
+            Ok((kind, pos, v)) => VariantKind::parse(&kind).map(|k| Ok((k, pos, v))),
+            Err(e) => Some(Err(e)),
+        })
+        .collect::<Result<_, _>>()?;
+    rows.sort();
+    let mut out: Vec<HanVariant> = vec![];
+    for (kind, _, v) in rows {
+        match out.iter_mut().find(|o| o.ch == v) {
+            Some(o) => o.kinds.push(kind.as_str().to_string()),
+            None => out.push(HanVariant {
+                ch: v,
+                kinds: vec![kind.as_str().to_string()],
+            }),
+        }
+    }
+    Ok(out)
 }
 
 fn has_table(conn: &Connection, name: &str) -> rusqlite::Result<bool> {
@@ -822,15 +871,23 @@ fn fingerprint(bytes: &[u8]) -> String {
 /// Fill the character tables of `db` (built by [`build`]) from `ids_txt`, the CJKVI IDS
 /// database's `ids.txt` ([`crate::ids`]): each character's decomposition, its components,
 /// its Hangul readings (with the `hangul-readings` feature), and how many terms use it, to
-/// list the common characters made of a component first.
+/// list the common characters made of a component first. `variants_txt`, Unihan's
+/// `Unihan_Variants.txt` ([`crate::unihan`]), fills `han_variant`.
 ///
-/// Does nothing, and returns `false`, when `ids.txt` is unchanged since it last filled them
-/// and `recount` is false; pass `recount` when dictionaries changed, since the counts follow
-/// the terms. Leaving search.db as it was keeps its checksum, so the app does not download
-/// it again.
-pub fn build_chars(db: &Path, ids_txt: &Path, recount: bool) -> Result<bool, YomitanError> {
+/// Does nothing, and returns `false`, when `ids.txt` and `variants_txt` are unchanged since
+/// it last filled them and `recount` is false; pass `recount` when dictionaries changed,
+/// since the counts follow the terms. Leaving search.db as it was keeps its checksum, so the
+/// app does not download it again.
+pub fn build_chars(
+    db: &Path,
+    ids_txt: &Path,
+    variants_txt: &Path,
+    recount: bool,
+) -> Result<bool, YomitanError> {
     let text = std::fs::read_to_string(ids_txt)?;
     let fp = format!("{}+{HAN_VERSION}", fingerprint(text.as_bytes()));
+    let variants = std::fs::read_to_string(variants_txt)?;
+    let variants_fp = format!("{}+{HAN_VARIANT_VERSION}", fingerprint(variants.as_bytes()));
 
     let mut conn = Connection::open(db)?;
     conn.execute_batch(HAN_SCHEMA)?;
@@ -847,7 +904,9 @@ pub fn build_chars(db: &Path, ids_txt: &Path, recount: bool) -> Result<bool, Yom
         !recount && meta(&conn, "term_char")?.as_deref() == Some(TERM_CHAR_VERSION);
     let han_reading_current =
         !recount && meta(&conn, "han_reading")?.as_deref() == Some(HAN_READING_VERSION);
-    if han_current && term_char_current && han_reading_current {
+    // the dictionaries don't change it
+    let han_variant_current = meta(&conn, "han_variant")?.as_deref() == Some(variants_fp.as_str());
+    if han_current && term_char_current && han_reading_current && han_variant_current {
         return Ok(false);
     }
     let dir = db.parent().unwrap_or(Path::new("."));
@@ -860,6 +919,9 @@ pub fn build_chars(db: &Path, ids_txt: &Path, recount: bool) -> Result<bool, Yom
     // it takes Hangul readings from han_char
     if !han_current || !han_reading_current {
         fill_han_reading(&mut conn, dir)?;
+    }
+    if !han_variant_current {
+        fill_han_variant(&mut conn, &variants, variants_fp)?;
     }
     conn.execute_batch("ANALYZE;")?;
     Ok(true)
@@ -1085,6 +1147,34 @@ fn fill_han_reading(conn: &mut Connection, dir: &Path) -> Result<(), YomitanErro
     tx.execute(
         "INSERT OR REPLACE INTO meta (key, value) VALUES ('han_reading', ?1)",
         [HAN_READING_VERSION],
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// `han_variant` from `Unihan_Variants.txt` (`text`, fingerprinted `fp`)
+fn fill_han_variant(conn: &mut Connection, text: &str, fp: String) -> Result<(), YomitanError> {
+    conn.execute_batch(HAN_VARIANT_SCHEMA)?;
+    let mut rows: Vec<(String, String, &str, usize)> = unihan::parse_variants(text)
+        .into_iter()
+        .map(|v| (v.ch, v.variant, v.kind.as_str(), v.pos))
+        .collect();
+    // in key order: the table is written once, without page splits
+    rows.sort();
+    rows.dedup_by(|a, b| (&a.0, &a.1, a.2) == (&b.0, &b.1, b.2));
+
+    let tx = conn.transaction()?;
+    tx.execute("DELETE FROM han_variant", [])?;
+    {
+        let mut ins =
+            tx.prepare("INSERT INTO han_variant (ch, variant, kind, pos) VALUES (?1, ?2, ?3, ?4)")?;
+        for (ch, v, kind, pos) in &rows {
+            ins.execute(params![ch, v, kind, *pos as i64])?;
+        }
+    }
+    tx.execute(
+        "INSERT OR REPLACE INTO meta (key, value) VALUES ('han_variant', ?1)",
+        [fp],
     )?;
     tx.commit()?;
     Ok(())
@@ -1847,7 +1937,18 @@ pub struct HanChar {
     pub hangul: Vec<String>,
     /// terms with the character
     pub uses: i64,
+    /// its variant forms, from Unihan: 学's 學 (traditional, kyujitai)
+    pub variants: Vec<HanVariant>,
     pub entries: Vec<KanjiEntryOut>,
+}
+
+/// A variant form of a Han character, and how it relates to it
+#[derive(Debug, Serialize)]
+pub struct HanVariant {
+    pub ch: String,
+    /// as `han_variant` has them, in [`VariantKind`]'s order: traditional, simplified,
+    /// kyujitai, shinjitai, semantic, other
+    pub kinds: Vec<String>,
 }
 
 /// One kanji dictionary entry, read from the zip.
@@ -1926,6 +2027,8 @@ pub struct SearchDb {
     /// search.db has `term_pitch`
     has_pitch: bool,
     has_han: bool,
+    /// search.db has `han_variant`, filled
+    has_han_variant: bool,
     /// search.db has `han_reading`
     has_han_reading: bool,
     /// dict_id -> its tag banks, for kanji entries' tags and stats
@@ -2165,7 +2268,9 @@ impl SearchDb {
         let has_pitch = has_term_pitch(&conn)?;
         let has_han = has_table(&conn, "han_char")?;
         let has_han_reading = meta(&conn, "han_reading")?.is_some();
+        let has_han_variant = meta(&conn, "han_variant")?.is_some();
         Ok(Self {
+            has_han_variant,
             has_roman,
             kana_folded,
             has_term_char,
@@ -2752,6 +2857,9 @@ impl SearchDb {
                         c.all_components.push(comp);
                     }
                 }
+                if self.has_han_variant {
+                    c.variants = han_variants(&conn, &ch)?;
+                }
                 if self.has_kanji {
                     links = conn
                         .prepare_cached(
@@ -3279,6 +3387,14 @@ mod han_tests {
         w.finish().unwrap();
     }
 
+    /// 森's made-up simplified form is U+23855, also a semantic variant along with 林;
+    /// 林's kyujitai is U+23855
+    const VARIANTS: &str = "# test\n\
+        U+68EE\tkSemanticVariant\tU+6797<kMatthews U+23855\n\
+        U+68EE\tkSimplifiedVariant\tU+23855\n\
+        U+6797\tkJapaneseOldVariant\tU+23855\n\
+        U+6797\tkSpoofingVariant\tU+6728\n";
+
     const IDS: &str = "# test\n\
         U+6728\t木\t木\n\
         U+6797\t林\t⿰木木\n\
@@ -3326,10 +3442,12 @@ mod han_tests {
         }
         let ids_txt = dir.join("ids.txt");
         std::fs::write(&ids_txt, IDS).unwrap();
-        assert!(build_chars(&db_path, &ids_txt, false).unwrap());
+        let variants_txt = dir.join("Unihan_Variants.txt");
+        std::fs::write(&variants_txt, VARIANTS).unwrap();
+        assert!(build_chars(&db_path, &ids_txt, &variants_txt, false).unwrap());
         // unchanged: search.db is left alone
         let before = std::fs::read(&db_path).unwrap();
-        assert!(!build_chars(&db_path, &ids_txt, false).unwrap());
+        assert!(!build_chars(&db_path, &ids_txt, &variants_txt, false).unwrap());
         assert_eq!(std::fs::read(&db_path).unwrap(), before);
 
         let db = SearchDb::open(&db_path, &dir).unwrap();
@@ -3451,6 +3569,36 @@ mod han_tests {
             );
         }
 
+        // variants: those of the first kinds first, each with every way it relates
+        let variants = |db: &SearchDb, ch: &str| -> Vec<(String, Vec<String>)> {
+            db.han_chars(ch).unwrap()[0]
+                .variants
+                .iter()
+                .map(|v| (v.ch.clone(), v.kinds.clone()))
+                .collect()
+        };
+        let v = |ch: &str, kinds: &[&str]| -> (String, Vec<String>) {
+            (ch.into(), kinds.iter().map(|k| k.to_string()).collect())
+        };
+        assert_eq!(
+            variants(&db, "森"),
+            [
+                v("\u{23855}", &["simplified", "semantic"]),
+                v("林", &["semantic"])
+            ]
+        );
+        // not the spoofing variant 木
+        assert_eq!(variants(&db, "林"), [v("\u{23855}", &["kyujitai"])]);
+        assert!(variants(&db, "可").is_empty());
+        drop(db);
+
+        // a newer Unihan: filled again, though the dictionaries didn't change
+        std::fs::write(&variants_txt, "U+6797\tkZVariant\tU+2F8F9\n").unwrap();
+        assert!(build_chars(&db_path, &ids_txt, &variants_txt, false).unwrap());
+        let db = SearchDb::open(&db_path, &dir).unwrap();
+        assert!(variants(&db, "森").is_empty());
+        assert_eq!(variants(&db, "林"), [v("\u{2F8F9}", &["other"])]);
+
         drop(db);
         std::fs::remove_dir_all(dir).unwrap();
     }
@@ -3492,6 +3640,8 @@ mod han_tests {
         }
         let ids_txt = dir.join("ids.txt");
         std::fs::write(&ids_txt, IDS).unwrap();
+        let variants_txt = dir.join("Unihan_Variants.txt");
+        std::fs::write(&variants_txt, VARIANTS).unwrap();
 
         // before term_char: a search.db is searched by patterns
         let db = SearchDb::open(&db_path, &dir).unwrap();
@@ -3519,10 +3669,10 @@ mod han_tests {
         );
         drop(db);
 
-        assert!(build_chars(&db_path, &ids_txt, false).unwrap());
+        assert!(build_chars(&db_path, &ids_txt, &variants_txt, false).unwrap());
         // nothing changed: left alone
         let before = std::fs::read(&db_path).unwrap();
-        assert!(!build_chars(&db_path, &ids_txt, false).unwrap());
+        assert!(!build_chars(&db_path, &ids_txt, &variants_txt, false).unwrap());
         assert_eq!(std::fs::read(&db_path).unwrap(), before);
 
         assert!(!missing_kanji_readings(&db_path).unwrap());
@@ -3870,9 +4020,11 @@ mod kanji_reading_warning_tests {
         build(&db_path, &[], &tok, |_, _, _| {}).await.unwrap();
         let ids_txt = dir.join("ids.txt");
         std::fs::write(&ids_txt, "U+6797\t林\t⿰木木\n").unwrap();
+        let variants_txt = dir.join("Unihan_Variants.txt");
+        std::fs::write(&variants_txt, "").unwrap();
 
         // no Japanese terms: nothing to warn about
-        build_chars(&db_path, &ids_txt, true).unwrap();
+        build_chars(&db_path, &ids_txt, &variants_txt, true).unwrap();
         assert!(!missing_kanji_readings(&db_path).unwrap());
 
         Connection::open(&db_path)
@@ -3882,7 +4034,7 @@ mod kanji_reading_warning_tests {
                 [],
             )
             .unwrap();
-        build_chars(&db_path, &ids_txt, true).unwrap();
+        build_chars(&db_path, &ids_txt, &variants_txt, true).unwrap();
         assert!(missing_kanji_readings(&db_path).unwrap());
         std::fs::remove_dir_all(dir).unwrap();
     }

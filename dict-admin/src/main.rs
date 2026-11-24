@@ -14,6 +14,7 @@ mod kanjium;
 mod libhangul;
 mod library;
 mod lindera;
+mod unihan;
 
 use std::{
     collections::BTreeMap,
@@ -124,6 +125,11 @@ enum Cmd {
         /// missing; delete it to update)
         #[arg(long, env = "CJK_DICT_IDS_DIR", default_value = "tmp/cjkvi-ids")]
         ids_dir: PathBuf,
+
+        /// Character variants: Unihan's Unihan_Variants.txt (taken from Unihan.zip if
+        /// missing; delete it to update)
+        #[arg(long, env = "CJK_DICT_UNIHAN_DIR", default_value = "tmp/unihan")]
+        unihan_dir: PathBuf,
     },
 
     /// Rebuild search.db and manifest.json from scratch
@@ -136,6 +142,11 @@ enum Cmd {
         /// missing; delete it to update)
         #[arg(long, env = "CJK_DICT_IDS_DIR", default_value = "tmp/cjkvi-ids")]
         ids_dir: PathBuf,
+
+        /// Character variants: Unihan's Unihan_Variants.txt (taken from Unihan.zip if
+        /// missing; delete it to update)
+        #[arg(long, env = "CJK_DICT_UNIHAN_DIR", default_value = "tmp/unihan")]
+        unihan_dir: PathBuf,
     },
 
     /// Mirror the library to R2 with rclone (zips first, then search.db.zst, then
@@ -271,11 +282,13 @@ async fn main() -> Result<()> {
         Cmd::Build {
             lindera_dir,
             ids_dir,
-        } => build(&lib, &lindera_dir, &ids_dir, false).await?,
+            unihan_dir,
+        } => build(&lib, &lindera_dir, &ids_dir, &unihan_dir, false).await?,
         Cmd::Rebuild {
             lindera_dir,
             ids_dir,
-        } => build(&lib, &lindera_dir, &ids_dir, true).await?,
+            unihan_dir,
+        } => build(&lib, &lindera_dir, &ids_dir, &unihan_dir, true).await?,
         Cmd::Upload { remote, dry_run } => upload(&lib, &remote, dry_run)?,
     }
 
@@ -500,7 +513,13 @@ fn rebank(zip: &Path, name: &str) -> Result<()> {
     }
 }
 
-async fn build(lib: &Library, lindera_dir: &Path, ids_dir: &Path, rebuild: bool) -> Result<()> {
+async fn build(
+    lib: &Library,
+    lindera_dir: &Path,
+    ids_dir: &Path,
+    unihan_dir: &Path,
+    rebuild: bool,
+) -> Result<()> {
     let dicts = lib.dicts()?;
     let db = lib.dir.join(SEARCH_DB);
     // built before katakana and hiragana were matched alike: its terms can't be updated
@@ -616,12 +635,14 @@ async fn build(lib: &Library, lindera_dir: &Path, ids_dir: &Path, rebuild: bool)
         t.elapsed().as_secs_f64()
     );
 
-    // character decomposition; how often characters are used follows the dictionaries
+    // character decomposition and variants; how often characters are used follows the
+    // dictionaries
     let ids_txt = ids::ensure(ids_dir)?;
+    let variants_txt = unihan::ensure(unihan_dir)?;
     let t = Instant::now();
     let dicts_changed =
         rebuild_from_scratch || !changed_sources.is_empty() || !removed_names.is_empty();
-    if search::build_chars(&db, &ids_txt, dicts_changed)? {
+    if search::build_chars(&db, &ids_txt, &variants_txt, dicts_changed)? {
         eprintln!("character tables in {:.1}s", t.elapsed().as_secs_f64());
     }
     if search::missing_kanji_readings(&db)? {

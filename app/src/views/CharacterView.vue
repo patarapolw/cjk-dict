@@ -135,6 +135,24 @@
           </div>
         </header>
 
+        <div v-if="c.variants.length" class="variants">
+          <h3>Variants</h3>
+          <ul class="variant-list">
+            <li v-for="v in c.variants" :key="v.ch">
+              <button
+                type="button"
+                class="component"
+                :lang="lang || undefined"
+                v-tooltip="variantTitle(v)"
+                @click="go(v.ch)"
+              >
+                {{ v.ch }}
+              </button>
+              <span class="variant-kind">{{ variantLabel(v.kinds) }}</span>
+            </li>
+          </ul>
+        </div>
+
         <div v-if="c.ids.length" class="breakdown">
           <h3>Components</h3>
           <ul class="ids-list">
@@ -222,8 +240,26 @@
           </button>
         </div>
 
-        <article v-for="(e, i) in shownEntries(c)" :key="i" class="kanji-entry">
+        <p v-if="cardEntries(c).some((it) => it.via)" class="muted via-note">
+          No entry for {{ c.ch }}; its variants':
+        </p>
+        <article
+          v-for="({ e, via, of: ech }, i) in cardEntries(c)"
+          :key="i"
+          class="kanji-entry"
+          :data-via="via?.ch"
+        >
           <header>
+            <button
+              v-if="via"
+              type="button"
+              class="via-variant"
+              v-tooltip="`Look up ${variantTitle(via)}`"
+              @click="go(via.ch)"
+            >
+              <span :lang="lang || undefined">{{ via.ch }}</span>
+              {{ variantLabel(via.kinds) }}
+            </button>
             <span
               class="tag"
               data-category="dictionary"
@@ -247,8 +283,8 @@
                   <button
                     type="button"
                     class="link-button reading"
-                    v-tooltip="readingTitle(c.ch, r)"
-                    @click="toReading(c.ch, r)"
+                    v-tooltip="readingTitle(ech, r)"
+                    @click="toReading(ech, r)"
                   >
                     {{ r }}
                   </button>
@@ -263,8 +299,8 @@
                   <button
                     type="button"
                     class="link-button reading"
-                    v-tooltip="readingTitle(c.ch, r)"
-                    @click="toReading(c.ch, r)"
+                    v-tooltip="readingTitle(ech, r)"
+                    @click="toReading(ech, r)"
                   >
                     {{ r }}
                   </button>
@@ -281,8 +317,8 @@
                     <button
                       type="button"
                       class="link-button reading"
-                      v-tooltip="readingTitle(c.ch, r)"
-                      @click="toReading(c.ch, r, READING_STAT_LANGS[name])"
+                      v-tooltip="readingTitle(ech, r)"
+                      @click="toReading(ech, r, READING_STAT_LANGS[name])"
                     >
                       {{ r }}
                     </button>
@@ -385,6 +421,7 @@ import Term from "../components/yomitan/Term.vue";
 import {
   IHanChar,
   IHanList,
+  IHanVariant,
   IKanjiEntry,
   ILatin,
   ITerm,
@@ -399,6 +436,8 @@ import {
   readingQuery,
   sortByLang,
   sortIds,
+  variantLabel,
+  variantTitle,
 } from "../util/han";
 import {
   charDicts,
@@ -508,6 +547,52 @@ const shownEntries = (c: IHanChar) =>
     lang.value,
   );
 
+/** the characters [`han_chars`] returned for the variants of characters with no entry */
+const variantChars = ref<Record<string, IHanChar>>({});
+/** variants asked for, so that one that failed isn't asked for again */
+let variantsAsked = new Set<string>();
+
+/**
+ * A card's kanji dictionary entries: its own shown entries, or with none, its variants'
+ * (`via`); `of` is the character an entry is of, to search the words with its readings
+ */
+function cardEntries(c: IHanChar) {
+  type Item = { e: IKanjiEntry; of: string; via?: IHanVariant };
+  const own: Item[] = shownEntries(c).map((e) => ({ e, of: c.ch }));
+  if (own.length) return own;
+  return c.variants.flatMap((via): Item[] => {
+    const v = variantChars.value[via.ch];
+    return v ? shownEntries(v).map((e) => ({ e, of: via.ch, via })) : [];
+  });
+}
+
+/** variants to look up: of the characters with no entry shown */
+const variantsToAsk = computed(() =>
+  found.value
+    .filter((c) => !shownEntries(c).length)
+    .flatMap((c) => c.variants.map((v) => v.ch))
+    .filter((ch) => !variantsAsked.has(ch) && !variantChars.value[ch]),
+);
+
+watch(variantsToAsk, async (chs) => {
+  const todo = [...new Set(chs)];
+  if (!todo.length) return;
+  todo.forEach((ch) => variantsAsked.add(ch));
+  const id = requestId;
+  try {
+    for (let i = 0; i < todo.length; i += MAX_CHARS) {
+      const cs = await searchDB.hanChars(todo.slice(i, i + MAX_CHARS).join(""));
+      if (id !== requestId) return;
+      variantChars.value = {
+        ...variantChars.value,
+        ...Object.fromEntries(cs.map((c) => [c.ch, c])),
+      };
+    }
+  } catch (e) {
+    console.error(e);
+  }
+});
+
 watch(dictsVersion, () => loadDicts());
 
 const elSearchInput = useTemplateRef("searchInput");
@@ -564,6 +649,8 @@ async function load() {
 
 function clear() {
   found.value = [];
+  variantChars.value = {};
+  variantsAsked = new Set();
   usedIn.value = {};
   superNext.value = null;
   containing.value = [];
@@ -1094,6 +1181,46 @@ h3 {
 .link-button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+.variant-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.variant-list .component {
+  font-size: 1.5rem;
+}
+
+.variant-kind {
+  margin-inline-start: 0.25rem;
+  font-size: 0.8125rem;
+  color: var(--app-text-muted);
+}
+
+.via-note {
+  margin: 0.75rem 0 0;
+  font-size: 0.875rem;
+}
+
+.via-variant {
+  margin-inline-end: 0.25rem;
+  padding: 0 0.375rem;
+  border: 1px solid var(--app-input-border);
+  border-radius: 0.25rem;
+  background: transparent;
+  color: var(--app-link);
+  font: inherit;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.via-variant:hover {
+  background: var(--app-selected-background);
 }
 
 .more-button {
