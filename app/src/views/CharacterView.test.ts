@@ -407,27 +407,20 @@ describe("CharacterView", () => {
     ]);
 
     // collapsed: merged, one row per kind: its own Hangul and Hanja's as one, guāng and
-    // guang1 as one; kun short: the first few, with their okurigana
+    // guang1 as one; kun short: the first few, as KANJIDIC writes them (ひか.る)
     await card.get(".char-toggle").trigger("click");
     expect(card.find(".hangul").exists()).toBe(false);
     expect(readingRows(card, ".card-readings")).toEqual([
       ["On", "コウ"],
-      ["Kun", "ひかる、ひからす、ひかり、…"],
+      ["Kun", "ひか.る、ひか.らす、ひかり、…"],
       ["Pinyin", "guāng"],
       ["Hangul", "광"],
       ["Korean romanization", "gwang"],
     ]);
-    // its okurigana apart, which a kun reading's link doesn't search
-    expect(
-      card
-        .findAll(".card-readings .okurigana")
-        .map((o) => o.text())
-        .slice(0, 2),
-    ).toEqual(["る", "らす"]);
-    // a short kun reading searches the words with it read so, up to the okurigana
+    // a kun reading searches the words with it read so, up to the okurigana
     await card
       .findAll(".card-readings button.reading")
-      .find((b) => b.text() === "ひかる")!
+      .find((b) => b.text() === "ひか.る")!
       .trigger("click");
     await flushPromises();
     expect(router.currentRoute.value.query.q).toBe("*<光>{ひか}");
@@ -496,7 +489,7 @@ describe("CharacterView", () => {
     lang.value = "ja-JP";
     expect(await collapsed()).toEqual([
       ["On", "コウ"],
-      ["Kun", "ひかる、ひからす、ひかり、…"],
+      ["Kun", "ひか.る、ひか.らす、ひかり、…"],
     ]);
     lang.value = "zh";
     // one kind alone: no label

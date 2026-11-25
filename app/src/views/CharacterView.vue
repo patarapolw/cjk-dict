@@ -154,9 +154,9 @@
                       @click="toReading(it.of, it.r, it.searchIn)"
                     >
                       {{ it.r
-                      }}<span v-if="it.okurigana" class="okurigana">{{
-                        it.okurigana
-                      }}</span>
+                      }}<template v-if="it.okurigana"
+                        >.{{ it.okurigana }}</template
+                      >
                     </button>
                     <template v-else>{{ it.r }}</template>
                   </template>
@@ -418,16 +418,21 @@
               it.uses.toLocaleString()
             }}</span>
           </button>
-          <!-- the next page, as "Used in" says how many more -->
-          <button
+          <!-- the next page, as "Used in" says how many more; in a line as high as a
+               character's, so that it sits on the characters' baseline -->
+          <span
             v-if="containingNext !== null"
-            type="button"
-            class="link-button used-in-more grid-more"
-            :disabled="loadingMore"
-            @click="loadContaining()"
+            class="char-glyph grid-more-line"
           >
-            {{ (containingTotal - containingNext).toLocaleString() }} more
-          </button>
+            <button
+              type="button"
+              class="link-button used-in-more grid-more"
+              :disabled="loadingMore"
+              @click="loadContaining()"
+            >
+              {{ (containingTotal - containingNext).toLocaleString() }} more
+            </button>
+          </span>
         </div>
       </section>
     </div>
@@ -958,7 +963,7 @@ type ReadingItem = {
   r: string;
   of: string;
   searchIn?: string;
-  /** after a kun reading's stem `r`, shown but not searched: る of ひか.る */
+  /** after a kun reading's stem `r` and a dot, as KANJIDIC writes it, but not searched: る of ひか.る */
   okurigana?: string;
 };
 /** a row of readings of one kind: On, Pinyin, Hangul, a dictionary's own */
@@ -1097,7 +1102,8 @@ const SHORT_KUN = 3;
 
 /**
  * Kun readings, short: the first few, each once, without `-`; the okurigana apart from
- * the stem, which is what a reading's link searches (ひか of ひか.る)
+ * the stem, which is what a reading's link searches (ひか of ひか.る). Shown as KANJIDIC
+ * writes them, with the dot: where the stem ends is the dictionary's word, not a guess.
  */
 function shortKun(row: ReadingRow): ReadingRow {
   const items: ReadingItem[] = [];
@@ -1444,7 +1450,8 @@ h3 {
   border-radius: 0.25rem;
   background: var(--app-control-background);
   font-size: 0.8125rem;
-  vertical-align: middle;
+  /* on the characters' baseline */
+  vertical-align: baseline;
   white-space: nowrap;
 }
 
@@ -1452,14 +1459,9 @@ h3 {
   background: var(--app-selected-background);
 }
 
-/* in the grid of characters, in line with them */
-.link-button.grid-more {
-  align-self: center;
-}
-
-.link-button.okurigana,
-.okurigana {
-  color: var(--app-text-muted);
+/* in the grid, past a character's padding, as the characters are */
+.grid-more-line {
+  padding: 0 0.125rem;
 }
 
 .super-more {
