@@ -20,6 +20,9 @@ How the app gets the library and shows entries. The [README](../README.md#app) h
   - Unpacking shows as "Unpacking search.db" in the downloads panel and, on Android, in the sync notification.
 - It signs its R2 requests itself, with presigned URLs.
   - Only for R2: other S3-compatible buckets are untested, and only a public one can be used, through `CJK_DICT_BASE_URL` (see the [README](../README.md#other-s3-compatible-buckets-not-tested)).
+- Without a remote (none configured, or one it can't reach), it plans from a `manifest.json` pushed with the library's files to `dicts/incoming/` (by `pnpm android:push`, see the [README](../README.md#debugging-on-android)):
+  - nothing can be downloaded then: a file that isn't on the device is named in the downloads panel, and nothing is committed;
+  - once committed, the pushed manifest is deleted. So is it when the remote's `manifest.json` is fetched: the remote's library wins.
 - On first launch, it also downloads the [lindera](https://github.com/lindera/lindera) tokenizer dictionaries in the background, used to tokenize `~` queries:
   - unidic (Japanese), ko-dic (Korean) and cc-cedict (Chinese), from [lindera's 6.2.0 release](https://github.com/lindera/lindera/releases/tag/v6.2.0);
   - \~73 MB to download, \~310 MB unpacked.

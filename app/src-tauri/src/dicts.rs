@@ -138,7 +138,8 @@ impl Remote {
             config!("CJK_DICT_R2_BUCKET"),
         ) else {
             return Err(AppError::Error(
-                "no dictionary source configured: build with CJK_DICT_R2_* (or CJK_DICT_BASE_URL)"
+                "no dictionary source configured: build with CJK_DICT_R2_* (or \
+                 CJK_DICT_BASE_URL), or push the library to the device (pnpm android:push)"
                     .into(),
             ));
         };
@@ -397,9 +398,35 @@ pub struct PlannedFile {
 
 /// Fetch the remote manifest and list the files that need downloading.
 /// Empty = up to date. Remembers the manifest until `dict_commit`.
+///
+/// Without a remote (none configured, or its manifest can't be fetched), it plans from a
+/// manifest pushed to `incoming/` with the library's files (`scripts/push-library.mjs`):
+/// then every file must be on the device already, as nothing can be downloaded.
 #[tauri::command]
 pub async fn dict_plan(app: AppHandle) -> Result<Plan, AppError> {
-    let remote = Remote::from_env()?;
+    let pushed = app.state::<DictState>().dir.join(INCOMING).join(MANIFEST);
+    let read_pushed = |e: AppError| std::fs::read_to_string(&pushed).map_err(|_| e);
+    let (remote, text) = match Remote::from_env() {
+        Ok(remote) => match fetch_manifest(&remote).await {
+            Ok(text) => {
+                // the remote's is the library now
+                let _ = std::fs::remove_file(&pushed);
+                (Some(remote), text)
+            }
+            Err(e) => (None, read_pushed(e)?),
+        },
+        Err(e) => (None, read_pushed(e)?),
+    };
+
+    // reading the library and committing is blocking work
+    tauri::async_runtime::spawn_blocking(move || {
+        plan(&app.state::<DictState>(), &text, remote.as_ref())
+    })
+    .await
+    .map_err(|e| AppError::Error(e.to_string()))?
+}
+
+async fn fetch_manifest(remote: &Remote) -> Result<String, AppError> {
     let res = reqwest::get(remote.url(MANIFEST)).await?;
     if !res.status().is_success() {
         return Err(AppError::Error(format!(
@@ -407,82 +434,94 @@ pub async fn dict_plan(app: AppHandle) -> Result<Plan, AppError> {
             res.status()
         )));
     }
-    let text = res.text().await?;
-    let remote_manifest: Manifest = serde_json::from_str(&text)?;
-    let zst = remote_manifest.zst()?.clone();
+    Ok(res.text().await?)
+}
 
-    // reading the library and committing is blocking work
-    tauri::async_runtime::spawn_blocking(move || {
-        let state = app.state::<DictState>();
-        if !zst.readable() {
-            // nor a plan from before, whose files R2 may no longer have
-            let _ = std::fs::remove_file(state.dir.join(PENDING));
-            return Ok(Plan {
-                files: vec![],
-                needs_newer_app: true,
-            });
+/// What to download for the library of manifest `text`, from `remote`; with none, only
+/// what's already on the device can be used, and a missing file is an error.
+fn plan(state: &DictState, text: &str, remote: Option<&Remote>) -> Result<Plan, AppError> {
+    let manifest: Manifest = serde_json::from_str(text)?;
+    let zst = manifest.zst()?;
+    if !zst.readable() {
+        // nor a plan from before, whose files R2 may no longer have
+        let _ = std::fs::remove_file(state.dir.join(PENDING));
+        return Ok(Plan {
+            files: vec![],
+            needs_newer_app: true,
+        });
+    }
+    let committed = state.committed();
+    let incoming = state.dir.join(INCOMING);
+    std::fs::create_dir_all(&incoming)?;
+
+    let mut wanted: Vec<&FileInfo> = vec![];
+    for f in manifest.zips() {
+        if committed.get(&f.file) == Some(&f.sha256) {
+            continue;
         }
-        let committed = state.committed();
-        let incoming = state.dir.join(INCOMING);
-        std::fs::create_dir_all(&incoming)?;
+        // moved into place by a commit that failed partway, before the manifest
+        if has_size(&state.dir.join(&f.file), f) {
+            continue;
+        }
+        wanted.push(f);
+    }
+    if committed.get(SEARCH_DB) != Some(&zst.unpacked_sha256) {
+        wanted.push(&zst.file);
+    }
 
-        let mut wanted: Vec<&FileInfo> = vec![];
-        for f in remote_manifest.zips() {
-            if committed.get(&f.file) == Some(&f.sha256) {
+    // files the committed manifest doesn't vouch for: downloaded, or waiting in incoming/
+    let all_in_place = wanted.is_empty();
+    let mut out = vec![];
+    let mut missing = vec![];
+    for f in wanted {
+        // Downloaded by an earlier run that was closed before the rest finished (or
+        // whose commit failed): nothing is committed until every file is there.
+        let new = incoming.join(&f.file);
+        if new.exists() {
+            if has_size(&new, f) {
                 continue;
             }
-            // moved into place by a commit that failed partway, before the manifest
-            if has_size(&state.dir.join(&f.file), f) {
-                continue;
-            }
-            wanted.push(f);
+            let _ = std::fs::remove_file(&new);
         }
-        if committed.get(SEARCH_DB) != Some(&zst.unpacked_sha256) {
-            wanted.push(&zst.file);
-        }
-
-        // files the committed manifest doesn't vouch for: downloaded, or waiting in incoming/
-        let all_in_place = wanted.is_empty();
-        let mut out = vec![];
-        for f in wanted {
-            // Downloaded by an earlier run that was closed before the rest finished (or
-            // whose commit failed): nothing is committed until every file is there.
-            let new = incoming.join(&f.file);
-            if new.exists() {
-                if has_size(&new, f) {
-                    continue;
-                }
-                let _ = std::fs::remove_file(&new);
-            }
-            out.push(PlannedFile {
+        match remote {
+            Some(remote) => out.push(PlannedFile {
                 filename: format!("dicts/{INCOMING}/{}", f.file),
                 url: remote.url(&f.file),
                 size: f.size,
-            });
+            }),
+            None => missing.push(f.file.as_str()),
         }
+    }
+    if !missing.is_empty() {
+        let _ = std::fs::remove_file(state.dir.join(PENDING));
+        return Err(AppError::Error(format!(
+            "{}: not on the device, and no dictionary source to download them from: push \
+             the library again (pnpm android:push)",
+            missing.join(", ")
+        )));
+    }
 
-        let unchanged =
-            std::fs::read_to_string(state.dir.join(MANIFEST)).ok() == Some(text.clone());
-        // up to date only with everything in place: files waiting in incoming/ (e.g. pushed
-        // by scripts/push-library.mjs) are committed, even under the same manifest
-        if unchanged && all_in_place {
-            let _ = std::fs::remove_file(state.dir.join(PENDING));
-            return Ok(Plan {
-                files: out,
-                needs_newer_app: false,
-            });
-        }
-        // `dict_commit` once these are downloaded, and every other download (the page
-        // waits for all of them); right away if there are none, e.g. when dictionaries
-        // were only removed
-        std::fs::write(state.dir.join(PENDING), &text)?;
-        Ok(Plan {
+    let unchanged = std::fs::read_to_string(state.dir.join(MANIFEST))
+        .ok()
+        .as_deref()
+        == Some(text);
+    // up to date only with everything in place: files waiting in incoming/ (e.g. pushed
+    // by scripts/push-library.mjs) are committed, even under the same manifest
+    if unchanged && all_in_place {
+        let _ = std::fs::remove_file(state.dir.join(PENDING));
+        return Ok(Plan {
             files: out,
             needs_newer_app: false,
-        })
+        });
+    }
+    // `dict_commit` once these are downloaded, and every other download (the page
+    // waits for all of them); right away if there are none, e.g. when dictionaries
+    // were only removed
+    std::fs::write(state.dir.join(PENDING), text)?;
+    Ok(Plan {
+        files: out,
+        needs_newer_app: false,
     })
-    .await
-    .map_err(|e| AppError::Error(e.to_string()))?
 }
 
 #[derive(Serialize)]
@@ -593,6 +632,11 @@ fn commit(app: &AppHandle, state: &DictState) -> Result<Vec<String>, AppError> {
         }
     }
     std::fs::rename(&pending, state.dir.join(MANIFEST))?;
+    // a pushed manifest, now committed
+    let pushed = incoming.join(MANIFEST);
+    if std::fs::read_to_string(&pushed).is_ok_and(|p| p == text) {
+        let _ = std::fs::remove_file(&pushed);
+    }
     // unpacked and in place: the manifest vouches for search.db from now on
     let _ = std::fs::remove_file(&zst_path);
     // the files moved: `committed()` vouches for them from now on
@@ -860,6 +904,53 @@ mod tests {
         assert!(at(SEARCH_DB_COMPAT));
         assert!(at(SEARCH_DB_COMPAT - 1));
         assert!(!at(SEARCH_DB_COMPAT + 1));
+    }
+
+    #[test]
+    fn without_a_remote_it_plans_from_the_files_on_the_device() {
+        let app_data = temp_dir("offline");
+        let state = DictState::new(&app_data);
+        let incoming = state.dir.join(INCOMING);
+        std::fs::create_dir_all(&incoming).unwrap();
+
+        // nothing pushed: an error naming what's missing, and nothing to commit
+        let e = plan(&state, V2, None).err().expect("files are missing");
+        assert!(e.to_string().contains("A.zip, search.db.zst"), "{e}");
+        assert!(!state.dir.join(PENDING).exists());
+
+        // all pushed, of the manifest's sizes: committed as they are
+        std::fs::write(incoming.join("A.zip"), b"a").unwrap();
+        std::fs::write(incoming.join("search.db.zst"), b"zz").unwrap();
+        let p = plan(&state, V2, None).unwrap();
+        assert!(p.files.is_empty() && !p.needs_newer_app);
+        assert_eq!(
+            std::fs::read_to_string(state.dir.join(PENDING)).unwrap(),
+            V2
+        );
+
+        // one of another size: deleted, and missing
+        std::fs::write(incoming.join("A.zip"), b"ab").unwrap();
+        assert!(plan(&state, V2, None).is_err());
+        assert!(!incoming.join("A.zip").exists());
+        assert!(!state.dir.join(PENDING).exists());
+        std::fs::remove_dir_all(&app_data).unwrap();
+    }
+
+    #[test]
+    fn with_a_remote_it_downloads_what_is_missing() {
+        let app_data = temp_dir("online");
+        let state = DictState::new(&app_data);
+        let remote = Remote::Http("http://127.0.0.1:8080".into());
+        let p = plan(&state, V2, Some(&remote)).unwrap();
+        assert_eq!(
+            p.files.iter().map(|f| f.url.as_str()).collect::<Vec<_>>(),
+            [
+                "http://127.0.0.1:8080/A.zip",
+                "http://127.0.0.1:8080/search.db.zst"
+            ]
+        );
+        assert!(state.dir.join(PENDING).exists());
+        std::fs::remove_dir_all(&app_data).unwrap();
     }
 
     #[test]

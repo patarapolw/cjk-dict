@@ -6,9 +6,13 @@
 //
 // - Files go to the app's `dicts/incoming/`, where downloads land. `dict_plan` keeps a file
 //   there whose size matches the manifest, and `dict_commit` checksums it as any download.
-// - The app plans from R2's manifest.json, so this helps as far as the library matches what
-//   `pnpm admin upload` sent. A file that doesn't is deleted (other size) or downloaded
-//   again (checksum mismatch): it costs time, never correctness.
+// - Then, once every file is there, the library's manifest.json, to `dicts/incoming/` too.
+//   The app plans from it only without a remote: none configured (no CJK_DICT_R2_* or
+//   CJK_DICT_BASE_URL), or one it can't reach. So the app can be used fully offline.
+// - With a remote it reaches, the app plans from the remote's manifest.json, so this helps
+//   as far as the library matches what `pnpm admin upload` sent. A file that doesn't is
+//   deleted (other size) or downloaded again (checksum mismatch): it costs time, never
+//   correctness.
 // - Pushes only what the app lacks: not a file its committed manifest vouches for, nor one
 //   already in `incoming/` with the right size; not search.db.zst when its search.db is the
 //   current one.
@@ -124,10 +128,9 @@ async function main() {
     if (m) sizes.set(m[2], Number(m[1]));
   }
   let committed = null;
+  const committedText = runAs(`cat dicts/${MANIFEST} 2>/dev/null`) || "";
   try {
-    committed = JSON.parse(
-      runAs(`cat dicts/${MANIFEST} 2>/dev/null`) || "null",
-    );
+    committed = JSON.parse(committedText || "null");
   } catch {
     // none, or unreadable: nothing is vouched for
   }
@@ -144,6 +147,8 @@ async function main() {
   console.log(`Library: ${lib}`);
   let pushed = 0;
   let failed = 0;
+  // in incoming/ from an earlier push: the app commits them with the manifest
+  let waiting = 0;
   for (const f of files) {
     const name = f.file;
     let why = null;
@@ -159,8 +164,10 @@ async function main() {
     } else if (sizes.get(name) === f.size && !vouched.has(name)) {
       why = "in place, not yet committed";
     }
-    if (!why && sizes.get(`incoming/${name}`) === f.size)
+    if (!why && sizes.get(`incoming/${name}`) === f.size) {
       why = "already in incoming/";
+      waiting++;
+    }
     if (why) {
       console.log(`skip  ${name}: ${why}`);
       continue;
@@ -183,9 +190,30 @@ async function main() {
       failed++;
     }
   }
+
+  // the manifest last, and only with every file there: offline, the app plans from it
+  if (failed) {
+    console.log(`skip  ${MANIFEST}: not every file was pushed`);
+  } else if (
+    !pushed &&
+    !waiting &&
+    committedText === readFileSync(manifestPath, "utf8")
+  ) {
+    console.log(`skip  ${MANIFEST}: the app has this library`);
+  } else {
+    try {
+      const size = statSync(manifestPath).size;
+      await pushFile(manifestPath, size, `dicts/incoming/${MANIFEST}`);
+      console.log(`push  ${MANIFEST}`);
+    } catch (e) {
+      console.log(`FAIL  ${MANIFEST}: ${e.message}`);
+      failed++;
+    }
+  }
   console.log(
-    `${pushed} pushed, ${failed} failed. The app checks them when it syncs; ` +
-      "it plans from R2's manifest, so run `pnpm admin upload` first.",
+    `${pushed} pushed, ${failed} failed. The app checks them when it syncs. ` +
+      "With a remote it reaches, it plans from the remote's manifest: run " +
+      "`pnpm admin upload` first. Without one, from the pushed manifest.",
   );
 }
 
