@@ -246,6 +246,15 @@ async function loaded(
   return wrapper;
 }
 
+/** each `dt` of what `sel` finds, with its `dd`: `[label, readings]` */
+const readingRows = (
+  el: ReturnType<Awaited<ReturnType<typeof mountView>>["wrapper"]["get"]>,
+  sel: string,
+) =>
+  el
+    .findAll(`${sel} dt`)
+    .map((dt) => [dt.text(), dt.element.nextElementSibling!.textContent!]);
+
 /** opens a character's card, collapsed in a list */
 async function openCard(
   wrapper: Awaited<ReturnType<typeof mountView>>["wrapper"],
@@ -289,25 +298,15 @@ describe("CharacterView", () => {
     const card = wrapper.get('[data-char="林"]');
     expect(card.get(".glyph").text()).toBe("林");
     expect(card.get(".ids").text().replace(/\s/g, "")).toBe("⿰木木");
-    // in the header, every reading but kun and name readings, one row per kind: on by
-    // its script, KANJIDIC having no one language
-    const rows = (sel: string) =>
-      card
-        .findAll(`${sel} dt`)
-        .map((dt) => [dt.text(), dt.element.nextElementSibling!.textContent!]);
-    // under its dictionary, so that it's clear where they come from
-    expect(card.findAll(".dict-readings > .tag").map((t) => t.text())).toEqual([
-      "KANJIDIC",
-    ]);
+    // open: its own Hangul readings in the header, and each entry's readings in it, one
+    // row per kind: on and kun by their script, KANJIDIC having no one language
     expect(card.get(".hangul").text()).toBe("림");
-    expect(rows(".card-readings")).toEqual([
+    expect(card.find(".card-readings").exists()).toBe(false);
+    expect(readingRows(card, ".kanji-entry .readings")).toEqual([
       ["On", "リン"],
+      ["Kun", "はやし"],
       ["Pinyin", "lín"],
       ["Hangul", "림"],
-    ]);
-    // inside, the rest
-    expect(rows(".kanji-entry .readings")).toEqual([
-      ["Kun", "はやし"],
       ["Name readings", "しげ"],
     ]);
     expect(card.findAll(".meanings li").map((li) => li.text())).toEqual([
@@ -329,19 +328,38 @@ describe("CharacterView", () => {
     wrapper.unmount();
   });
 
-  it("keeps each dictionary's readings under its name in the header", async () => {
+  it("merges the readings when collapsed, and keeps each dictionary's when open", async () => {
     const { wrapper } = await mountView("/kanji?q=光");
     await loaded(wrapper);
-    const blocks = wrapper
-      .findAll('[data-char="光"] .dict-readings')
-      .map((d) => [
-        d.get(".tag").text(),
-        d.findAll("dt").map((dt) => dt.text()),
-        d.get("dl").text().replace(/\s+/g, ""),
-      ]);
-    expect(blocks).toEqual([
-      ["KANJIDIC", ["On", "Pinyin"], "OnコウPinyinguāng"],
-      ["Hanja", ["Hangul"], "Hangul광"],
+    const card = wrapper.get('[data-char="光"]');
+
+    // open: each entry's own, under its dictionary's name
+    expect(
+      card
+        .findAll(".kanji-entry")
+        .map((e) => [
+          e.get('.tag[data-category="dictionary"]').text(),
+          readingRows(e, ".readings"),
+        ]),
+    ).toEqual([
+      [
+        "KANJIDIC",
+        [
+          ["On", "コウ"],
+          ["Kun", "ひかり"],
+          ["Pinyin", "guāng"],
+        ],
+      ],
+      ["Hanja", [["Hangul", "광"]]],
+    ]);
+
+    // collapsed: merged, one row per kind, its own Hangul and Hanja's as one; no kun
+    await card.get(".char-toggle").trigger("click");
+    expect(card.find(".hangul").exists()).toBe(false);
+    expect(readingRows(card, ".card-readings")).toEqual([
+      ["On", "コウ"],
+      ["Pinyin", "guāng"],
+      ["Hangul", "광"],
     ]);
     wrapper.unmount();
   });
@@ -391,8 +409,8 @@ describe("CharacterView", () => {
     expect(entry.get(".via-variant").text()).toBe("學 traditional, kyūjitai");
     expect(entry.get(".meanings").text()).toBe("learning");
 
-    // its readings, in the header, are 學's
-    await card.get(".card-readings button.reading").trigger("click");
+    // its readings are 學's
+    await entry.get("button.reading").trigger("click");
     await flushPromises();
     expect(router.currentRoute.value.query.q).toBe("*<學>{ガク}");
     wrapper.unmount();

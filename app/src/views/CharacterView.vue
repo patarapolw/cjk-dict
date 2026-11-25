@@ -107,7 +107,8 @@
             </span>
           </button>
           <div class="char-summary">
-            <p v-if="c.hangul.length" class="hangul" lang="ko">
+            <!-- opened, the dictionaries' readings are in their entries, below -->
+            <p v-if="isOpen(c.ch) && c.hangul.length" class="hangul" lang="ko">
               <template v-for="(r, k) in c.hangul" :key="r">
                 <template v-if="k"> · </template>
                 <button
@@ -120,40 +121,30 @@
                 </button>
               </template>
             </p>
-            <!-- each dictionary's readings but kun and name readings, under its name -->
-            <div
-              v-for="d in headerReadings(c)"
-              :key="d.key"
-              class="dict-readings"
-              :data-dict="d.dict"
+            <!-- collapsed: every reading but kun and name readings, of every entry shown -->
+            <dl
+              v-if="!isOpen(c.ch) && cardReadings(c).length"
+              class="readings card-readings"
             >
-              <span class="tag" data-category="dictionary" :lang="d.lang"
-                >{{ d.dict
-                }}<template v-if="d.via">
-                  · <span :lang="lang || undefined">{{ d.via }}</span></template
-                ></span
-              >
-              <dl class="readings card-readings">
-                <template v-for="row in d.rows" :key="row.key">
-                  <dt v-tooltip="row.title">{{ row.label }}</dt>
-                  <dd :lang="row.lang">
-                    <template v-for="(it, k) in row.items" :key="k">
-                      <template v-if="k">{{ row.sep }}</template>
-                      <button
-                        v-if="it.searchIn"
-                        type="button"
-                        class="link-button reading"
-                        v-tooltip="readingTitle(it.of, it.r)"
-                        @click="toReading(it.of, it.r, it.searchIn)"
-                      >
-                        {{ it.r }}
-                      </button>
-                      <template v-else>{{ it.r }}</template>
-                    </template>
-                  </dd>
-                </template>
-              </dl>
-            </div>
+              <template v-for="row in cardReadings(c)" :key="row.key">
+                <dt v-tooltip="row.title">{{ row.label }}</dt>
+                <dd :lang="row.lang">
+                  <template v-for="(it, k) in row.items" :key="k">
+                    <template v-if="k">{{ row.sep }}</template>
+                    <button
+                      v-if="it.searchIn"
+                      type="button"
+                      class="link-button reading"
+                      v-tooltip="readingTitle(it.of, it.r)"
+                      @click="toReading(it.of, it.r, it.searchIn)"
+                    >
+                      {{ it.r }}
+                    </button>
+                    <template v-else>{{ it.r }}</template>
+                  </template>
+                </dd>
+              </template>
+            </dl>
             <div class="item-actions" :lang="lang || undefined">
               <button
                 type="button"
@@ -315,9 +306,9 @@
                 >{{ t }}</span
               >
             </header>
-            <!-- what the card's header leaves out: kun and name readings -->
-            <dl v-if="innerReadings(e, ech).length" class="readings">
-              <template v-for="row in innerReadings(e, ech)" :key="row.key">
+            <!-- the dictionary's own readings, so that it's clear where each comes from -->
+            <dl v-if="allReadings(e, ech).length" class="readings">
+              <template v-for="row in allReadings(e, ech)" :key="row.key">
                 <dt v-tooltip="row.title">{{ row.label }}</dt>
                 <dd :lang="row.lang">
                   <template v-for="(it, k) in row.items" :key="k">
@@ -945,34 +936,49 @@ function entryReadings(e: IKanjiEntry, of: string) {
   return { outer, inner };
 }
 
-const innerReadings = (e: IKanjiEntry, of: string) =>
-  entryReadings(e, of).inner;
+/** rows by kind: on, kun, pinyin, Hangul, the dictionary's others, name readings last */
+const ROW_ORDER = ["on", "kun", "pinyin", "hangul"];
+const rowRank = (key: string) =>
+  INNER_STATS.has(key)
+    ? ROW_ORDER.length + 1
+    : ROW_ORDER.includes(key)
+      ? ROW_ORDER.indexOf(key)
+      : ROW_ORDER.length;
+/** stable: the dictionary's others as they come */
+const byRowKind = (rows: ReadingRow[]) =>
+  rows.sort((a, b) => rowRank(a.key) - rowRank(b.key));
+
+/** all an entry's readings, shown in it on an open card */
+function allReadings(e: IKanjiEntry, of: string) {
+  const { outer, inner } = entryReadings(e, of);
+  return byRowKind([...outer, ...inner]);
+}
 
 /**
- * A card's readings for its header, each entry's under its dictionary, so that it's clear
- * where they come from; one row per kind: On, Pinyin, Hangul, then the dictionary's others
+ * A collapsed card's readings, of every entry shown, merged, one row per kind: On, Pinyin,
+ * Hangul (its own Hangul readings too), then the dictionaries' others; not kun and name
+ * readings, often many
  */
-function headerReadings(c: IHanChar) {
-  const order = Object.keys(READING_KINDS);
-  const rank = (key: string) =>
-    order.includes(key) ? order.indexOf(key) : order.length;
-  return cardEntries(c).flatMap(({ e, of, via }, i) => {
-    // stable: the dictionary's others as they come
-    const rows = entryReadings(e, of).outer.sort(
-      (a, b) => rank(a.key) - rank(b.key),
+function cardReadings(c: IHanChar): ReadingRow[] {
+  const rows = new Map<string, ReadingRow>();
+  const add = (row: ReadingRow) => {
+    const had = rows.get(row.key);
+    if (!had) return rows.set(row.key, { ...row, items: [...row.items] });
+    for (const it of row.items) {
+      if (!had.items.some((x) => x.r === it.r && x.of === it.of))
+        had.items.push(it);
+    }
+  };
+  if (c.hangul.length)
+    add(
+      kindRow(
+        "hangul",
+        c.hangul.map((r) => ({ r, of: c.ch, searchIn: "ko-KR" })),
+      ),
     );
-    return rows.length
-      ? [
-          {
-            key: i,
-            dict: e.dict_path,
-            lang: e.lang || undefined,
-            via: via?.ch,
-            rows,
-          },
-        ]
-      : [];
-  });
+  for (const { e, of } of cardEntries(c))
+    entryReadings(e, of).outer.forEach(add);
+  return byRowKind([...rows.values()]);
 }
 
 const readingStats = (e: IKanjiEntry) =>
@@ -1141,12 +1147,8 @@ button:focus-visible {
   font-size: 1.125rem;
 }
 
-.dict-readings {
-  margin: 0 0 0.25rem;
-}
-
 .card-readings {
-  margin: 0.125rem 0 0;
+  margin: 0 0 0.25rem;
 }
 
 .uses {
