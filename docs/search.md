@@ -77,17 +77,18 @@ The Characters view (`#/kanji?q=<characters>`) shows each Han character as a car
   - its readings:
     - collapsed, those of every kanji dictionary entry shown (see below), merged, one row per kind, by the search language:
 
-      | Search language | Rows                                                                                      | e.g. 光                               |
-      | --------------- | ----------------------------------------------------------------------------------------- | ------------------------------------- |
-      | Auto-detect     | On, short kun, Pinyin, Hangul, the dictionaries' others (Korean romanization, Vietnamese) | コウ; ひか、ひかり、びかり; guāng; 광 |
-      | Japanese        | On, short kun                                                                             | コウ; ひか、ひかり、びかり            |
-      | Chinese         | Pinyin                                                                                    | guāng                                 |
-      | Korean          | Hangul (its own, Hanja's, KANJIDIC's)                                                     | 광                                    |
+      | Search language | Rows                                                                                      | e.g. 光                                        |
+      | --------------- | ----------------------------------------------------------------------------------------- | ---------------------------------------------- |
+      | Auto-detect     | On, short kun, Pinyin, Hangul, the dictionaries' others (Korean romanization, Vietnamese) | コウ; ひか.る, ひか.らす, ひかり, …; guāng; 광 |
+      | Japanese        | On, short kun                                                                             | コウ; ひか.る, ひか.らす, ひかり, …            |
+      | Chinese         | Pinyin                                                                                    | guāng                                          |
+      | Korean          | Hangul (its own, Hanja's, KANJIDIC's)                                                     | 광                                             |
       - Short kun: the first 3, then "…" if there are more, as KANJIDIC writes them: `ひか.る`, and `-びかり` for a prefix or suffix.
-        - A reading another dictionary has without the `-` is listed once, without it.
+        - Each reading once, whatever its dot or `-`: 果's `は.たす`, `はた.す` and `-は.たす` are one `は.たす`, the first without a `-`, so that the others aren't pushed off the 3.
         - A tap searches the stem, before the dot and without the `-` (`*<光>{ひか}`).
       - With none of the search language's (e.g. a character only CC-CEDICT.Hanzi has, with Japanese), every kind, as with Auto-detect.
       - One kind alone has no label: `rì`, not `Pinyin rì`.
+      - Readings are separated by `, `, in every language, as in the open entries.
       - Never name readings (nanori), often many.
       - Pinyin in one way, with tone marks and lowercase, so that each reading is listed once: KANJIDIC's `xīng` and CC-CEDICT.Hanzi's `xing1` are one `xīng`. Open, each entry shows it as its dictionary writes it.
 

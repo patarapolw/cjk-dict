@@ -172,6 +172,24 @@ HAN["杉"] = {
   ],
 };
 
+/** 果: kun readings KANJIDIC writes several ways */
+HAN["果"] = {
+  ch: "果",
+  ids: [],
+  components: [],
+  all_components: [],
+  hangul: [],
+  uses: 5,
+  variants: [],
+  entries: [
+    {
+      ...daoEntry("KANJIDIC", null),
+      character: "果",
+      kunyomi: "は.たす はた.す -は.たす は.てる -は.てる は.て",
+    },
+  ],
+};
+
 /** what the `dicts` command returns */
 let dicts: Partial<IDictInfo>[] = [];
 
@@ -415,7 +433,7 @@ describe("CharacterView", () => {
         "KANJIDIC",
         [
           ["On", "コウ"],
-          ["Kun", "ひか.る、ひか.らす、ひかり、-びかり"],
+          ["Kun", "ひか.る, ひか.らす, ひかり, -びかり"],
           ["Pinyin", "guāng"],
           ["Korean romanization", "gwang"],
         ],
@@ -431,7 +449,7 @@ describe("CharacterView", () => {
     expect(card.find(".hangul").exists()).toBe(false);
     expect(readingRows(card, ".card-readings")).toEqual([
       ["On", "コウ"],
-      ["Kun", "ひか.る、ひか.らす、ひかり、…"],
+      ["Kun", "ひか.る, ひか.らす, ひかり, …"],
       ["Pinyin", "guāng"],
       ["Hangul", "광"],
       ["Korean romanization", "gwang"],
@@ -497,7 +515,7 @@ describe("CharacterView", () => {
     await loaded(wrapper, false);
     const card = wrapper.get('[data-char="杉"]');
     // -びかり is MyDict's びかり too: that one, in its place
-    expect(headerRows(card)).toEqual([["", "びかり、すぎ、-ばかり"]]);
+    expect(headerRows(card)).toEqual([["", "びかり, すぎ, -ばかり"]]);
     // searched without the `-`
     await card
       .findAll(".card-readings button.reading")
@@ -505,6 +523,17 @@ describe("CharacterView", () => {
       .trigger("click");
     await flushPromises();
     expect(router.currentRoute.value.query.q).toBe("*<杉>{ばかり}");
+    wrapper.unmount();
+  });
+
+  it("lists a collapsed card's kun reading once, whatever its dot or `-`", async () => {
+    lang.value = "ja-JP";
+    const { wrapper } = await mountView("/kanji?q=果");
+    await loaded(wrapper, false);
+    // は.たす, はた.す and -は.たす are one; so are は.てる and -は.てる
+    expect(headerRows(wrapper.get('[data-char="果"]'))).toEqual([
+      ["", "は.たす, は.てる, は.て"],
+    ]);
     wrapper.unmount();
   });
 
@@ -525,7 +554,7 @@ describe("CharacterView", () => {
     lang.value = "ja-JP";
     expect(await collapsed()).toEqual([
       ["On", "コウ"],
-      ["Kun", "ひか.る、ひか.らす、ひかり、…"],
+      ["Kun", "ひか.る, ひか.らす, ひかり, …"],
     ]);
     lang.value = "zh";
     // one kind alone: no label

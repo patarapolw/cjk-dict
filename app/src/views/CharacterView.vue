@@ -998,7 +998,7 @@ const INNER_STATS = new Set(["nanori"]);
 const kindRow = (key: string, items: ReadingItem[]): ReadingRow => ({
   key,
   ...READING_KINDS[key],
-  sep: key === "on" ? "、" : ", ",
+  sep: ", ",
   items,
 });
 
@@ -1015,7 +1015,7 @@ function entryReadings(e: IKanjiEntry, of: string) {
     const items = rs.map((r) => ({ r, of, searchIn: readingLang(r) }));
     const label = readingLabel(field);
     if (label === "Kun") {
-      inner.push({ key: "kun", label, lang: e.lang || "ja", sep: "、", items });
+      inner.push({ key: "kun", label, lang: e.lang || "ja", sep: ", ", items });
       continue;
     }
     // on, or another language's in those fields: CC-CEDICT.Hanzi's pinyin, Hanja's Hangul
@@ -1069,7 +1069,7 @@ function allReadings(e: IKanjiEntry, of: string): ReadingRow[] {
       key: i ? "kunyomi" : "onyomi",
       label: readingLabel(field),
       lang: e.lang || undefined,
-      sep: "、",
+      sep: ", ",
       items: rs.map((r) => ({ r, of, searchIn: readingLang(r) })),
     });
   });
@@ -1104,18 +1104,19 @@ const SHORT_KUN = 3;
 const undashed = (r: string) => r.replace(/^[-‐]+|[-‐]+$/gu, "");
 
 /**
- * Kun readings, short: the first few, each once, as KANJIDIC writes them: with the dot
- * before the okurigana (ひか.る), where the stem ends being the dictionary's word, not a
- * guess; and with the `-` of a prefix or suffix (`-びかり`), unless another dictionary has
- * the reading without it, which then stands for both. A reading's link searches its stem,
- * without the `-` (ひか of ひか.る).
+ * Kun readings, short: the first few, as KANJIDIC writes them: with the dot before the
+ * okurigana (ひか.る), where the stem ends being the dictionary's word, not a guess; and
+ * with the `-` of a prefix or suffix (`-びかり`). Each once, whatever its dot or `-`:
+ * は.たす, はた.す and -は.たす are one は.たす, the first without a `-`, so that the others
+ * aren't pushed off. A reading's link searches its stem, without the `-` (ひか of ひか.る).
  */
 function shortKun(row: ReadingRow): ReadingRow {
   const items: ReadingItem[] = [];
   const written = (x: ReadingItem) =>
     x.okurigana ? `${x.r}.${x.okurigana}` : x.r;
-  const whole = (x: ReadingItem) => undashed(written(x));
-  const dashed = (x: ReadingItem) => whole(x) !== written(x);
+  const dashed = (x: ReadingItem) => undashed(written(x)) !== written(x);
+  /** the reading itself: はたす for は.たす, はた.す and -は.たす */
+  const whole = (x: ReadingItem) => undashed(written(x)).replace(".", "");
   for (const it of row.items) {
     const [r, okurigana = ""] = it.r.split(".");
     if (!undashed(r)) continue;
