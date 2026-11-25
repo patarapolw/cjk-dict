@@ -19,6 +19,7 @@ How the app gets the library and shows entries. The [README](../README.md#app) h
   - Files that fail their checksum are deleted and downloaded again, then checked again: at most twice per launch.
   - Unpacking shows as "Unpacking search.db" in the downloads panel and, on Android, in the sync notification.
 - It signs its R2 requests itself, with presigned URLs.
+  - Only for R2: other S3-compatible buckets are untested, and only a public one can be used, through `CJK_DICT_BASE_URL` (see the [README](../README.md#other-s3-compatible-buckets-not-tested)).
 - On first launch, it also downloads the [lindera](https://github.com/lindera/lindera) tokenizer dictionaries in the background, used to tokenize `~` queries:
   - unidic (Japanese), ko-dic (Korean) and cc-cedict (Chinese), from [lindera's 6.2.0 release](https://github.com/lindera/lindera/releases/tag/v6.2.0);
   - \~73 MB to download, \~310 MB unpacked.
