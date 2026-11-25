@@ -260,6 +260,47 @@ fn meta(conn: &Connection, key: &str) -> rusqlite::Result<Option<String>> {
         .optional()
 }
 
+/// The compatibility level of the search.db this code builds, and the highest one it reads:
+/// an app reads a search.db whose level ([`compat`]) is at most this.
+///
+/// - Bump it only for a change that an app built before it would read wrongly: a table or
+///   column dropped or renamed, or data stored differently (as when terms were stored with
+///   katakana as hiragana, which an older app's queries would no longer match).
+/// - Leave it for a change those apps ignore: a new table, column or `meta` key.
+/// - Bumping it must come with the build redoing what changed in an existing search.db (as
+///   `meta.term_char` does): [`stamp_compat`] then records the new level.
+/// - An app that reads less keeps the library it has rather than download this one.
+pub const SEARCH_DB_COMPAT: u32 = 1;
+
+/// `meta.compat`: the compatibility level of `db` ([`SEARCH_DB_COMPAT`]); 1 for a search.db
+/// from before it was recorded
+pub fn compat(db: &Path) -> Result<u32, YomitanError> {
+    let conn = Connection::open_with_flags(db, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    Ok(stored_compat(&conn)?)
+}
+
+fn stored_compat(conn: &Connection) -> rusqlite::Result<u32> {
+    Ok(meta(conn, "compat")?
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1))
+}
+
+/// Record [`SEARCH_DB_COMPAT`] as `db`'s level, after a build. Leaves `db` as it is when
+/// it already says so (or, at level 1, says nothing), so that its checksum stays the same
+/// and the app doesn't download it again.
+pub fn stamp_compat(db: &Path) -> Result<(), YomitanError> {
+    let conn = Connection::open(db)?;
+    if stored_compat(&conn)? == SEARCH_DB_COMPAT {
+        return Ok(());
+    }
+    conn.execute_batch(META_SCHEMA)?;
+    conn.execute(
+        "INSERT OR REPLACE INTO meta (key, value) VALUES ('compat', ?1)",
+        [SEARCH_DB_COMPAT.to_string()],
+    )?;
+    Ok(())
+}
+
 /// Kanji bank entries (single characters) indexed per dictionary name, from `kanji_link`
 pub fn char_counts(db: &Path) -> Result<HashMap<String, usize>, YomitanError> {
     let conn = Connection::open_with_flags(db, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
@@ -528,6 +569,10 @@ async fn build_inner(
         conn.execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES ('kana', '1')",
             [],
+        )?;
+        conn.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES ('compat', ?1)",
+            [SEARCH_DB_COMPAT.to_string()],
         )?;
     }
     conn.execute_batch(FTS_TRIGGERS)?;
@@ -3470,6 +3515,47 @@ mod han_tests {
 
     fn chars(list: HanList) -> Vec<String> {
         list.items.into_iter().map(|i| i.ch).collect()
+    }
+
+    #[tokio::test]
+    async fn search_db_records_its_compatibility_level() {
+        let dir = temp_dir("compat");
+        let db_path = dir.join("search.db");
+        write_kanji_zip(&dir.join("kanji.zip"));
+        let tok = TokenizerMapper::new(dir.clone());
+        let src = DictSource {
+            name: "kanji".into(),
+            zip: dir.join("kanji.zip"),
+            lang: None,
+            target_lang: Some("en".into()),
+        };
+        build(&db_path, &[src], &tok, |_, _, _| {}).await.unwrap();
+        assert_eq!(compat(&db_path).unwrap(), SEARCH_DB_COMPAT);
+
+        // from before it was recorded: level 1, and stamping it at level 1 leaves it be
+        Connection::open(&db_path)
+            .unwrap()
+            .execute("DELETE FROM meta WHERE key = 'compat'", [])
+            .unwrap();
+        assert_eq!(compat(&db_path).unwrap(), 1);
+        let before = std::fs::read(&db_path).unwrap();
+        stamp_compat(&db_path).unwrap();
+        if SEARCH_DB_COMPAT == 1 {
+            assert_eq!(std::fs::read(&db_path).unwrap(), before);
+        }
+        assert_eq!(compat(&db_path).unwrap(), SEARCH_DB_COMPAT);
+
+        // a lower level is raised to this one
+        Connection::open(&db_path)
+            .unwrap()
+            .execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES ('compat', '0')",
+                [],
+            )
+            .unwrap();
+        stamp_compat(&db_path).unwrap();
+        assert_eq!(compat(&db_path).unwrap(), SEARCH_DB_COMPAT);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[tokio::test]

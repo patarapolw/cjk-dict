@@ -21,7 +21,7 @@
   </div>
   <!-- Background downloads: non-modal, the app stays usable meanwhile -->
   <aside
-    v-if="toBeLoaded.length || loadErrors.length || verifying"
+    v-if="toBeLoaded.length || loadErrors.length || verifying || needsNewerApp"
     class="downloads"
     :class="{ collapsed: downloadsCollapsed }"
     aria-live="polite"
@@ -31,7 +31,8 @@
         Downloading ({{ toBeLoaded.length }} left)
       </span>
       <span v-else-if="verifying">Checking dictionaries</span>
-      <span v-else>Download failed</span>
+      <span v-else-if="loadErrors.length">Download failed</span>
+      <span v-else>Update the app</span>
       <button
         type="button"
         class="text-button"
@@ -43,7 +44,10 @@
         v-if="!toBeLoaded.length && !verifying"
         type="button"
         class="text-button"
-        @click="loadErrors = []"
+        @click="
+          loadErrors = [];
+          needsNewerApp = false;
+        "
       >
         Dismiss
       </button>
@@ -74,6 +78,10 @@
         :ref="(el) => setLoader(d.filename, el)"
         v-bind="d"
       />
+      <p v-if="needsNewerApp">
+        The dictionaries online are for a newer version of the app: update it to
+        get them. Until then, it keeps the ones it has.
+      </p>
       <p v-for="e in loadErrors" :key="e.filename" class="downloads-error">
         {{ e.filename }}: {{ e.error }} (will retry on next launch)
       </p>
@@ -105,6 +113,7 @@ import {
   VerifyProgress,
   dictsVersion,
   loadErrors,
+  needsNewerApp,
   syncStatus,
   toBeLoaded,
   verifyLabel,
@@ -311,11 +320,15 @@ async function loadAll() {
 async function planDicts() {
   try {
     const plan = await checksummed(() =>
-      invoke<{ filename: string; url: string }[]>("dict_plan"),
+      invoke<{
+        files: { filename: string; url: string }[];
+        needs_newer_app: boolean;
+      }>("dict_plan"),
     );
+    needsNewerApp.value = plan.needs_newer_app;
     toBeLoaded.value = [
       ...toBeLoaded.value,
-      ...plan.map(
+      ...plan.files.map(
         (f): DownloadingProps => ({
           filename: f.filename,
           url: f.url,
@@ -323,7 +336,7 @@ async function planDicts() {
         }),
       ),
     ];
-    if (!plan.length) dictsVersion.value++;
+    if (!plan.files.length) dictsVersion.value++;
     // nothing to commit unless dict_plan left a plan: then dict_commit does nothing
     commitPending = true;
     await commitWhenReady();

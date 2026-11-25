@@ -645,6 +645,7 @@ async fn build(
     if search::build_chars(&db, &ids_txt, &variants_txt, dicts_changed)? {
         eprintln!("character tables in {:.1}s", t.elapsed().as_secs_f64());
     }
+    search::stamp_compat(&db)?;
     if search::missing_kanji_readings(&db)? {
         eprintln!(
             "warning: no kanji dictionary with Japanese readings, so `*<興>{{キョウ}}` finds no \

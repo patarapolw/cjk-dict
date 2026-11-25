@@ -42,6 +42,12 @@ export const toBeLoaded = ref<DownloadingProps[]>([]);
 /** The file being verified or unpacked, while `dict_commit` checks the library. */
 export const verifying = ref<VerifyProgress | null>(null);
 
+/**
+ * The library online needs a newer app (its `search.db` is of a higher compatibility
+ * level than this app reads): the app keeps the dictionaries it has.
+ */
+export const needsNewerApp = ref(false);
+
 /** Downloads that failed this session (retried on next launch). */
 export const loadErrors = ref<{ filename: string; error: string }[]>([]);
 

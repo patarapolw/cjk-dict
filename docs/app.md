@@ -7,6 +7,10 @@ How the app gets the library and shows entries. The [README](../README.md#app) h
 - On start, the app compares the remote `manifest.json` with its own copy, and downloads only the changed files: dictionary zips and `search.db.zst`.
   - `search.db.zst` is `search.db`, zstd-compressed (\~310 MB for a 1.3 GB `search.db`). It's downloaded only when its unpacked checksum differs from the `search.db` the app has.
   - A remote manifest from before `search.db.zst` (version 1) is refused, and the app keeps what it has.
+  - So is a library whose `search.db` needs a newer app (its compatibility level, see [dict-admin.md](dict-admin.md#build-and-rebuild), is higher than the app reads):
+    - the app downloads none of it, zips included, since the zips and `search.db` must match;
+    - it keeps searching the dictionaries it has, and the downloads panel says to update the app to get the new ones;
+    - apps from before compatibility levels can't tell, and download it anyway.
 - Downloads run in the background, one at a time, and resume where they stopped.
   - The order: the tokenizer dictionaries, the fonts, then the library's files.
 - Files go to a staging folder, and replace the old ones only when all of them have arrived and their checksums match. Until then, the app keeps searching the previous version.
