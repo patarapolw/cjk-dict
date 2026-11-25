@@ -4,7 +4,7 @@ Yomitan dictionary search for Chinese, Japanese and Korean: a Tauri app (desktop
 
 - The **library** is a folder of Yomitan dictionary zips, plus `search.db`, a small SQLite index built from them.
   - The zips' term banks are re-split into \~256 KB files, so the app can read single entries quickly.
-  - `dict-admin` manages the library, and `rclone` mirrors it to R2.
+  - `dict-admin` manages the library, and [rclone](https://rclone.org/), a command-line tool for cloud storage, mirrors it to R2.
 - The **app** downloads the library, or only what changed, and searches on the device:
   - It queries `search.db` for matches.
   - It reads definitions and images straight from the zips, so nothing is indexed on the device.
@@ -29,7 +29,7 @@ More in [`docs/`](docs/):
 
 - All commands run from the repo root, and work the same in bash and PowerShell. Run `pnpm install` once first.
 - Local development needs no settings:
-  - `pnpm serve` serves `library/` over HTTP with rclone;
+  - `pnpm serve` serves `library/` over HTTP with rclone ([install it](https://rclone.org/install/) first);
   - `pnpm dev` runs the app against it;
   - `dict-admin` defaults to `library/` and `tmp/lindera`.
 - Production settings (R2 keys and the rclone upload destination) go in `.env` at the repo root (gitignored); copy `.env.example`.
@@ -100,7 +100,7 @@ pnpm admin upload --remote r2:cjk-dict     # rclone; or set CJK_DICT_REMOTE
 2. Create two R2 API tokens:
    - **Object Read & Write**, for rclone on your machine.
    - **Object Read only**, scoped to the bucket, for the app.
-3. Configure rclone (`rclone config`):
+3. [Install rclone](https://rclone.org/install/), and configure it ([`rclone config`](https://rclone.org/commands/rclone_config/), see [its R2 guide](https://rclone.org/s3/#cloudflare-r2)):
    - type `s3`, provider `Cloudflare`;
    - the read/write token's keys;
    - endpoint `https://<account id>.r2.cloudflarestorage.com`;
