@@ -106,7 +106,7 @@ A card shows, for its character:
 - **Used in**: up to 30 characters made directly of it (one level up), the most used first: 口 lists 可, 呆, ... but not 河, made of 可;
   - "5 more" after them when there are more;
   - a radical also lists the characters written with its component forms: 水 lists 河;
-  - **All characters containing 口** below it searches `*口`, which shows them all, each in full (see below);
+  - **All characters made directly of 口** below it searches `*口`, which shows them all, each in full (see below);
 - its kanji dictionary entries, each under its dictionary's name: readings as the dictionary gives them (its on and kun fields, labelled On, Kun or Reading by their script; then its reading stats, e.g. KANJIDIC's pinyin, Korean, name readings, by the dictionary's order and with its own notes), meanings, and stats with the dictionary's own notes;
   - of the kanji dictionaries [chosen](#choosing-dictionaries), and only those of the search language and those that don't say theirs: KANJIDIC (Japanese, Chinese and Korean readings) in every language, CC-CEDICT.Hanzi (Chinese) with Chinese or all, Hanja (Korean) with Korean or all;
   - the search language's first;

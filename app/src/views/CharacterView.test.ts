@@ -622,7 +622,7 @@ describe("CharacterView", () => {
     const button = wrapper.get('[data-char="木"] .super-search');
     // as it will read in the search box
     expect(button.text().replace(/\s+/g, " ")).toBe(
-      "All characters containing 木",
+      "All characters made directly of 木",
     );
     await button.trigger("click");
     await vi.waitFor(() =>

@@ -269,7 +269,7 @@
               v-tooltip="superTitle(c.ch)"
               @click="go(`*${c.ch}`)"
             >
-              All characters containing
+              All characters made directly of
               <span class="super-query" :lang="lang || undefined">{{
                 c.ch
               }}</span>
