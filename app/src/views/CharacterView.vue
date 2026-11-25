@@ -389,10 +389,19 @@
         <p class="muted containing-note">
           Each is made of all {{ chars.length }} characters, at any depth.
         </p>
-        <p v-if="!containing.length && containingNext === null" class="muted">
+        <!-- until the characters shown have loaded, not "None", nor the last query's -->
+        <p v-if="containingOf !== chars.join('')" class="muted">Loading…</p>
+        <p
+          v-else-if="!containing.length && containingNext === null"
+          class="muted"
+        >
           None
         </p>
-        <div class="char-grid" :lang="lang || undefined">
+        <div
+          v-if="containingOf === chars.join('')"
+          class="char-grid"
+          :lang="lang || undefined"
+        >
           <button
             v-for="it in containing"
             :key="it.ch"
@@ -446,6 +455,7 @@ function rememberOpened(query: string, chs: string[]) {
 <script setup lang="ts">
 import {
   computed,
+  nextTick,
   onBeforeUnmount,
   onMounted,
   ref,
@@ -496,8 +506,6 @@ const MAX_CHARS = 20;
 const PAGE = 60;
 /** characters made directly of a character, shown on its card */
 const USED_IN_PAGE = 30;
-/** meanings shown on a collapsed card */
-const GIST_MEANINGS = 3;
 /** a query's open cards: as they were left, else none */
 const initialOpened = (query: string) => openedByQuery.get(query.trim()) ?? [];
 
@@ -559,6 +567,8 @@ const found = ref<IHanChar[]>([]);
 const error = ref("");
 const containing = ref<{ ch: string; uses: number }[]>([]);
 const containingNext = ref<number | null>(null);
+/** the characters `containing` is of, which the ones typed may have moved on from */
+const containingOf = ref("");
 const loadingMore = ref(false);
 /** each character's characters made directly of it (super-characters) */
 const usedIn = ref<Record<string, IHanList>>({});
@@ -590,17 +600,13 @@ function toggle(ch: string) {
 }
 
 /**
- * A collapsed card's gist: the first meanings of its first entry shown, or with none,
- * of its variants'
+ * A collapsed card's gist: the meanings of its first entry shown, or with none, of its
+ * variants', on one line that the card's width cuts off
  */
 function gist(c: IHanChar) {
   const first = cardEntries(c)[0];
   if (!first?.e.meanings.length) return null;
-  const ms = first.e.meanings;
-  const text =
-    ms.slice(0, GIST_MEANINGS).join("; ") +
-    (ms.length > GIST_MEANINGS ? "; …" : "");
-  return { text, lang: glossLang(first.e) };
+  return { text: first.e.meanings.join("; "), lang: glossLang(first.e) };
 }
 
 /** the kanji dictionaries of the search language, to choose from */
@@ -712,6 +718,7 @@ async function load() {
       opened.value = initialOpened(q.value);
       usedIn.value = direct;
       containing.value = list.items;
+      containingOf.value = text;
       containingNext.value = list.next;
     }
     if (elScroller.value) scrollToStart(elScroller.value);
@@ -721,6 +728,8 @@ async function load() {
     if (id !== requestId) return;
     clear();
     error.value = String(e);
+    // the error says why: not "Loading…" under it
+    containingOf.value = text;
   }
 }
 
@@ -733,6 +742,7 @@ function clear() {
   superNext.value = null;
   containing.value = [];
   containingNext.value = null;
+  containingOf.value = "";
   noneFound.value = false;
   error.value = "";
 }
@@ -837,10 +847,23 @@ const superTitle = (components: string) =>
 const DEBOUNCE_MS = 200;
 let timer: ReturnType<typeof setTimeout> | undefined;
 // the search language too: the characters most used in its words first, and their counts
+/** the query changes by navigation (a link, Back, opening the view), not typing: load at once */
+let navigated = false;
 watch([chars, lookupKey, dictsVersion, lang], () => {
   clearTimeout(timer);
-  timer = setTimeout(load, DEBOUNCE_MS);
+  if (navigated) {
+    navigated = false;
+    load();
+  } else timer = setTimeout(load, DEBOUNCE_MS);
 });
+
+/** sets the query from navigation, to be looked up without waiting for typing to pause */
+function navigateTo(text: string) {
+  if (text !== q.value) navigated = true;
+  q.value = text;
+  // the watch above has run by then, or won't, the characters being the same
+  nextTick(() => (navigated = false));
+}
 
 async function setRouteQuery() {
   if (String(route.query.q ?? "") === q.value) return;
@@ -850,7 +873,7 @@ async function setRouteQuery() {
 /** Look up something else, keeping the current lookup in the history (back button). */
 async function go(text: string) {
   await setRouteQuery();
-  q.value = text;
+  navigateTo(text);
   await setRouteQuery();
 }
 
@@ -1142,9 +1165,9 @@ let removeRouterListener: (() => void) | undefined;
 
 onMounted(() => {
   loadDicts();
-  q.value = String(route.query.q ?? "");
+  navigateTo(String(route.query.q ?? ""));
   removeRouterListener = router.afterEach((to) => {
-    if (to.path === "/kanji") q.value = String(to.query.q ?? "");
+    if (to.path === "/kanji") navigateTo(String(to.query.q ?? ""));
   });
 });
 
@@ -1411,10 +1434,12 @@ h3 {
   margin-top: 0.75rem;
 }
 
+/* labels and readings on one baseline, whatever the fonts of their scripts (#75) */
 .readings {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 0.125rem 0.75rem;
+  align-items: baseline;
   margin: 0.25rem 0;
 }
 
@@ -1510,6 +1535,12 @@ h3 {
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+/* a variant and its kind on one baseline (#75) */
+.variant-list li {
+  display: flex;
+  align-items: baseline;
 }
 
 .variant-list .component {

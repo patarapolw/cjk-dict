@@ -805,6 +805,28 @@ describe("CharacterView", () => {
     wrapper.unmount();
   });
 
+  it("shows the characters made of those typed only once they have loaded", async () => {
+    const { wrapper } = await mountView("/kanji?q=林木");
+    // opened by navigation: looked up at once, without waiting for typing to pause
+    await flushPromises();
+    expect(calls.some((c) => c.cmd === "han_containing")).toBe(true);
+    expect(wrapper.get(".containing").text()).toContain("森");
+    expect(wrapper.get(".containing").text()).not.toContain("None");
+
+    // typed: the new heading at once, but not "None" nor the last query's characters
+    // until they have loaded
+    calls = [];
+    await wrapper.get("input.search-input").setValue("木林");
+    expect(wrapper.get(".containing h2").text()).toContain("木 + 林");
+    expect(wrapper.get(".containing").text()).toContain("Loading…");
+    expect(wrapper.get(".containing").text()).not.toContain("None");
+    expect(wrapper.find(".char-grid").exists()).toBe(false);
+    await loaded(wrapper, false);
+    expect(wrapper.get(".containing").text()).toContain("None");
+    expect(wrapper.get(".containing").text()).not.toContain("Loading…");
+    wrapper.unmount();
+  });
+
   it("collapses a single character's card too", async () => {
     // 森: a query no other test opens, as open cards are kept per query
     const { wrapper } = await mountView("/kanji?q=森");
