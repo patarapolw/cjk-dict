@@ -394,6 +394,51 @@ describe("CharacterView", () => {
     wrapper.unmount();
   });
 
+  it("searches a Hangul reading as Hangul, open or collapsed", async () => {
+    const { wrapper, router } = await mountView("/kanji?q=光");
+    await loaded(wrapper);
+    const hangulButton = (sel: string) =>
+      wrapper
+        .findAll(`[data-char="光"] ${sel} button.reading`)
+        .find((b) => b.text() === "광")!;
+    const toggle = () => wrapper.get('[data-char="光"] .char-toggle');
+    if (toggle().attributes("aria-expanded") === "false")
+      await toggle().trigger("click");
+
+    // open: Hanja's entry; KANJIDIC's romanization (gwang) is text, not a link, as
+    // `*<光>{gwang}` isn't romanized
+    expect(
+      wrapper
+        .findAll('[data-char="光"] .kanji-entry button.reading')
+        .some((b) => b.text() === "gwang"),
+    ).toBe(false);
+    // open: Hanja's entry
+    const hanja = wrapper
+      .findAll('[data-char="光"] .kanji-entry')
+      .find((e) => e.text().includes("Hanja"))!;
+    await hanja.get("button.reading").trigger("click");
+    await flushPromises();
+    expect(router.currentRoute.value.query).toMatchObject({
+      q: "*<光>{광}",
+      qState: "",
+    });
+
+    // collapsed: Japanese shows no Hangul; Korean does, and searches by it
+    lang.value = "ja-JP";
+    calls = [];
+    await router.push("/kanji?q=光");
+    await loaded(wrapper);
+    await toggle().trigger("click");
+    expect(hangulButton(".card-readings")).toBeUndefined();
+    lang.value = "ko-KR";
+    await flushPromises();
+    await hangulButton(".card-readings").trigger("click");
+    await flushPromises();
+    expect(router.currentRoute.value.query.q).toBe("*<光>{광}");
+    expect(lang.value).toBe("ko-KR");
+    wrapper.unmount();
+  });
+
   it("shows a collapsed card's readings of the search language", async () => {
     const collapsed = async () => {
       calls = [];

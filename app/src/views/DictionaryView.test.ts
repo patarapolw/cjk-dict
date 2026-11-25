@@ -462,6 +462,37 @@ describe("DictionaryView", () => {
       wrapper.unmount();
     });
 
+    it("searches a character's Hangul reading as Hangul, as the Characters view links it", async () => {
+      lang.value = "ko-KR";
+      findWhen(() => false);
+      const wrapper = await mountView();
+      // the Characters view's link for 光 read 광 (Hanja's, or its own Hangul)
+      await wrapper.get("input.search-input").setValue("*<光>{광}");
+      expect(await firstSearch()).toMatchObject({
+        ch: "光",
+        ch_reading: "광",
+        romanized: false,
+      });
+      expect(hint(wrapper)).toContain("Searching words with 光 read 광");
+      // with a reading of its own, nothing to search the other way
+      await new Promise((r) => setTimeout(r, 50));
+      await flushPromises();
+      expect(searches).toHaveLength(1);
+
+      // a word with a Hangul reading of its own: not romanized either
+      searches.length = 0;
+      await wrapper.get("input.search-input").setValue("<光>{광}");
+      expect(await firstSearch()).toMatchObject({
+        term: "光",
+        reading: "광",
+        romanized: false,
+      });
+      await new Promise((r) => setTimeout(r, 50));
+      await flushPromises();
+      expect(searches).toHaveLength(1);
+      wrapper.unmount();
+    });
+
     it("searches Korean romanization in {} as romanization", async () => {
       lang.value = "ko-KR";
       findWhen(() => false);
