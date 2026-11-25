@@ -139,7 +139,8 @@ impl Remote {
         ) else {
             return Err(AppError::Error(
                 "no dictionary source configured: build with CJK_DICT_R2_* (or \
-                 CJK_DICT_BASE_URL), or push the library to the device (pnpm android:push)"
+                 CJK_DICT_BASE_URL), or push the library \
+                 to the app (pnpm desktop:push or pnpm android:push)"
                     .into(),
             ));
         };
@@ -496,7 +497,7 @@ fn plan(state: &DictState, text: &str, remote: Option<&Remote>) -> Result<Plan, 
         let _ = std::fs::remove_file(state.dir.join(PENDING));
         return Err(AppError::Error(format!(
             "{}: not on the device, and no dictionary source to download them from: push \
-             the library again (pnpm android:push)",
+             the library again (pnpm desktop:push or pnpm android:push)",
             missing.join(", ")
         )));
     }

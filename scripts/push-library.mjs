@@ -1,8 +1,11 @@
 #!/usr/bin/env node
-// Push the dict-admin library to the Android app over adb, so the app finds its files
-// already downloaded rather than downloading them from R2.
+// Push the dict-admin library to the app, so the app finds its files already downloaded
+// rather than downloading them from R2.
 //
-//   node scripts/push-library.mjs        (`pnpm android` runs it before `tauri android run`)
+//   node scripts/push-library.mjs            to the Android app, over adb (`pnpm android:push`;
+//                                            `pnpm android` runs it before `tauri android run`)
+//   node scripts/push-library.mjs --desktop  to the desktop app on this computer, by copying
+//                                            into its app data folder (`pnpm desktop:push`)
 //
 // - Files go to the app's `dicts/incoming/`, where downloads land. `dict_plan` keeps a file
 //   there whose size matches the manifest, and `dict_commit` checksums it as any download.
@@ -16,15 +19,31 @@
 // - Pushes only what the app lacks: not a file its committed manifest vouches for, nor one
 //   already in `incoming/` with the right size; not search.db.zst when its search.db is the
 //   current one.
-// - Needs the app installed (a debug build, for `run-as`): on a first install it pushes
-//   nothing, and the app downloads the library.
-// - adb picks the device as usual: set ANDROID_SERIAL when several are connected.
+// - Android: needs the app installed (a debug build, for `run-as`): on a first install it
+//   pushes nothing, and the app downloads the library. adb picks the device as usual: set
+//   ANDROID_SERIAL when several are connected.
+// - Desktop: any build, installed or not; close the app first. The folder is
+//   `cc.polv.cjk-dict/dicts` in %APPDATA% (Windows), ~/Library/Application Support (macOS)
+//   or $XDG_DATA_HOME, else ~/.local/share (Linux).
 
 import { spawn, spawnSync } from "node:child_process";
-import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
+import {
+  copyFileSync,
+  createReadStream,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  statSync,
+} from "node:fs";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
 const PKG = "cc.polv.cjk_dict";
+// the desktop app's identifier (tauri.conf.json), its app data folder's name
+const IDENTIFIER = "cc.polv.cjk-dict";
 const MANIFEST = "manifest.json";
 const SEARCH_DB = "search.db";
 // a file being pushed; renamed when complete, so the app never sees half of one
@@ -83,6 +102,95 @@ async function pushFile(file, size, dest) {
   return (Date.now() - t) / 1000;
 }
 
+/** The Android app, over adb; null (having said why) when it can't take the library */
+function androidTarget() {
+  if (adbShell(`pm path ${PKG}`) === null) {
+    console.log(
+      `${PKG} isn't installed yet: nothing pushed; the app downloads the library.`,
+    );
+    return null;
+  }
+  if (runAs("true") === null) {
+    console.log(`run-as ${PKG} failed (a release build?): nothing pushed.`);
+    return null;
+  }
+  // the app must not plan or commit while files arrive; `tauri android run` starts it again
+  adbShell(`am force-stop ${PKG}`);
+  return {
+    sizes() {
+      const sizes = new Map();
+      const listing =
+        runAs(
+          "mkdir -p dicts/incoming && cd dicts && rm -f incoming/*" +
+            PART +
+            ' && for f in * incoming/*; do [ -f "$f" ] && stat -c "%s %n" "$f"; done; true',
+        ) ?? "";
+      for (const line of listing.split("\n")) {
+        const m = line.match(/^(\d+) (.+)$/);
+        if (m) sizes.set(m[2], Number(m[1]));
+      }
+      return sizes;
+    },
+    committedManifest: () => runAs(`cat dicts/${MANIFEST} 2>/dev/null`) || "",
+    push: (file, size, name) => pushFile(file, size, `dicts/incoming/${name}`),
+  };
+}
+
+/** The desktop app's `dicts/` folder on this computer */
+function desktopDictsDir() {
+  const home = homedir();
+  const data =
+    process.platform === "win32"
+      ? process.env.APPDATA || join(home, "AppData", "Roaming")
+      : process.platform === "darwin"
+        ? join(home, "Library", "Application Support")
+        : process.env.XDG_DATA_HOME || join(home, ".local", "share");
+  return join(data, IDENTIFIER, "dicts");
+}
+
+/** The desktop app on this computer, by copying into its app data folder */
+function desktopTarget() {
+  const dir = desktopDictsDir();
+  const incoming = join(dir, "incoming");
+  mkdirSync(incoming, { recursive: true });
+  console.log(`App data: ${dir} (close the app first)`);
+  return {
+    sizes() {
+      const sizes = new Map();
+      for (const [sub, prefix] of [
+        [dir, ""],
+        [incoming, "incoming/"],
+      ]) {
+        for (const e of readdirSync(sub, { withFileTypes: true })) {
+          if (!e.isFile()) continue;
+          if (e.name.endsWith(PART)) {
+            rmSync(join(sub, e.name), { force: true });
+            continue;
+          }
+          sizes.set(prefix + e.name, statSync(join(sub, e.name)).size);
+        }
+      }
+      return sizes;
+    },
+    committedManifest() {
+      try {
+        return readFileSync(join(dir, MANIFEST), "utf8");
+      } catch {
+        return "";
+      }
+    },
+    async push(file, size, name) {
+      const t = Date.now();
+      const dest = join(incoming, name);
+      copyFileSync(file, dest + PART);
+      if (statSync(dest + PART).size !== size)
+        throw new Error("incomplete copy");
+      renameSync(dest + PART, dest);
+      return (Date.now() - t) / 1000;
+    },
+  };
+}
+
 const mb = (n) => `${(n / 1e6).toFixed(1)} MB`;
 
 async function main() {
@@ -102,33 +210,15 @@ async function main() {
     return;
   }
 
-  if (adbShell(`pm path ${PKG}`) === null) {
-    console.log(
-      `${PKG} isn't installed yet: nothing pushed; the app downloads the library.`,
-    );
-    return;
-  }
-  if (runAs("true") === null) {
-    console.log(`run-as ${PKG} failed (a release build?): nothing pushed.`);
-    return;
-  }
-  // the app must not plan or commit while files arrive; `tauri android run` starts it again
-  adbShell(`am force-stop ${PKG}`);
+  const target = process.argv.includes("--desktop")
+    ? desktopTarget()
+    : androidTarget();
+  if (!target) return;
 
   // what the app has: file sizes in dicts/ and dicts/incoming/, and its committed manifest
-  const sizes = new Map();
-  const listing =
-    runAs(
-      "mkdir -p dicts/incoming && cd dicts && rm -f incoming/*" +
-        PART +
-        ' && for f in * incoming/*; do [ -f "$f" ] && stat -c "%s %n" "$f"; done; true',
-    ) ?? "";
-  for (const line of listing.split("\n")) {
-    const m = line.match(/^(\d+) (.+)$/);
-    if (m) sizes.set(m[2], Number(m[1]));
-  }
+  const sizes = target.sizes();
+  const committedText = target.committedManifest();
   let committed = null;
-  const committedText = runAs(`cat dicts/${MANIFEST} 2>/dev/null`) || "";
   try {
     committed = JSON.parse(committedText || "null");
   } catch {
@@ -182,7 +272,7 @@ async function main() {
       continue;
     }
     try {
-      const s = await pushFile(local, f.size, `dicts/incoming/${name}`);
+      const s = await target.push(local, f.size, name);
       console.log(`push  ${name}: ${mb(f.size)} in ${s.toFixed(1)} s`);
       pushed++;
     } catch (e) {
@@ -203,7 +293,7 @@ async function main() {
   } else {
     try {
       const size = statSync(manifestPath).size;
-      await pushFile(manifestPath, size, `dicts/incoming/${MANIFEST}`);
+      await target.push(manifestPath, size, MANIFEST);
       console.log(`push  ${MANIFEST}`);
     } catch (e) {
       console.log(`FAIL  ${MANIFEST}: ${e.message}`);

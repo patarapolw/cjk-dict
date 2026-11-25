@@ -8,6 +8,7 @@
     "app": "pnpm --filter cjk-dict-app",
     "android": "node scripts/push-library.mjs && pnpm app android",
     "android:push": "node scripts/push-library.mjs",
+    "desktop:push": "node scripts/push-library.mjs --desktop",
     "admin": "cargo run --release -q -p dict-admin --",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
