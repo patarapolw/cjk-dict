@@ -122,7 +122,7 @@ Each reading searches the words with the character read so, anywhere in the word
 
 - on: `*<興>{キョウ}`;
 - kun: `*<興>{おこ}`, up to the okurigana, which the dot marks (興る and 興す);
-  - KANJIDIC's `-` marks a suffix or prefix, with a character there: `-び` is `*?<日>{び}` (not at a word's start), `おお-` is `*<大>{おお}?*`;
+  - KANJIDIC's `-` marks a suffix or prefix, with a character there: `-び` is `*?<日>{び}`, the words ending in 日 read び (曜日); `おお-` is `<大>{おお}?*`, the words starting with 大 read おお (大雨);
 - pinyin: `*<興>{xīng}`;
 - Hangul: `*<興>{흥}`.
 

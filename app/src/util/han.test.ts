@@ -92,7 +92,7 @@ describe("readingQuery", () => {
     // KANJIDIC's dash: other characters go there
     expect(readingQuery("日", "-び")).toBe("*?<日>{び}");
     expect(readingQuery("果", "-は.たす")).toBe("*?<果>{は}");
-    expect(readingQuery("大", "おお-")).toBe("*<大>{おお}?*");
+    expect(readingQuery("大", "おお-")).toBe("<大>{おお}?*");
   });
 
   it("tells a reading's language by its script", () => {
