@@ -74,15 +74,23 @@ The Characters view (`#/kanji?q=<characters>`) shows each Han character as a car
   - the first 3 meanings of its first kanji dictionary entry shown;
   - how many words use it;
   - its readings:
-    - collapsed, those of every kanji dictionary entry shown (see below), merged, but kun and name readings (nanori), one row per kind:
-      - **On**;
-      - **Pinyin**: e.g. KANJIDIC's, CC-CEDICT.Hanzi's;
-      - **Hangul**: its own Hangul readings, and e.g. Hanja's, KANJIDIC's;
-      - the dictionaries' others, e.g. KANJIDIC's Korean romanization and Vietnamese;
+    - collapsed, those of every kanji dictionary entry shown (see below), merged, one row per kind, by the search language:
+
+      | Search language | Rows                                                                                      | e.g. 光                               |
+      | --------------- | ----------------------------------------------------------------------------------------- | ------------------------------------- |
+      | Auto-detect     | On, short kun, Pinyin, Hangul, the dictionaries' others (Korean romanization, Vietnamese) | コウ; ひか、ひかり、びかり; guāng; 광 |
+      | Japanese        | On, short kun                                                                             | コウ; ひか、ひかり、びかり            |
+      | Chinese         | Pinyin                                                                                    | guāng                                 |
+      | Korean          | Hangul (its own, Hanja's, KANJIDIC's), Korean romanization                                | 광                                    |
+      - Short kun: the first 3, without okurigana (ひか.る is ひか), then "…" if there are more.
+      - Never name readings (nanori), often many.
+
     - open, its own Hangul readings; the dictionaries' are in their entries, so that it's clear where each comes from;
+
   - **= 日**: 日 as a word (exact search);
   - **\*日\***: the words with 日 anywhere in them;
   - **Variants**.
+
 - Inside: the rest, below.
 - Open at first: the first card, of a single character (`日`) or of a list (`木口`, `*口`, a reading).
 - The cards open are kept per query while the app runs: going to Words and back shows them as they were.

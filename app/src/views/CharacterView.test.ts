@@ -129,7 +129,7 @@ HAN["光"] = {
       ...daoEntry("KANJIDIC", null),
       character: "光",
       onyomi: "コウ",
-      kunyomi: "ひかり",
+      kunyomi: "ひか.る ひか.らす ひかり -びかり",
       stats: [["pinyin", "guāng"]],
       tag_meta: { pinyin: { category: "reading", order: 0, notes: "Pinyin" } },
     },
@@ -329,7 +329,7 @@ describe("CharacterView", () => {
   });
 
   it("merges the readings when collapsed, and keeps each dictionary's when open", async () => {
-    const { wrapper } = await mountView("/kanji?q=光");
+    const { wrapper, router } = await mountView("/kanji?q=光");
     await loaded(wrapper);
     const card = wrapper.get('[data-char="光"]');
 
@@ -346,22 +346,56 @@ describe("CharacterView", () => {
         "KANJIDIC",
         [
           ["On", "コウ"],
-          ["Kun", "ひかり"],
+          ["Kun", "ひか.る、ひか.らす、ひかり、-びかり"],
           ["Pinyin", "guāng"],
         ],
       ],
       ["Hanja", [["Hangul", "광"]]],
     ]);
 
-    // collapsed: merged, one row per kind, its own Hangul and Hanja's as one; no kun
+    // collapsed: merged, one row per kind, its own Hangul and Hanja's as one; kun short:
+    // the first few, without okurigana
     await card.get(".char-toggle").trigger("click");
     expect(card.find(".hangul").exists()).toBe(false);
     expect(readingRows(card, ".card-readings")).toEqual([
       ["On", "コウ"],
+      ["Kun", "ひか、ひかり、びかり"],
       ["Pinyin", "guāng"],
       ["Hangul", "광"],
     ]);
+    // a short kun reading searches the words with it read so
+    await card
+      .findAll(".card-readings button.reading")
+      .find((b) => b.text() === "ひか")!
+      .trigger("click");
+    await flushPromises();
+    expect(router.currentRoute.value.query.q).toBe("*<光>{ひか}");
     wrapper.unmount();
+  });
+
+  it("shows a collapsed card's readings of the search language", async () => {
+    const collapsed = async () => {
+      calls = [];
+      const { wrapper } = await mountView("/kanji?q=光");
+      await loaded(wrapper);
+      const card = wrapper.get('[data-char="光"]');
+      // open at first, or as another test left it: open is remembered per query
+      const toggle = card.get(".char-toggle");
+      if (toggle.attributes("aria-expanded") === "true")
+        await toggle.trigger("click");
+      const rows = readingRows(card, ".card-readings");
+      wrapper.unmount();
+      return rows;
+    };
+    lang.value = "ja-JP";
+    expect(await collapsed()).toEqual([
+      ["On", "コウ"],
+      ["Kun", "ひか、ひかり、びかり"],
+    ]);
+    lang.value = "zh";
+    expect(await collapsed()).toEqual([["Pinyin", "guāng"]]);
+    lang.value = "ko-KR";
+    expect(await collapsed()).toEqual([["Hangul", "광"]]);
   });
 
   it("lists a character's variants, each looked up when clicked", async () => {
@@ -528,11 +562,12 @@ describe("CharacterView", () => {
     const toggle = card.get(".char-toggle");
     expect(toggle.attributes("aria-expanded")).toBe("false");
     expect(card.find(".char-details").exists()).toBe(false);
-    // outside: the first meanings, how many words use it, the readings but kun
+    // outside: the first meanings, how many words use it, the readings but name readings
     expect(card.get(".gist-meanings").text()).toBe("grove; forest");
     expect(card.get(".uses").text()).toBe("in 120 words");
     expect(card.get(".card-readings").text()).toContain("リン");
-    expect(card.get(".card-readings").text()).not.toContain("はやし");
+    expect(card.get(".card-readings").text()).toContain("はやし");
+    expect(card.get(".card-readings").text()).not.toContain("しげ");
 
     await toggle.trigger("click");
     expect(toggle.attributes("aria-expanded")).toBe("true");

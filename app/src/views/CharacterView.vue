@@ -955,13 +955,47 @@ function allReadings(e: IKanjiEntry, of: string) {
 }
 
 /**
- * A collapsed card's readings, of every entry shown, merged, one row per kind: On, Pinyin,
- * Hangul (its own Hangul readings too), then the dictionaries' others; not kun and name
- * readings, often many
+ * A collapsed card's reading kinds, by the search language, to tell the characters of a
+ * list apart by the readings one knows them by; every kind with Auto-detect
+ */
+const HEADER_KINDS: Record<string, string[]> = {
+  "ja-JP": ["on", "kun"],
+  zh: ["pinyin"],
+  "ko-KR": ["hangul", "korean_r"],
+};
+/** kun readings a collapsed card shows: the first few, without okurigana */
+const SHORT_KUN = 3;
+
+/** kun readings, short: without okurigana or `-`, each once, the first few */
+function shortKun(row: ReadingRow): ReadingRow {
+  const items: ReadingItem[] = [];
+  for (const it of row.items) {
+    const r = it.r.replace(/^[-‐]+|[-‐]+$/gu, "").split(".")[0];
+    if (r && !items.some((x) => x.r === r && x.of === it.of))
+      items.push({ ...it, r });
+  }
+  const more = items.length > SHORT_KUN;
+  return {
+    ...row,
+    items: [
+      ...items.slice(0, SHORT_KUN),
+      ...(more ? [{ r: "…", of: "" }] : []),
+    ],
+  };
+}
+
+/**
+ * A collapsed card's readings, of every entry shown, merged, one row per kind: On, short
+ * kun, Pinyin, Hangul (its own Hangul readings too), then the dictionaries' others; those
+ * of the search language only (see HEADER_KINDS), and never name readings, often many
  */
 function cardReadings(c: IHanChar): ReadingRow[] {
+  const kinds = HEADER_KINDS[lang.value];
+  const shown = (key: string) =>
+    kinds ? kinds.includes(key) : !INNER_STATS.has(key);
   const rows = new Map<string, ReadingRow>();
   const add = (row: ReadingRow) => {
+    if (!shown(row.key)) return;
     const had = rows.get(row.key);
     if (!had) return rows.set(row.key, { ...row, items: [...row.items] });
     for (const it of row.items) {
@@ -976,8 +1010,12 @@ function cardReadings(c: IHanChar): ReadingRow[] {
         c.hangul.map((r) => ({ r, of: c.ch, searchIn: "ko-KR" })),
       ),
     );
-  for (const { e, of } of cardEntries(c))
-    entryReadings(e, of).outer.forEach(add);
+  for (const { e, of } of cardEntries(c)) {
+    const { outer, inner } = entryReadings(e, of);
+    [...outer, ...inner].forEach(add);
+  }
+  const kun = rows.get("kun");
+  if (kun) rows.set("kun", shortKun(kun));
   return byRowKind([...rows.values()]);
 }
 
