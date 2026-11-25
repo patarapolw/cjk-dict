@@ -20,7 +20,7 @@ How the app's search works. The [README](../README.md#app) has how to run the ap
   - an exact search for itself;
   - `~` words containing it;
   - words with the same reading;
-  - **Characters** of it: its Han characters in the Characters view.
+  - its Han characters in the Characters view: the boxed **字** icon.
 - In-dictionary links and the back button keep a search history.
 
 ## Readings
@@ -73,18 +73,17 @@ The Characters view (`#/kanji?q=<characters>`) shows each Han character as a car
   - the character, tapped to open or close the card;
   - the first 3 meanings of its first kanji dictionary entry shown;
   - how many words use it;
-  - its readings, but kun and name readings (nanori), one row per kind, of every kanji dictionary entry shown (see below):
+  - its own Hangul readings;
+  - the readings of each kanji dictionary entry shown (see below), but kun and name readings (nanori), under the dictionary's name, so that it's clear where each comes from; one row per kind:
     - **On**;
-    - **Pinyin**: KANJIDIC's and CC-CEDICT.Hanzi's;
-    - **Hangul**: the character's own Hangul readings, Hanja's and KANJIDIC's;
-    - the dictionaries' others, e.g. KANJIDIC's Korean romanization and Vietnamese;
+    - **Pinyin**: e.g. KANJIDIC's, CC-CEDICT.Hanzi's;
+    - **Hangul**: e.g. Hanja's, KANJIDIC's;
+    - the dictionary's others, e.g. KANJIDIC's Korean romanization and Vietnamese;
   - **= 日**: 日 as a word (exact search);
   - **\*日\***: the words with 日 anywhere in them;
   - **Variants**.
 - Inside: the rest, below.
-- Open at first:
-  - a single character's card (`日`, or a list of one);
-  - none of a list's: `木口`, `*口`, a reading.
+- Open at first: the first card, of a single character (`日`) or of a list (`木口`, `*口`, a reading).
 - The cards open are kept per query while the app runs: going to Words and back shows them as they were.
 
 A card shows, for its character:
@@ -96,7 +95,7 @@ A card shows, for its character:
 - **Used in**: up to 30 characters made directly of it (one level up), the most used first: 口 lists 可, 呆, ... but not 河, made of 可;
   - "5 more" after them when there are more;
   - a radical also lists the characters written with its component forms: 水 lists 河;
-  - **All characters made of 口** below it searches `*口`, which shows them all, each in full (see below);
+  - **All characters containing 口** below it searches `*口`, which shows them all, each in full (see below);
 - its kanji dictionary entries: kun and name readings (the rest are in the header), meanings, and stats with the dictionary's own notes;
   - of the kanji dictionaries [chosen](#choosing-dictionaries), and only those of the search language and those that don't say theirs: KANJIDIC (Japanese, Chinese and Korean readings) in every language, CC-CEDICT.Hanzi (Chinese) with Chinese or all, Hanja (Korean) with Korean or all;
   - the search language's first;

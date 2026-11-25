@@ -229,10 +229,12 @@
               v-if="hanChars(headTerm(it)).length"
               type="button"
               class="link-button"
+              :aria-label="`Characters of ${headTerm(it)}`"
               v-tooltip="'Its characters: components, readings and meanings'"
               @click="toCharacters(headTerm(it))"
             >
-              Characters {{ hanChars(headTerm(it)).join("") }}
+              <!-- an icon: a character in a box, as on a character card -->
+              <span class="chars-icon" aria-hidden="true">字</span>
             </button>
           </div>
           <PitchAccents
@@ -1009,7 +1011,15 @@ onBeforeUnmount(() => {
   }
 
   /* "Next: ..." apart from what is searched, which a template's whitespace doesn't keep */
-  .search-hint .link-button {
+  .search-hint .chars-icon {
+    display: inline-block;
+    padding: 0 0.125rem;
+    border: 1px solid currentColor;
+    border-radius: 0.2rem;
+    line-height: 1.2;
+  }
+
+  .link-button {
     margin-inline-start: 0.75em;
   }
 

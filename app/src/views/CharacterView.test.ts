@@ -115,6 +115,28 @@ HAN["學"] = {
   ],
 };
 
+/** 光 in two kanji dictionaries, each with its own readings */
+HAN["光"] = {
+  ch: "光",
+  ids: [],
+  components: [],
+  all_components: [],
+  hangul: ["광"],
+  uses: 30,
+  variants: [],
+  entries: [
+    {
+      ...daoEntry("KANJIDIC", null),
+      character: "光",
+      onyomi: "コウ",
+      kunyomi: "ひかり",
+      stats: [["pinyin", "guāng"]],
+      tag_meta: { pinyin: { category: "reading", order: 0, notes: "Pinyin" } },
+    },
+    { ...daoEntry("Hanja", "ko"), character: "光", onyomi: "광" },
+  ],
+};
+
 /** what the `dicts` command returns */
 let dicts: Partial<IDictInfo>[] = [];
 
@@ -268,11 +290,16 @@ describe("CharacterView", () => {
     expect(card.get(".glyph").text()).toBe("林");
     expect(card.get(".ids").text().replace(/\s/g, "")).toBe("⿰木木");
     // in the header, every reading but kun and name readings, one row per kind: on by
-    // its script, KANJIDIC having no one language; its Hangul with the card's own
+    // its script, KANJIDIC having no one language
     const rows = (sel: string) =>
       card
         .findAll(`${sel} dt`)
         .map((dt) => [dt.text(), dt.element.nextElementSibling!.textContent!]);
+    // under its dictionary, so that it's clear where they come from
+    expect(card.findAll(".dict-readings > .tag").map((t) => t.text())).toEqual([
+      "KANJIDIC",
+    ]);
+    expect(card.get(".hangul").text()).toBe("림");
     expect(rows(".card-readings")).toEqual([
       ["On", "リン"],
       ["Pinyin", "lín"],
@@ -299,6 +326,23 @@ describe("CharacterView", () => {
     expect(wrapper.find(".containing").exists()).toBe(false);
     // nothing but what is shown
     expect(wrapper.get(".search-hint").text()).toBe("Character 林");
+    wrapper.unmount();
+  });
+
+  it("keeps each dictionary's readings under its name in the header", async () => {
+    const { wrapper } = await mountView("/kanji?q=光");
+    await loaded(wrapper);
+    const blocks = wrapper
+      .findAll('[data-char="光"] .dict-readings')
+      .map((d) => [
+        d.get(".tag").text(),
+        d.findAll("dt").map((dt) => dt.text()),
+        d.get("dl").text().replace(/\s+/g, ""),
+      ]);
+    expect(blocks).toEqual([
+      ["KANJIDIC", ["On", "Pinyin"], "OnコウPinyinguāng"],
+      ["Hanja", ["Hangul"], "Hangul광"],
+    ]);
     wrapper.unmount();
   });
 
@@ -380,7 +424,7 @@ describe("CharacterView", () => {
   it("lists the characters made directly of each character on its card", async () => {
     const { wrapper } = await mountView("/kanji?q=林木");
     await loaded(wrapper);
-    await openCard(wrapper, "林");
+    // the first open at first
     await openCard(wrapper, "木");
 
     const direct = calls.filter(
@@ -416,7 +460,7 @@ describe("CharacterView", () => {
     const button = wrapper.get('[data-char="木"] .super-search');
     // as it will read in the search box
     expect(button.text().replace(/\s+/g, " ")).toBe(
-      "All characters made of 木",
+      "All characters containing 木",
     );
     await button.trigger("click");
     await vi.waitFor(() =>
@@ -436,10 +480,11 @@ describe("CharacterView", () => {
     const cards = () =>
       wrapper.findAll(".char-card").map((c) => c.attributes("data-char"));
     expect(cards()).toEqual(MADE_OF_MU.slice(0, 20));
-    // each collapsed, and in full when opened, with its own "Used in"
-    expect(wrapper.find('[data-char="林"] .used-in').exists()).toBe(false);
-    await openCard(wrapper, "林");
+    // the first open, the rest collapsed, and in full when opened, with its own "Used in"
     expect(wrapper.find('[data-char="林"] .used-in').exists()).toBe(true);
+    expect(wrapper.find('[data-char="森"] .used-in').exists()).toBe(false);
+    await openCard(wrapper, "森");
+    expect(wrapper.find('[data-char="森"] .used-in').exists()).toBe(true);
     expect(wrapper.find(".containing").exists()).toBe(false);
 
     // the next page
@@ -455,6 +500,12 @@ describe("CharacterView", () => {
     const { wrapper, router } = await mountView("/kanji?q=木林");
     await loaded(wrapper);
 
+    // the first open at first: close it
+    const first = wrapper.get('[data-char="木"] .char-toggle');
+    expect(first.attributes("aria-expanded")).toBe("true");
+    await first.trigger("click");
+    expect(first.attributes("aria-expanded")).toBe("false");
+
     const card = wrapper.get('[data-char="林"]');
     const toggle = card.get(".char-toggle");
     expect(toggle.attributes("aria-expanded")).toBe("false");
@@ -469,7 +520,7 @@ describe("CharacterView", () => {
     expect(toggle.attributes("aria-expanded")).toBe("true");
     expect(card.get(".kanji-entry .meanings").text()).toContain("grove");
 
-    // to Words and back: the view is mounted again, 林 still open
+    // to Words and back: the view is mounted again, 林 still open, 木 still closed
     await card
       .findAll(".item-actions button")
       .find((b) => b.text() === "= 林")!
@@ -478,7 +529,6 @@ describe("CharacterView", () => {
     expect(router.currentRoute.value.path).toBe("/dictionary");
     wrapper.unmount();
 
-    calls = [];
     calls = [];
     await router.push("/kanji?q=木林");
     const again = mount(CharacterView, {

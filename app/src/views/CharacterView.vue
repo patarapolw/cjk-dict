@@ -107,27 +107,53 @@
             </span>
           </button>
           <div class="char-summary">
-            <!-- every reading but kun and name readings, of every entry shown -->
-            <dl v-if="cardReadings(c).length" class="readings card-readings">
-              <template v-for="row in cardReadings(c)" :key="row.key">
-                <dt v-tooltip="row.title">{{ row.label }}</dt>
-                <dd :lang="row.lang">
-                  <template v-for="(it, k) in row.items" :key="k">
-                    <template v-if="k">{{ row.sep }}</template>
-                    <button
-                      v-if="it.searchIn"
-                      type="button"
-                      class="link-button reading"
-                      v-tooltip="readingTitle(it.of, it.r)"
-                      @click="toReading(it.of, it.r, it.searchIn)"
-                    >
-                      {{ it.r }}
-                    </button>
-                    <template v-else>{{ it.r }}</template>
-                  </template>
-                </dd>
+            <p v-if="c.hangul.length" class="hangul" lang="ko">
+              <template v-for="(r, k) in c.hangul" :key="r">
+                <template v-if="k"> · </template>
+                <button
+                  type="button"
+                  class="link-button reading"
+                  v-tooltip="readingTitle(c.ch, r)"
+                  @click="toReading(c.ch, r, 'ko-KR')"
+                >
+                  {{ r }}
+                </button>
               </template>
-            </dl>
+            </p>
+            <!-- each dictionary's readings but kun and name readings, under its name -->
+            <div
+              v-for="d in headerReadings(c)"
+              :key="d.key"
+              class="dict-readings"
+              :data-dict="d.dict"
+            >
+              <span class="tag" data-category="dictionary" :lang="d.lang"
+                >{{ d.dict
+                }}<template v-if="d.via">
+                  · <span :lang="lang || undefined">{{ d.via }}</span></template
+                ></span
+              >
+              <dl class="readings card-readings">
+                <template v-for="row in d.rows" :key="row.key">
+                  <dt v-tooltip="row.title">{{ row.label }}</dt>
+                  <dd :lang="row.lang">
+                    <template v-for="(it, k) in row.items" :key="k">
+                      <template v-if="k">{{ row.sep }}</template>
+                      <button
+                        v-if="it.searchIn"
+                        type="button"
+                        class="link-button reading"
+                        v-tooltip="readingTitle(it.of, it.r)"
+                        @click="toReading(it.of, it.r, it.searchIn)"
+                      >
+                        {{ it.r }}
+                      </button>
+                      <template v-else>{{ it.r }}</template>
+                    </template>
+                  </dd>
+                </template>
+              </dl>
+            </div>
             <div class="item-actions" :lang="lang || undefined">
               <button
                 type="button"
@@ -248,7 +274,7 @@
               v-tooltip="superTitle(c.ch)"
               @click="go(`*${c.ch}`)"
             >
-              All characters made of
+              All characters containing
               <span class="super-query" :lang="lang || undefined">{{
                 c.ch
               }}</span>
@@ -452,9 +478,9 @@ const PAGE = 60;
 const USED_IN_PAGE = 30;
 /** meanings shown on a collapsed card */
 const GIST_MEANINGS = 3;
-/** a query's open cards: as they were left, else a single character's */
+/** a query's open cards: as they were left, else the first one's */
 function initialOpened(query: string, cs: IHanChar[]) {
-  return openedByQuery.get(query.trim()) ?? (cs.length === 1 ? [cs[0].ch] : []);
+  return openedByQuery.get(query.trim()) ?? (cs.length ? [cs[0].ch] : []);
 }
 
 const q = ref("");
@@ -923,33 +949,30 @@ const innerReadings = (e: IKanjiEntry, of: string) =>
   entryReadings(e, of).inner;
 
 /**
- * A card's readings for its header, of every entry shown, one row per kind: On, Pinyin,
- * Hangul (its own Hangul readings too), then the dictionaries' others
+ * A card's readings for its header, each entry's under its dictionary, so that it's clear
+ * where they come from; one row per kind: On, Pinyin, Hangul, then the dictionary's others
  */
-function cardReadings(c: IHanChar): ReadingRow[] {
-  const rows = new Map<string, ReadingRow>();
-  const add = (row: ReadingRow) => {
-    const had = rows.get(row.key);
-    if (!had) return rows.set(row.key, { ...row, items: [...row.items] });
-    for (const it of row.items) {
-      if (!had.items.some((x) => x.r === it.r && x.of === it.of))
-        had.items.push(it);
-    }
-  };
-  if (c.hangul.length)
-    add(
-      kindRow(
-        "hangul",
-        c.hangul.map((r) => ({ r, of: c.ch, searchIn: "ko-KR" })),
-      ),
-    );
-  for (const { e, of } of cardEntries(c))
-    entryReadings(e, of).outer.forEach(add);
+function headerReadings(c: IHanChar) {
   const order = Object.keys(READING_KINDS);
   const rank = (key: string) =>
     order.includes(key) ? order.indexOf(key) : order.length;
-  // stable: the dictionaries' others as they come
-  return [...rows.values()].sort((a, b) => rank(a.key) - rank(b.key));
+  return cardEntries(c).flatMap(({ e, of, via }, i) => {
+    // stable: the dictionary's others as they come
+    const rows = entryReadings(e, of).outer.sort(
+      (a, b) => rank(a.key) - rank(b.key),
+    );
+    return rows.length
+      ? [
+          {
+            key: i,
+            dict: e.dict_path,
+            lang: e.lang || undefined,
+            via: via?.ch,
+            rows,
+          },
+        ]
+      : [];
+  });
 }
 
 const readingStats = (e: IKanjiEntry) =>
@@ -1114,8 +1137,16 @@ button:focus-visible {
   margin: 0 0 0.25rem;
 }
 
-.card-readings {
+.hangul {
+  font-size: 1.125rem;
+}
+
+.dict-readings {
   margin: 0 0 0.25rem;
+}
+
+.card-readings {
+  margin: 0.125rem 0 0;
 }
 
 .uses {
