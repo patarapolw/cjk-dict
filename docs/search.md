@@ -94,7 +94,7 @@ The Characters view (`#/kanji?q=<characters>`) shows each Han character as a car
   - **Variants**.
 
 - Inside: the rest, below.
-- Open at first: the first card, of a single character (`日`) or of a list (`木口`, `*口`, a reading).
+- Every card starts collapsed, a single character's (`日`) as a list's (`木口`, `*口`, a reading).
 - The cards open are kept per query while the app runs: going to Words and back shows them as they were.
 
 A card shows, for its character:
@@ -104,9 +104,9 @@ A card shows, for its character:
 - how it breaks down: each IDS, by region, the one for the search language first;
 - every component, all the way down; components link to their own page;
 - **Used in**: up to 30 characters made directly of it (one level up), the most used first: 口 lists 可, 呆, ... but not 河, made of 可;
-  - "5 more" after them when there are more;
+  - "5 more" after them when there are more, which searches `*口`: them all, each in full (see below);
   - a radical also lists the characters written with its component forms: 水 lists 河;
-  - **All characters made directly of 口** below it searches `*口`, which shows them all, each in full (see below);
+  - with none more, **All characters made directly of 口** below them searches `*口` the same;
 - its kanji dictionary entries, each under its dictionary's name: readings as the dictionary gives them (its on and kun fields, labelled On, Kun or Reading by their script; then its reading stats, e.g. KANJIDIC's pinyin, Korean, name readings, by the dictionary's order and with its own notes), meanings, and stats with the dictionary's own notes;
   - of the kanji dictionaries [chosen](#choosing-dictionaries), and only those of the search language and those that don't say theirs: KANJIDIC (Japanese, Chinese and Korean readings) in every language, CC-CEDICT.Hanzi (Chinese) with Chinese or all, Hanja (Korean) with Korean or all;
   - the search language's first;

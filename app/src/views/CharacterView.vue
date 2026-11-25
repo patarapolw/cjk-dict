@@ -256,14 +256,28 @@
               >
                 {{ it.ch }}
               </button>
-              <span
+              <!-- the rest, and all of them each in full: *日 -->
+              <button
                 v-if="usedIn[c.ch].total > usedIn[c.ch].items.length"
-                class="muted used-in-more"
-                >{{ usedIn[c.ch].total - usedIn[c.ch].items.length }} more</span
+                type="button"
+                class="link-button used-in-more"
+                v-tooltip="superTitle(c.ch)"
+                @click="go(`*${c.ch}`)"
               >
+                {{
+                  (
+                    usedIn[c.ch].total - usedIn[c.ch].items.length
+                  ).toLocaleString()
+                }}
+                more
+              </button>
             </p>
+            <!-- all listed: until a design is chosen, the search for them each in full -->
             <button
-              v-if="usedIn[c.ch].items.length"
+              v-if="
+                usedIn[c.ch].items.length &&
+                usedIn[c.ch].total <= usedIn[c.ch].items.length
+              "
               type="button"
               class="super-search"
               v-tooltip="superTitle(c.ch)"
@@ -474,10 +488,8 @@ const PAGE = 60;
 const USED_IN_PAGE = 30;
 /** meanings shown on a collapsed card */
 const GIST_MEANINGS = 3;
-/** a query's open cards: as they were left, else the first one's */
-function initialOpened(query: string, cs: IHanChar[]) {
-  return openedByQuery.get(query.trim()) ?? (cs.length ? [cs[0].ch] : []);
-}
+/** a query's open cards: as they were left, else none */
+const initialOpened = (query: string) => openedByQuery.get(query.trim()) ?? [];
 
 const q = ref("");
 /**
@@ -661,7 +673,7 @@ async function load() {
       if (id !== requestId) return;
       clear();
       found.value = page.found;
-      opened.value = initialOpened(q.value, page.found);
+      opened.value = initialOpened(q.value);
       usedIn.value = page.usedIn;
       superNext.value = page.next;
       noneFound.value = !!reading && !page.found.length;
@@ -676,7 +688,7 @@ async function load() {
       if (id !== requestId) return;
       clear();
       found.value = cs;
-      opened.value = initialOpened(q.value, cs);
+      opened.value = initialOpened(q.value);
       usedIn.value = direct;
       containing.value = list.items;
       containingNext.value = list.next;

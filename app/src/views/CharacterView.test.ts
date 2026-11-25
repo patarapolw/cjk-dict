@@ -252,14 +252,25 @@ async function mountView(path: string) {
   return { wrapper, router };
 }
 
+/** waits for the characters to load, and opens their cards, unless `open` is false */
 async function loaded(
   wrapper: Awaited<ReturnType<typeof mountView>>["wrapper"],
+  open = true,
 ) {
   await vi.waitFor(() =>
     expect(calls.some((c) => c.cmd === "han_chars")).toBe(true),
   );
   await flushPromises();
+  if (open) await openAll(wrapper);
   return wrapper;
+}
+
+/** opens every card collapsed: they all start so */
+async function openAll(
+  wrapper: Awaited<ReturnType<typeof mountView>>["wrapper"],
+) {
+  for (const t of wrapper.findAll(".char-toggle"))
+    if (t.attributes("aria-expanded") === "false") await t.trigger("click");
 }
 
 /** each `dt` of what `sel` finds, with its `dd`: `[label, readings]` */
@@ -571,6 +582,7 @@ describe("CharacterView", () => {
     );
     await flushPromises();
     expect(router.currentRoute.value.query.q).toBe("木");
+    await openAll(wrapper);
     expect(wrapper.get('[data-char="木"]').text()).toContain(
       "Does not break down further",
     );
@@ -579,14 +591,17 @@ describe("CharacterView", () => {
         .findAll('[data-char="木"] .used-in-list .component')
         .map((b) => b.text()),
     ).toEqual(MADE_OF_MU.slice(0, 30));
+    // the rest: a link to them all, each in full
     expect(wrapper.get('[data-char="木"] .used-in-more').text()).toBe("5 more");
+    expect(wrapper.find('[data-char="木"] .super-search').exists()).toBe(false);
     wrapper.unmount();
   });
 
   it("lists the characters made directly of each character on its card", async () => {
     const { wrapper } = await mountView("/kanji?q=林木");
-    await loaded(wrapper);
-    // the first open at first
+    await loaded(wrapper, false);
+    // all collapsed at first
+    await openCard(wrapper, "林");
     await openCard(wrapper, "木");
 
     const direct = calls.filter(
@@ -619,11 +634,9 @@ describe("CharacterView", () => {
     await loaded(wrapper);
 
     calls = [];
-    const button = wrapper.get('[data-char="木"] .super-search');
-    // as it will read in the search box
-    expect(button.text().replace(/\s+/g, " ")).toBe(
-      "All characters made directly of 木",
-    );
+    // "5 more" after those "Used in" lists: all of them, each in full
+    const button = wrapper.get('[data-char="木"] .used-in-more');
+    expect(button.text()).toBe("5 more");
     await button.trigger("click");
     await vi.waitFor(() =>
       expect(calls.some((c) => c.cmd === "han_chars")).toBe(true),
@@ -642,8 +655,7 @@ describe("CharacterView", () => {
     const cards = () =>
       wrapper.findAll(".char-card").map((c) => c.attributes("data-char"));
     expect(cards()).toEqual(MADE_OF_MU.slice(0, 20));
-    // the first open, the rest collapsed, and in full when opened, with its own "Used in"
-    expect(wrapper.find('[data-char="林"] .used-in').exists()).toBe(true);
+    // each collapsed, and in full when opened, with its own "Used in"
     expect(wrapper.find('[data-char="森"] .used-in').exists()).toBe(false);
     await openCard(wrapper, "森");
     expect(wrapper.find('[data-char="森"] .used-in').exists()).toBe(true);
@@ -660,13 +672,12 @@ describe("CharacterView", () => {
   it("collapses the cards of a list, with the gist outside, and keeps them as left", async () => {
     // not 林木: the cards open are kept per query, and another test opens those
     const { wrapper, router } = await mountView("/kanji?q=木林");
-    await loaded(wrapper);
+    await loaded(wrapper, false);
 
-    // the first open at first: close it
-    const first = wrapper.get('[data-char="木"] .char-toggle');
-    expect(first.attributes("aria-expanded")).toBe("true");
-    await first.trigger("click");
-    expect(first.attributes("aria-expanded")).toBe("false");
+    // all collapsed at first
+    expect(
+      wrapper.get('[data-char="木"] .char-toggle').attributes("aria-expanded"),
+    ).toBe("false");
 
     const card = wrapper.get('[data-char="林"]');
     const toggle = card.get(".char-toggle");
@@ -698,7 +709,7 @@ describe("CharacterView", () => {
       global: { plugins: [router] },
       attachTo: document.body,
     });
-    await loaded(again);
+    await loaded(again, false);
     const expanded = (ch: string) =>
       again.get(`[data-char="${ch}"] .char-toggle`).attributes("aria-expanded");
     expect(expanded("林")).toBe("true");
@@ -706,14 +717,20 @@ describe("CharacterView", () => {
     again.unmount();
   });
 
+  it("collapses a single character's card too", async () => {
+    // 森: a query no other test opens, as open cards are kept per query
+    const { wrapper } = await mountView("/kanji?q=森");
+    await loaded(wrapper, false);
+    expect(
+      wrapper.get('[data-char="森"] .char-toggle').attributes("aria-expanded"),
+    ).toBe("false");
+    wrapper.unmount();
+  });
+
   it("links a character to the words with it as a word and anywhere", async () => {
     const { wrapper, router } = await mountView("/kanji?q=林");
     await loaded(wrapper);
 
-    // one character: open
-    expect(
-      wrapper.get('[data-char="林"] .char-toggle').attributes("aria-expanded"),
-    ).toBe("true");
     const actions = wrapper.findAll('[data-char="林"] .item-actions button');
     expect(actions.map((b) => b.text())).toEqual(["= 林", "*林*"]);
     await actions[1].trigger("click");
