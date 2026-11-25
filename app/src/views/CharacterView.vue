@@ -153,7 +153,10 @@
                       v-tooltip="readingTitle(it.of, it.r)"
                       @click="toReading(it.of, it.r, it.searchIn)"
                     >
-                      {{ it.r }}
+                      {{ it.r
+                      }}<span v-if="it.okurigana" class="okurigana">{{
+                        it.okurigana
+                      }}</span>
                     </button>
                     <template v-else>{{ it.r }}</template>
                   </template>
@@ -373,11 +376,11 @@
       <button
         v-if="paged && superNext !== null"
         type="button"
-        class="more-button super-more"
+        class="link-button used-in-more super-more"
         :disabled="loadingMore"
         @click="loadSuper()"
       >
-        More
+        {{ (superTotal - superNext).toLocaleString() }} more
       </button>
 
       <!-- one character's are under "Used in" on its card -->
@@ -415,16 +418,17 @@
               it.uses.toLocaleString()
             }}</span>
           </button>
+          <!-- the next page, as "Used in" says how many more -->
+          <button
+            v-if="containingNext !== null"
+            type="button"
+            class="link-button used-in-more grid-more"
+            :disabled="loadingMore"
+            @click="loadContaining()"
+          >
+            {{ (containingTotal - containingNext).toLocaleString() }} more
+          </button>
         </div>
-        <button
-          v-if="containingNext !== null"
-          type="button"
-          class="more-button"
-          :disabled="loadingMore"
-          @click="loadContaining()"
-        >
-          More
-        </button>
       </section>
     </div>
   </main>
@@ -567,6 +571,8 @@ const found = ref<IHanChar[]>([]);
 const error = ref("");
 const containing = ref<{ ch: string; uses: number }[]>([]);
 const containingNext = ref<number | null>(null);
+/** how many characters `containing` has on every page */
+const containingTotal = ref(0);
 /** the characters `containing` is of, which the ones typed may have moved on from */
 const containingOf = ref("");
 const loadingMore = ref(false);
@@ -574,6 +580,8 @@ const loadingMore = ref(false);
 const usedIn = ref<Record<string, IHanList>>({});
 /** with a `*` query or a reading, the offset of its next page of characters */
 const superNext = ref<number | null>(null);
+/** how many characters a `*` query or a reading has on every page */
+const superTotal = ref(0);
 /** a reading that no character has */
 const noneFound = ref(false);
 /** a card's own Hangul readings, of no dictionary: with Korean or Auto-detect */
@@ -703,13 +711,14 @@ async function load() {
       opened.value = initialOpened(q.value);
       usedIn.value = page.usedIn;
       superNext.value = page.next;
+      superTotal.value = page.total;
       noneFound.value = !!reading && !page.found.length;
     } else {
       const [cs, list, direct] = await Promise.all([
         searchDB.hanChars(text, lang.value),
         chars.value.length > 1
           ? searchDB.hanContaining(text, PAGE, 0, false, lang.value)
-          : { items: [], next: null },
+          : { items: [], next: null, total: 0 },
         usedInOf(chars.value),
       ]);
       if (id !== requestId) return;
@@ -720,6 +729,7 @@ async function load() {
       containing.value = list.items;
       containingOf.value = text;
       containingNext.value = list.next;
+      containingTotal.value = list.total;
     }
     if (elScroller.value) scrollToStart(elScroller.value);
   } catch (e) {
@@ -789,7 +799,7 @@ async function superPage(
         usedInOf(chs),
       ])
     : [[], {}];
-  return { found: cs, usedIn: direct, next: list.next };
+  return { found: cs, usedIn: direct, next: list.next, total: list.total };
 }
 
 async function loadSuper() {
@@ -808,6 +818,7 @@ async function loadSuper() {
     found.value = [...found.value, ...page.found];
     usedIn.value = { ...usedIn.value, ...page.usedIn };
     superNext.value = page.next;
+    superTotal.value = page.total;
   } catch (e) {
     console.error(e);
   } finally {
@@ -831,6 +842,7 @@ async function loadContaining() {
     if (id !== requestId) return;
     containing.value = [...containing.value, ...list.items];
     containingNext.value = list.next;
+    containingTotal.value = list.total;
   } catch (e) {
     console.error(e);
   } finally {
@@ -942,7 +954,13 @@ function byOrder(e: IKanjiEntry, stats: [string, string][]) {
 }
 
 /** a reading, searching the words with `of` read so in `searchIn`; with none, text */
-type ReadingItem = { r: string; of: string; searchIn?: string };
+type ReadingItem = {
+  r: string;
+  of: string;
+  searchIn?: string;
+  /** after a kun reading's stem `r`, shown but not searched: る of ひか.る */
+  okurigana?: string;
+};
 /** a row of readings of one kind: On, Pinyin, Hangul, a dictionary's own */
 type ReadingRow = {
   key: string;
@@ -1077,13 +1095,21 @@ const HEADER_KINDS: Record<string, string[]> = {
 /** kun readings a collapsed card shows: the first few, without okurigana */
 const SHORT_KUN = 3;
 
-/** kun readings, short: without okurigana or `-`, each once, the first few */
+/**
+ * Kun readings, short: the first few, each once, without `-`; the okurigana apart from
+ * the stem, which is what a reading's link searches (ひか of ひか.る)
+ */
 function shortKun(row: ReadingRow): ReadingRow {
   const items: ReadingItem[] = [];
   for (const it of row.items) {
-    const r = it.r.replace(/^[-‐]+|[-‐]+$/gu, "").split(".")[0];
-    if (r && !items.some((x) => x.r === r && x.of === it.of))
-      items.push({ ...it, r });
+    const [r, okurigana = ""] = it.r.replace(/^[-‐]+|[-‐]+$/gu, "").split(".");
+    if (
+      r &&
+      !items.some(
+        (x) => x.r === r && x.okurigana === okurigana && x.of === it.of,
+      )
+    )
+      items.push({ ...it, r, okurigana });
   }
   const more = items.length > SHORT_KUN;
   return {
@@ -1424,6 +1450,16 @@ h3 {
 
 .link-button.used-in-more:hover {
   background: var(--app-selected-background);
+}
+
+/* in the grid of characters, in line with them */
+.link-button.grid-more {
+  align-self: center;
+}
+
+.link-button.okurigana,
+.okurigana {
+  color: var(--app-text-muted);
 }
 
 .super-more {

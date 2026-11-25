@@ -207,6 +207,13 @@ beforeEach(() => {
         };
       };
       if (a.components === "林木" && !a.direct) return page(["森"]);
+      // more than a page (60) of characters made of both
+      if (a.components === "木口" && !a.direct)
+        return page(
+          Array.from({ length: 65 }, (_, i) =>
+            String.fromCodePoint(0x5000 + i),
+          ),
+        );
       if (a.components === "木" && a.direct) return page(MADE_OF_MU);
       return page([]);
     }
@@ -400,20 +407,27 @@ describe("CharacterView", () => {
     ]);
 
     // collapsed: merged, one row per kind: its own Hangul and Hanja's as one, guāng and
-    // guang1 as one; kun short: the first few, without okurigana
+    // guang1 as one; kun short: the first few, with their okurigana
     await card.get(".char-toggle").trigger("click");
     expect(card.find(".hangul").exists()).toBe(false);
     expect(readingRows(card, ".card-readings")).toEqual([
       ["On", "コウ"],
-      ["Kun", "ひか、ひかり、びかり"],
+      ["Kun", "ひかる、ひからす、ひかり、…"],
       ["Pinyin", "guāng"],
       ["Hangul", "광"],
       ["Korean romanization", "gwang"],
     ]);
-    // a short kun reading searches the words with it read so
+    // its okurigana apart, which a kun reading's link doesn't search
+    expect(
+      card
+        .findAll(".card-readings .okurigana")
+        .map((o) => o.text())
+        .slice(0, 2),
+    ).toEqual(["る", "らす"]);
+    // a short kun reading searches the words with it read so, up to the okurigana
     await card
       .findAll(".card-readings button.reading")
-      .find((b) => b.text() === "ひか")!
+      .find((b) => b.text() === "ひかる")!
       .trigger("click");
     await flushPromises();
     expect(router.currentRoute.value.query.q).toBe("*<光>{ひか}");
@@ -482,7 +496,7 @@ describe("CharacterView", () => {
     lang.value = "ja-JP";
     expect(await collapsed()).toEqual([
       ["On", "コウ"],
-      ["Kun", "ひか、ひかり、びかり"],
+      ["Kun", "ひかる、ひからす、ひかり、…"],
     ]);
     lang.value = "zh";
     // one kind alone: no label
@@ -693,6 +707,8 @@ describe("CharacterView", () => {
     expect(wrapper.find(".containing").exists()).toBe(false);
 
     // the next page
+    // how many more, of the 35
+    expect(wrapper.get(".super-more").text()).toBe("15 more");
     await wrapper.get(".super-more").trigger("click");
     await flushPromises();
     expect(cards()).toEqual(MADE_OF_MU);
@@ -824,6 +840,23 @@ describe("CharacterView", () => {
     await loaded(wrapper, false);
     expect(wrapper.get(".containing").text()).toContain("None");
     expect(wrapper.get(".containing").text()).not.toContain("Loading…");
+    wrapper.unmount();
+  });
+
+  it('says how many more characters made of those typed there are, as "Used in" does', async () => {
+    const { wrapper } = await mountView("/kanji?q=木口");
+    await loaded(wrapper, false);
+    const more = wrapper.get(".char-grid .grid-more");
+    expect(more.text()).toBe("5 more");
+    calls = [];
+    await more.trigger("click");
+    await flushPromises();
+    expect(calls.find((c) => c.cmd === "han_containing")?.args).toMatchObject({
+      components: "木口",
+      offset: 60,
+    });
+    expect(wrapper.findAll(".char-grid .char-button")).toHaveLength(65);
+    expect(wrapper.find(".grid-more").exists()).toBe(false);
     wrapper.unmount();
   });
 

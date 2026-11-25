@@ -83,7 +83,7 @@ The Characters view (`#/kanji?q=<characters>`) shows each Han character as a car
       | Japanese        | On, short kun                                                                             | コウ; ひか、ひかり、びかり            |
       | Chinese         | Pinyin                                                                                    | guāng                                 |
       | Korean          | Hangul (its own, Hanja's, KANJIDIC's)                                                     | 광                                    |
-      - Short kun: the first 3, without okurigana (ひか.る is ひか), then "…" if there are more.
+      - Short kun: the first 3, then "…" if there are more; the okurigana muted after the stem (ひか.る is ひか<i>る</i>), which a tap searches without it.
       - With none of the search language's (e.g. a character only CC-CEDICT.Hanzi has, with Japanese), every kind, as with Auto-detect.
       - One kind alone has no label: `rì`, not `Pinyin rì`.
       - Never name readings (nanori), often many.
@@ -123,9 +123,9 @@ Each reading searches the words with the character read so, anywhere in the word
 
 A Chinese or Korean reading switches the search language to its own, unless it is Auto-detect.
 
-Below, with several characters typed, the characters made of all of them, at any depth, the most used first, each with how many words use it: `木口` lists 呆, 杏, ...
+Below, with several characters typed, the characters made of all of them, at any depth, the most used first, each with how many words use it: `木口` lists 呆, 杏, ..., 60 at a time, with **N more** at the end for the next 60.
 
-`*` before the characters lists the characters made directly of them instead, each in full, as a card: `*口` shows 可, 呆, ..., 20 at a time, and **More** shows the next 20.
+`*` before the characters lists the characters made directly of them instead, each in full, as a card: `*口` shows 可, 呆, ..., 20 at a time, and **N more** (e.g. "15 more") shows the next 20.
 
 - `*木口`: made directly of both 木 and 口.
 - A full-width `＊` works too.
@@ -137,7 +137,7 @@ In both:
 
 ### By reading
 
-A reading instead of characters lists the characters read so, each in full, as a card, the most used first, 20 at a time: `きょう` shows 京, 強, 教, ...
+A reading instead of characters lists the characters read so, each in full, as a card, the most used first, 20 at a time, with **N more** for the next: `きょう` shows 京, 強, 教, ...
 
 - Text without Han characters is a reading; `{}` around it works too: `{xing}`.
 - Kana: on, kun and name readings, katakana and hiragana alike.
