@@ -134,6 +134,12 @@ HAN["光"] = {
       tag_meta: { pinyin: { category: "reading", order: 0, notes: "Pinyin" } },
     },
     { ...daoEntry("Hanja", "ko"), character: "光", onyomi: "광" },
+    // pinyin written as CC-CEDICT does, the same reading as KANJIDIC's
+    {
+      ...daoEntry("CC-CEDICT.Hanzi", "zh"),
+      character: "光",
+      onyomi: "guang1",
+    },
   ],
 };
 
@@ -351,10 +357,12 @@ describe("CharacterView", () => {
         ],
       ],
       ["Hanja", [["Hangul", "광"]]],
+      // as the dictionary writes it
+      ["CC-CEDICT.Hanzi", [["Pinyin", "guang1"]]],
     ]);
 
-    // collapsed: merged, one row per kind, its own Hangul and Hanja's as one; kun short:
-    // the first few, without okurigana
+    // collapsed: merged, one row per kind: its own Hangul and Hanja's as one, guāng and
+    // guang1 as one; kun short: the first few, without okurigana
     await card.get(".char-toggle").trigger("click");
     expect(card.find(".hangul").exists()).toBe(false);
     expect(readingRows(card, ".card-readings")).toEqual([

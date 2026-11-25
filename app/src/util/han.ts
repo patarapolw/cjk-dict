@@ -181,3 +181,41 @@ export function readingQuery(ch: string, reading: string): string {
   const r = reading.replace(/^[-‐]+|[-‐]+$/gu, "").trim();
   return `*<${ch}>{${r.split(".")[0]}}`;
 }
+
+const TONES: Record<string, string[]> = {
+  a: ["ā", "á", "ǎ", "à"],
+  e: ["ē", "é", "ě", "è"],
+  i: ["ī", "í", "ǐ", "ì"],
+  o: ["ō", "ó", "ǒ", "ò"],
+  u: ["ū", "ú", "ǔ", "ù"],
+  ü: ["ǖ", "ǘ", "ǚ", "ǜ"],
+};
+
+/**
+ * Numbered pinyin with tone marks, as KANJIDIC writes it: `xing1` → `xīng`, `lu:e4` or
+ * `lve4` → `lüè`, `ma5` → `ma`. The mark goes on a or e, else the o of ou, else the last
+ * vowel. Pinyin with marks already, or without a number, is kept as it is.
+ */
+export function toneMarks(pinyin: string): string {
+  return pinyin.replace(/([a-zü:]+)([1-5])/giu, (_, syl: string, n: string) => {
+    const s = syl.replace(/u:|v/giu, (m) =>
+      m[0] === m[0].toUpperCase() ? "Ü" : "ü",
+    );
+    const tone = Number(n);
+    if (tone === 5) return s;
+    const lower = s.toLowerCase();
+    let at = lower.search(/[ae]/u);
+    if (at < 0) at = lower.indexOf("ou");
+    if (at < 0) {
+      const vowels = [...lower.matchAll(/[iouü]/gu)];
+      at = vowels.length ? vowels[vowels.length - 1].index! : -1;
+    }
+    if (at < 0) return s;
+    const v = lower[at];
+    const marked = TONES[v][tone - 1];
+    const upper = s[at] !== v;
+    return (
+      s.slice(0, at) + (upper ? marked.toUpperCase() : marked) + s.slice(at + 1)
+    );
+  });
+}

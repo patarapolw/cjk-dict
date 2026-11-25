@@ -84,6 +84,7 @@ The Characters view (`#/kanji?q=<characters>`) shows each Han character as a car
       | Korean          | Hangul (its own, Hanja's, KANJIDIC's), Korean romanization                                | 광                                    |
       - Short kun: the first 3, without okurigana (ひか.る is ひか), then "…" if there are more.
       - Never name readings (nanori), often many.
+      - Pinyin in one way, with tone marks and lowercase, so that each reading is listed once: KANJIDIC's `xīng` and CC-CEDICT.Hanzi's `xing1` are one `xīng`. Open, each entry shows it as its dictionary writes it.
 
     - open, its own Hangul readings; the dictionaries' are in their entries, so that it's clear where each comes from;
 

@@ -444,6 +444,7 @@ import {
   readingQuery,
   sortByLang,
   sortIds,
+  toneMarks,
   variantLabel,
   variantTitle,
 } from "../util/han";
@@ -996,6 +997,16 @@ function cardReadings(c: IHanChar): ReadingRow[] {
   const rows = new Map<string, ReadingRow>();
   const add = (row: ReadingRow) => {
     if (!shown(row.key)) return;
+    // one way of writing pinyin, so that each reading is listed once: KANJIDIC's xīng
+    // and CC-CEDICT.Hanzi's xing1 are both xīng
+    if (row.key === "pinyin")
+      row = {
+        ...row,
+        items: row.items.map((it) => ({
+          ...it,
+          r: toneMarks(it.r).toLowerCase(),
+        })),
+      };
     const had = rows.get(row.key);
     if (!had) return rows.set(row.key, { ...row, items: [...row.items] });
     for (const it of row.items) {
