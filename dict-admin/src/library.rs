@@ -51,6 +51,14 @@ pub struct PackedFile {
     pub file: FileInfo,
     pub unpacked_size: u64,
     pub unpacked_sha256: String,
+    /// the unpacked search.db's compatibility level (`meta.compat`): apps that read a lower
+    /// one keep the library they have. Absent in manifests from before: 1.
+    #[serde(default = "compat_1")]
+    pub compat: u32,
+}
+
+fn compat_1() -> u32 {
+    1
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -206,13 +214,17 @@ const ZSTD_LEVEL: i32 = 19;
 /// as it is now
 pub fn pack_search_db(db: &Path, zst: &Path, previous: Option<&PackedFile>) -> Result<PackedFile> {
     let unpacked = file_info(db, SEARCH_DB)?;
+    let compat = yomitan_parser::search::compat(db)?;
     let file_name = zst
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
     if let Some(p) = previous.filter(|p| p.unpacked_sha256 == unpacked.sha256) {
         if std::fs::metadata(zst).is_ok_and(|m| m.len() == p.file.size) {
-            return Ok(p.clone());
+            return Ok(PackedFile {
+                compat,
+                ..p.clone()
+            });
         }
     }
     let tmp = zst.with_extension("zst.tmp");
@@ -231,6 +243,7 @@ pub fn pack_search_db(db: &Path, zst: &Path, previous: Option<&PackedFile>) -> R
         file: file_info(zst, &file_name)?,
         unpacked_size: unpacked.size,
         unpacked_sha256: unpacked.sha256,
+        compat,
     })
 }
 

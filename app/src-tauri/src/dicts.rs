@@ -21,7 +21,7 @@ use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager, State};
 use yomitan_parser::char_reading::Latin;
 use yomitan_parser::search::{
-    DictInfo, HanChar, HanList, SearchDb, SearchRequest, SearchResult, parse_lang,
+    DictInfo, HanChar, HanList, SEARCH_DB_COMPAT, SearchDb, SearchRequest, SearchResult, parse_lang,
 };
 
 use crate::error::AppError;
@@ -62,6 +62,20 @@ struct PackedFile {
     file: FileInfo,
     unpacked_size: u64,
     unpacked_sha256: String,
+    /// the unpacked search.db's compatibility level; absent in manifests from before: 1
+    #[serde(default = "compat_1")]
+    compat: u32,
+}
+
+fn compat_1() -> u32 {
+    1
+}
+
+impl PackedFile {
+    /// Whether this app can read the search.db: one of a higher level needs a newer app
+    fn readable(&self) -> bool {
+        self.compat <= SEARCH_DB_COMPAT
+    }
 }
 
 /// dict-admin's `manifest.json`. Version 2 lists `search_db_zst`; version 1, `search_db`,
@@ -364,6 +378,16 @@ fn sha256_file(path: &Path, mut progress: impl FnMut(u64)) -> Result<String, App
 }
 
 #[derive(Serialize)]
+pub struct Plan {
+    /// what to download; empty = up to date, or `needs_newer_app`
+    files: Vec<PlannedFile>,
+    /// The remote library's search.db needs a newer app (its compatibility level is
+    /// higher than this app reads): the app keeps the library it has, and downloads none
+    /// of it, since the zips and search.db must match.
+    needs_newer_app: bool,
+}
+
+#[derive(Serialize)]
 pub struct PlannedFile {
     /// relative to app data dir, for the `download_url` command
     filename: String,
@@ -374,7 +398,7 @@ pub struct PlannedFile {
 /// Fetch the remote manifest and list the files that need downloading.
 /// Empty = up to date. Remembers the manifest until `dict_commit`.
 #[tauri::command]
-pub async fn dict_plan(app: AppHandle) -> Result<Vec<PlannedFile>, AppError> {
+pub async fn dict_plan(app: AppHandle) -> Result<Plan, AppError> {
     let remote = Remote::from_env()?;
     let res = reqwest::get(remote.url(MANIFEST)).await?;
     if !res.status().is_success() {
@@ -390,6 +414,14 @@ pub async fn dict_plan(app: AppHandle) -> Result<Vec<PlannedFile>, AppError> {
     // reading the library and committing is blocking work
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<DictState>();
+        if !zst.readable() {
+            // nor a plan from before, whose files R2 may no longer have
+            let _ = std::fs::remove_file(state.dir.join(PENDING));
+            return Ok(Plan {
+                files: vec![],
+                needs_newer_app: true,
+            });
+        }
         let committed = state.committed();
         let incoming = state.dir.join(INCOMING);
         std::fs::create_dir_all(&incoming)?;
@@ -435,13 +467,19 @@ pub async fn dict_plan(app: AppHandle) -> Result<Vec<PlannedFile>, AppError> {
         // by scripts/push-library.mjs) are committed, even under the same manifest
         if unchanged && all_in_place {
             let _ = std::fs::remove_file(state.dir.join(PENDING));
-            return Ok(out);
+            return Ok(Plan {
+                files: out,
+                needs_newer_app: false,
+            });
         }
         // `dict_commit` once these are downloaded, and every other download (the page
         // waits for all of them); right away if there are none, e.g. when dictionaries
         // were only removed
         std::fs::write(state.dir.join(PENDING), &text)?;
-        Ok(out)
+        Ok(Plan {
+            files: out,
+            needs_newer_app: false,
+        })
     })
     .await
     .map_err(|e| AppError::Error(e.to_string()))?
@@ -800,10 +838,28 @@ mod tests {
         let v2: Manifest = serde_json::from_str(V2).unwrap();
         assert_eq!(v2.search_db_sha256(), Some("db2"));
         assert_eq!(v2.zst().unwrap().file.file, "search.db.zst");
+        // from before compatibility levels: level 1, which every app reads
+        assert_eq!(v2.zst().unwrap().compat, 1);
+        assert!(v2.zst().unwrap().readable());
         assert_eq!(
             v2.zips().map(|f| f.file.as_str()).collect::<Vec<_>>(),
             ["A.zip"]
         );
+    }
+
+    #[test]
+    fn a_search_db_of_a_higher_level_needs_a_newer_app() {
+        let at = |compat: u32| {
+            let m: Manifest = serde_json::from_str(&V2.replace(
+                r#""unpacked_sha256":"db2""#,
+                &format!(r#""unpacked_sha256":"db2","compat":{compat}"#),
+            ))
+            .unwrap();
+            m.zst().unwrap().readable()
+        };
+        assert!(at(SEARCH_DB_COMPAT));
+        assert!(at(SEARCH_DB_COMPAT - 1));
+        assert!(!at(SEARCH_DB_COMPAT + 1));
     }
 
     #[test]

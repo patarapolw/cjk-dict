@@ -99,6 +99,12 @@ Options and behavior:
 - Both write `search.db.zst`, `search.db` zstd-compressed (level 19), for the app to download:
   - compressed again only when `search.db` changed since the last one (the manifest has its unpacked checksum);
   - about a minute for a 1.3 GB `search.db`, which becomes \~310 MB.
+- `search.db` records its compatibility level (`meta.compat`, e.g. `1`), and the manifest copies it (`search_db_zst.compat`):
+  - the level is `SEARCH_DB_COMPAT` in `yomitan-parser/src/search.rs`: an app reads a `search.db` of that level or lower;
+  - an app that reads a lower level keeps the library it has (see [app.md](app.md#downloading-the-library)), so a device needn't get every new app version;
+  - it's bumped only when an older app would read the new `search.db` wrongly: a table or column dropped or renamed, or data stored differently;
+  - new tables, columns and `meta` keys don't bump it: older apps don't query them;
+  - `build` records it only when it differs from what `search.db` says (none means 1), so an unchanged library keeps the same `search.db`.
 - Only terms, and where kanji entries are, are indexed. Definitions, kanji meta, frequencies and media stay in the zips.
 - Pitch accents (term meta of mode `pitch`, e.g. Kanjium's) are copied into `search.db`'s `term_pitch`, every entry, with its term and reading as the dictionary has them, so a search returns them with the words. An existing `search.db` gets those of the dictionaries it has on the next `build`.
 - Terms are tokenized with [lindera](https://github.com/lindera/lindera), so that `~` finds words containing them.
