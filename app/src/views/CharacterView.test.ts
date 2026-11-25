@@ -30,11 +30,15 @@ const HAN: Record<string, IHanChar> = {
         meanings: ["grove", "forest"],
         stats: [
           ["freq", "1000"],
+          ["korean_h", "림"],
+          ["nanori", "しげ"],
           ["pinyin", "lín"],
           ["strokes", "8"],
         ],
         tag_meta: {
           pinyin: { category: "reading", order: 0, notes: "Pinyin" },
+          korean_h: { category: "reading", order: 1, notes: "Korean" },
+          nanori: { category: "reading", order: 2, notes: "Name readings" },
           jouyou: { category: "frequent", order: 0, notes: "regular-use" },
           strokes: { category: "misc", order: -1, notes: "Stroke count" },
           freq: { category: "misc", order: 0, notes: "Frequency" },
@@ -111,6 +115,101 @@ HAN["學"] = {
   ],
 };
 
+/** 光 in two kanji dictionaries, each with its own readings */
+HAN["光"] = {
+  ch: "光",
+  ids: [],
+  components: [],
+  all_components: [],
+  hangul: ["광"],
+  uses: 30,
+  variants: [],
+  entries: [
+    {
+      ...daoEntry("KANJIDIC", null),
+      character: "光",
+      onyomi: "コウ",
+      kunyomi: "ひか.る ひか.らす ひかり -びかり",
+      stats: [
+        ["korean_r", "gwang"],
+        ["pinyin", "guāng"],
+      ],
+      tag_meta: {
+        pinyin: { category: "reading", order: 0, notes: "Pinyin" },
+        korean_r: {
+          category: "reading",
+          order: 1,
+          notes: "Korean romanization",
+        },
+      },
+    },
+    { ...daoEntry("Hanja", "ko"), character: "光", onyomi: "광" },
+    // pinyin written as CC-CEDICT does, the same reading as KANJIDIC's
+    {
+      ...daoEntry("CC-CEDICT.Hanzi", "zh"),
+      character: "光",
+      onyomi: "guang1",
+    },
+  ],
+};
+
+/** 杉: kun readings with KANJIDIC's `-`, one of them also in another Japanese dictionary */
+HAN["杉"] = {
+  ch: "杉",
+  ids: [],
+  components: [],
+  all_components: [],
+  hangul: [],
+  uses: 5,
+  variants: [],
+  entries: [
+    {
+      ...daoEntry("KANJIDIC", null),
+      character: "杉",
+      kunyomi: "-びかり すぎ -ばかり",
+    },
+    { ...daoEntry("MyDict", "ja"), character: "杉", kunyomi: "びかり" },
+  ],
+};
+
+/** 果: kun readings KANJIDIC writes several ways */
+HAN["果"] = {
+  ch: "果",
+  ids: [],
+  components: [],
+  all_components: [],
+  hangul: [],
+  uses: 5,
+  variants: [],
+  entries: [
+    {
+      ...daoEntry("KANJIDIC", null),
+      character: "果",
+      kunyomi: "は.たす はた.す -は.たす は.てる -は.てる は.て",
+    },
+  ],
+};
+
+/** 日: KANJIDIC's kun, with a rendaku form (-び) and a suffix that isn't one (-か) */
+HAN["日"] = {
+  ch: "日",
+  ids: [],
+  components: [],
+  all_components: [],
+  hangul: [],
+  uses: 5,
+  variants: [],
+  entries: [
+    {
+      ...daoEntry("KANJIDIC", null),
+      character: "日",
+      kunyomi: "ひ -び -か",
+    },
+    // a voiced reading without the `-`, which stays
+    { ...daoEntry("MyDict", "ja"), character: "日", kunyomi: "び" },
+  ],
+};
+
 /** what the `dicts` command returns */
 let dicts: Partial<IDictInfo>[] = [];
 
@@ -165,6 +264,13 @@ beforeEach(() => {
         };
       };
       if (a.components === "林木" && !a.direct) return page(["森"]);
+      // more than a page (60) of characters made of both
+      if (a.components === "木口" && !a.direct)
+        return page(
+          Array.from({ length: 65 }, (_, i) =>
+            String.fromCodePoint(0x5000 + i),
+          ),
+        );
       if (a.components === "木" && a.direct) return page(MADE_OF_MU);
       return page([]);
     }
@@ -210,14 +316,59 @@ async function mountView(path: string) {
   return { wrapper, router };
 }
 
+/** waits for the characters to load, and opens their cards, unless `open` is false */
 async function loaded(
   wrapper: Awaited<ReturnType<typeof mountView>>["wrapper"],
+  open = true,
 ) {
   await vi.waitFor(() =>
     expect(calls.some((c) => c.cmd === "han_chars")).toBe(true),
   );
   await flushPromises();
+  if (open) await openAll(wrapper);
   return wrapper;
+}
+
+/** opens every card collapsed: they all start so */
+async function openAll(
+  wrapper: Awaited<ReturnType<typeof mountView>>["wrapper"],
+) {
+  for (const t of wrapper.findAll(".char-toggle"))
+    if (t.attributes("aria-expanded") === "false") await t.trigger("click");
+}
+
+/** each `dt` of what `sel` finds, with its `dd`: `[label, readings]` */
+const readingRows = (
+  el: ReturnType<Awaited<ReturnType<typeof mountView>>["wrapper"]["get"]>,
+  sel: string,
+) =>
+  el
+    .findAll(`${sel} dt`)
+    .map((dt) => [dt.text(), dt.element.nextElementSibling!.textContent!]);
+
+/**
+ * Each row of a collapsed card's readings: `[label, readings]`, or with one kind alone,
+ * which needs no label, `["", readings]`
+ */
+const headerRows = (
+  el: ReturnType<Awaited<ReturnType<typeof mountView>>["wrapper"]["get"]>,
+) => {
+  const dl = el.find(".card-readings");
+  if (!dl.exists()) return [];
+  return dl.findAll("dd").map((dd) => {
+    const dt = dd.element.previousElementSibling;
+    return [dt?.tagName === "DT" ? dt.textContent!.trim() : "", dd.text()];
+  });
+};
+
+/** opens a character's card, collapsed in a list */
+async function openCard(
+  wrapper: Awaited<ReturnType<typeof mountView>>["wrapper"],
+  ch: string,
+) {
+  const toggle = wrapper.get(`[data-char="${ch}"] .char-toggle`);
+  expect(toggle.attributes("aria-expanded")).toBe("false");
+  await toggle.trigger("click");
 }
 
 describe("CharacterView", () => {
@@ -252,22 +403,23 @@ describe("CharacterView", () => {
 
     const card = wrapper.get('[data-char="林"]');
     expect(card.get(".glyph").text()).toBe("林");
-    expect(card.get(".hangul").text()).toBe("림");
     expect(card.get(".ids").text().replace(/\s/g, "")).toBe("⿰木木");
-    expect(card.get(".readings").text()).toContain("リン");
-    // on and kun by their script, KANJIDIC having no one language
-    expect(card.findAll(".readings dt").map((dt) => dt.text())).toEqual([
-      "On",
-      "Kun",
-      "Pinyin",
+    // open: its own Hangul readings in the header, and each entry's readings in it, as
+    // the dictionary gives them: on and kun by their script, KANJIDIC having no one
+    // language, then its reading stats by the tag bank's order, with its notes
+    expect(card.get(".hangul").text()).toBe("림");
+    expect(card.find(".card-readings").exists()).toBe(false);
+    expect(readingRows(card, ".kanji-entry .readings")).toEqual([
+      ["On", "リン"],
+      ["Kun", "はやし"],
+      ["Pinyin", "lín"],
+      ["Korean", "림"],
+      ["Name readings", "しげ"],
     ]);
     expect(card.findAll(".meanings li").map((li) => li.text())).toEqual([
       "grove",
       "forest",
     ]);
-    // other languages' readings go with the readings
-    expect(card.get(".readings").text()).toContain("Pinyin");
-    expect(card.get(".readings").text()).toContain("lín");
     // the rest by the tag bank's order
     expect(card.findAll(".stats th").map((th) => th.text())).toEqual([
       "Stroke count",
@@ -281,6 +433,214 @@ describe("CharacterView", () => {
     // nothing but what is shown
     expect(wrapper.get(".search-hint").text()).toBe("Character 林");
     wrapper.unmount();
+  });
+
+  it("merges the readings when collapsed, and keeps each dictionary's when open", async () => {
+    const { wrapper, router } = await mountView("/kanji?q=光");
+    await loaded(wrapper);
+    const card = wrapper.get('[data-char="光"]');
+
+    // open: each entry's own, under its dictionary's name
+    expect(
+      card
+        .findAll(".kanji-entry")
+        .map((e) => [
+          e.get('.tag[data-category="dictionary"]').text(),
+          readingRows(e, ".readings"),
+        ]),
+    ).toEqual([
+      [
+        "KANJIDIC",
+        [
+          ["On", "コウ"],
+          ["Kun", "ひか.る, ひか.らす, ひかり, -びかり"],
+          ["Pinyin", "guāng"],
+          ["Korean romanization", "gwang"],
+        ],
+      ],
+      // as the dictionary gives them: its readings field, labelled by its script
+      ["Hanja", [["Reading", "광"]]],
+      ["CC-CEDICT.Hanzi", [["Reading", "guang1"]]],
+    ]);
+
+    // collapsed: merged, one row per kind: its own Hangul and Hanja's as one, guāng and
+    // guang1 as one; kun short: the first few, as KANJIDIC writes them (ひか.る)
+    await card.get(".char-toggle").trigger("click");
+    expect(card.find(".hangul").exists()).toBe(false);
+    expect(readingRows(card, ".card-readings")).toEqual([
+      ["On", "コウ"],
+      ["Kun", "ひか.る, ひか.らす, ひかり"],
+      ["Pinyin", "guāng"],
+      ["Hangul", "광"],
+      ["Korean romanization", "gwang"],
+    ]);
+    // a kun reading searches the words with it read so, up to the okurigana
+    await card
+      .findAll(".card-readings button.reading")
+      .find((b) => b.text() === "ひか.る")!
+      .trigger("click");
+    await flushPromises();
+    expect(router.currentRoute.value.query.q).toBe("*<光>{ひか}");
+    wrapper.unmount();
+  });
+
+  it("searches a Hangul reading as Hangul, open or collapsed", async () => {
+    const { wrapper, router } = await mountView("/kanji?q=光");
+    await loaded(wrapper);
+    const hangulButton = (sel: string) =>
+      wrapper
+        .findAll(`[data-char="光"] ${sel} button.reading`)
+        .find((b) => b.text() === "광")!;
+    const toggle = () => wrapper.get('[data-char="光"] .char-toggle');
+    if (toggle().attributes("aria-expanded") === "false")
+      await toggle().trigger("click");
+
+    // open: Hanja's entry; KANJIDIC's romanization (gwang) is text, not a link, as
+    // `*<光>{gwang}` isn't romanized
+    expect(
+      wrapper
+        .findAll('[data-char="光"] .kanji-entry button.reading')
+        .some((b) => b.text() === "gwang"),
+    ).toBe(false);
+    // open: Hanja's entry
+    const hanja = wrapper
+      .findAll('[data-char="光"] .kanji-entry')
+      .find((e) => e.text().includes("Hanja"))!;
+    await hanja.get("button.reading").trigger("click");
+    await flushPromises();
+    expect(router.currentRoute.value.query).toMatchObject({
+      q: "*<光>{광}",
+      qState: "",
+    });
+
+    // collapsed: Japanese shows no Hangul; Korean does, and searches by it
+    lang.value = "ja-JP";
+    calls = [];
+    await router.push("/kanji?q=光");
+    await loaded(wrapper);
+    await toggle().trigger("click");
+    expect(hangulButton(".card-readings")).toBeUndefined();
+    lang.value = "ko-KR";
+    await flushPromises();
+    await hangulButton(".card-readings").trigger("click");
+    await flushPromises();
+    expect(router.currentRoute.value.query.q).toBe("*<光>{광}");
+    expect(lang.value).toBe("ko-KR");
+    wrapper.unmount();
+  });
+
+  it("writes a collapsed card's kun with KANJIDIC's `-`, but once", async () => {
+    lang.value = "ja-JP";
+    const { wrapper, router } = await mountView("/kanji?q=杉");
+    await loaded(wrapper, false);
+    const card = wrapper.get('[data-char="杉"]');
+    // -びかり is MyDict's びかり too: that one, in its place
+    expect(headerRows(card)).toEqual([["", "びかり, すぎ, -ばかり"]]);
+    // searched without the `-`
+    await card
+      .findAll(".card-readings button.reading")
+      .find((b) => b.text() === "-ばかり")!
+      .trigger("click");
+    await flushPromises();
+    // a suffix: with a character before it
+    expect(router.currentRoute.value.query.q).toBe("*?<杉>{ばかり}");
+    wrapper.unmount();
+  });
+
+  it("leaves rendaku forms out of a collapsed card's kun, with the `-` in front only", async () => {
+    lang.value = "ja-JP";
+    const { wrapper } = await mountView("/kanji?q=日");
+    await loaded(wrapper, false);
+    // -び is ひ's rendaku: out; but MyDict's び (first, of the search language), without the
+    // `-`, stays; -か isn't voiced
+    expect(headerRows(wrapper.get('[data-char="日"]'))).toEqual([
+      ["", "び, ひ, -か"],
+    ]);
+    wrapper.unmount();
+  });
+
+  it("lists a collapsed card's kun reading once, whatever its dot or `-`", async () => {
+    lang.value = "ja-JP";
+    const { wrapper, router } = await mountView("/kanji?q=果");
+    await loaded(wrapper, false);
+    // は.たす, はた.す and -は.たす are one, the longest stem without a `-`, which a tap
+    // searches; は.てる and -は.てる are one too
+    const card = wrapper.get('[data-char="果"]');
+    expect(headerRows(card)).toEqual([["", "はた.す, は.てる, は.て"]]);
+    await card.get(".card-readings button.reading").trigger("click");
+    await flushPromises();
+    expect(router.currentRoute.value.query.q).toBe("*<果>{はた}");
+    wrapper.unmount();
+  });
+
+  it("shows a collapsed card's readings of the search language", async () => {
+    const collapsed = async () => {
+      calls = [];
+      const { wrapper } = await mountView("/kanji?q=光");
+      await loaded(wrapper);
+      const card = wrapper.get('[data-char="光"]');
+      // open at first, or as another test left it: open is remembered per query
+      const toggle = card.get(".char-toggle");
+      if (toggle.attributes("aria-expanded") === "true")
+        await toggle.trigger("click");
+      const rows = headerRows(card);
+      wrapper.unmount();
+      return rows;
+    };
+    lang.value = "ja-JP";
+    expect(await collapsed()).toEqual([
+      ["On", "コウ"],
+      ["Kun", "ひか.る, ひか.らす, ひかり"],
+    ]);
+    lang.value = "zh";
+    // one kind alone: no label
+    expect(await collapsed()).toEqual([["", "guāng"]]);
+    // Hangul only, not its romanization
+    lang.value = "ko-KR";
+    expect(await collapsed()).toEqual([["", "광"]]);
+  });
+
+  it("falls back to every reading when collapsed with none of the search language's", async () => {
+    // 道's entries have no readings: give CC-CEDICT.Hanzi's pinyin only
+    const saved = HAN["道"];
+    HAN["道"] = {
+      ...saved,
+      hangul: [],
+      entries: [{ ...daoEntry("CC-CEDICT.Hanzi", null), onyomi: "dao4" }],
+    };
+    try {
+      lang.value = "ja-JP";
+      const { wrapper } = await mountView("/kanji?q=道");
+      await loaded(wrapper);
+      const card = wrapper.get('[data-char="道"]');
+      const toggle = card.get(".char-toggle");
+      if (toggle.attributes("aria-expanded") === "true")
+        await toggle.trigger("click");
+      expect(headerRows(card)).toEqual([["", "dào"]]);
+      // open again: open is remembered per query, and other tests look into 道
+      await toggle.trigger("click");
+      wrapper.unmount();
+    } finally {
+      HAN["道"] = saved;
+    }
+  });
+
+  it("shows an open card's own Hangul readings with Korean or Auto-detect only", async () => {
+    const hangul = async () => {
+      calls = [];
+      const { wrapper } = await mountView("/kanji?q=林");
+      await loaded(wrapper);
+      const shown = wrapper.find('[data-char="林"] .hangul').exists();
+      wrapper.unmount();
+      return shown;
+    };
+    expect(await hangul()).toBe(true);
+    lang.value = "ko-KR";
+    expect(await hangul()).toBe(true);
+    lang.value = "ja-JP";
+    expect(await hangul()).toBe(false);
+    lang.value = "zh";
+    expect(await hangul()).toBe(false);
   });
 
   it("lists a character's variants, each looked up when clicked", async () => {
@@ -346,6 +706,7 @@ describe("CharacterView", () => {
     );
     await flushPromises();
     expect(router.currentRoute.value.query.q).toBe("木");
+    await openAll(wrapper);
     expect(wrapper.get('[data-char="木"]').text()).toContain(
       "Does not break down further",
     );
@@ -354,13 +715,24 @@ describe("CharacterView", () => {
         .findAll('[data-char="木"] .used-in-list .component')
         .map((b) => b.text()),
     ).toEqual(MADE_OF_MU.slice(0, 30));
+    // the rest: a link to them all, each in full
     expect(wrapper.get('[data-char="木"] .used-in-more').text()).toBe("5 more");
+    // and the heading: them all, each in full
+    expect(wrapper.get('[data-char="木"] .used-in-heading').text()).toBe(
+      "Used in ›",
+    );
+    await wrapper.get('[data-char="木"] .used-in-more').trigger("click");
+    await flushPromises();
+    expect(router.currentRoute.value.query.q).toBe("*木");
     wrapper.unmount();
   });
 
   it("lists the characters made directly of each character on its card", async () => {
     const { wrapper } = await mountView("/kanji?q=林木");
-    await loaded(wrapper);
+    await loaded(wrapper, false);
+    // all collapsed at first
+    await openCard(wrapper, "林");
+    await openCard(wrapper, "木");
 
     const direct = calls.filter(
       (c) => c.cmd === "han_containing" && c.args.direct,
@@ -369,8 +741,11 @@ describe("CharacterView", () => {
     expect(wrapper.get('[data-char="林"] .used-in').text()).toContain(
       "Not a component of another character",
     );
-    // nothing to search further
-    expect(wrapper.find('[data-char="林"] .super-search').exists()).toBe(false);
+    // nothing to search further: the heading is no link
+    expect(wrapper.find('[data-char="林"] .used-in-heading').exists()).toBe(
+      false,
+    );
+    expect(wrapper.get('[data-char="林"] .used-in h3').text()).toBe("Used in");
     expect(
       wrapper
         .findAll('[data-char="木"] .used-in-list .component')
@@ -381,9 +756,15 @@ describe("CharacterView", () => {
     expect(wrapper.get(".search-hint").text()).toBe("Characters 林 木");
     expect(wrapper.get(".containing h2").text()).toContain("林 + 木");
     expect(wrapper.get(".containing").text()).toContain("all 2 characters");
-    expect(wrapper.findAll(".char-grid button").map((b) => b.text())).toEqual([
-      "森",
-    ]);
+    // each with how many words use it
+    expect(
+      wrapper
+        .findAll(".char-grid button")
+        .map((b) => [
+          b.element.firstChild!.textContent!.trim(),
+          b.get(".char-uses").text(),
+        ]),
+    ).toEqual([["森", "1"]]);
     wrapper.unmount();
   });
 
@@ -392,9 +773,9 @@ describe("CharacterView", () => {
     await loaded(wrapper);
 
     calls = [];
-    const button = wrapper.get('[data-char="木"] .super-search');
-    // as it will read in the search box
-    expect(button.text().replace(/\s+/g, " ")).toBe("Search *木");
+    // "5 more" after those "Used in" lists, and its heading: all of them, each in full
+    expect(wrapper.get('[data-char="木"] .used-in-more').text()).toBe("5 more");
+    const button = wrapper.get('[data-char="木"] .used-in-heading');
     await button.trigger("click");
     await vi.waitFor(() =>
       expect(calls.some((c) => c.cmd === "han_chars")).toBe(true),
@@ -413,23 +794,191 @@ describe("CharacterView", () => {
     const cards = () =>
       wrapper.findAll(".char-card").map((c) => c.attributes("data-char"));
     expect(cards()).toEqual(MADE_OF_MU.slice(0, 20));
-    // each in full, with its own "Used in"
-    expect(wrapper.find('[data-char="林"] .used-in').exists()).toBe(true);
+    // each collapsed, and in full when opened, with its own "Used in"
+    expect(wrapper.find('[data-char="森"] .used-in').exists()).toBe(false);
+    await openCard(wrapper, "森");
+    expect(wrapper.find('[data-char="森"] .used-in').exists()).toBe(true);
     expect(wrapper.find(".containing").exists()).toBe(false);
 
     // the next page
+    // how many more, of the 35
+    expect(wrapper.get(".super-more").text()).toBe("15 more");
     await wrapper.get(".super-more").trigger("click");
     await flushPromises();
     expect(cards()).toEqual(MADE_OF_MU);
     expect(wrapper.find(".super-more").exists()).toBe(false);
+    wrapper.unmount();
+  });
 
-    // one of them alone
-    await wrapper
-      .findAll('[data-char="林"] .item-actions button')
-      .find((b) => b.text() === "字 林")!
+  it("collapses the cards of a list, with the gist outside, and keeps them as left", async () => {
+    // not 林木: the cards open are kept per query, and another test opens those
+    const { wrapper, router } = await mountView("/kanji?q=木林");
+    await loaded(wrapper, false);
+
+    // all collapsed at first
+    expect(
+      wrapper.get('[data-char="木"] .char-toggle').attributes("aria-expanded"),
+    ).toBe("false");
+
+    const card = wrapper.get('[data-char="林"]');
+    const toggle = card.get(".char-toggle");
+    expect(toggle.attributes("aria-expanded")).toBe("false");
+    expect(card.find(".char-details").exists()).toBe(false);
+    // outside: the first meanings, how many words use it, the readings but name readings
+    expect(card.get(".gist-meanings").text()).toBe("grove; forest");
+    expect(card.get(".uses").text()).toBe("in 120 words");
+    expect(card.get(".card-readings").text()).toContain("リン");
+    expect(card.get(".card-readings").text()).toContain("はやし");
+    expect(card.get(".card-readings").text()).not.toContain("しげ");
+
+    await toggle.trigger("click");
+    expect(toggle.attributes("aria-expanded")).toBe("true");
+    expect(card.get(".kanji-entry .meanings").text()).toContain("grove");
+
+    // to Words and back: the view is mounted again, 林 still open, 木 still closed
+    await card
+      .findAll(".item-actions button")
+      .find((b) => b.text() === "= 林")!
       .trigger("click");
     await flushPromises();
-    expect(router.currentRoute.value.query.q).toBe("林");
+    expect(router.currentRoute.value.path).toBe("/dictionary");
+    wrapper.unmount();
+
+    calls = [];
+    await router.push("/kanji?q=木林");
+    const again = mount(CharacterView, {
+      global: { plugins: [router] },
+      attachTo: document.body,
+    });
+    await loaded(again, false);
+    const expanded = (ch: string) =>
+      again.get(`[data-char="${ch}"] .char-toggle`).attributes("aria-expanded");
+    expect(expanded("林")).toBe("true");
+    expect(expanded("木")).toBe("false");
+    again.unmount();
+  });
+
+  it("counts and orders the characters by the search language's words", async () => {
+    lang.value = "ja-JP";
+    const { wrapper } = await mountView("/kanji?q=木");
+    await loaded(wrapper, false);
+    expect(calls.find((c) => c.cmd === "han_chars")?.args).toEqual({
+      text: "木",
+      lang: "ja-JP",
+    });
+    expect(calls.find((c) => c.cmd === "han_containing")?.args).toMatchObject({
+      components: "木",
+      lang: "ja-JP",
+    });
+
+    // another language: looked up again, with its counts
+    calls = [];
+    lang.value = "zh";
+    await vi.waitFor(() =>
+      expect(calls.some((c) => c.cmd === "han_chars")).toBe(true),
+    );
+    expect(calls.find((c) => c.cmd === "han_chars")?.args.lang).toBe("zh");
+    wrapper.unmount();
+  });
+
+  it("opens a card on a tap anywhere on its header but its links", async () => {
+    // 杏: a query no other test opens, as open cards are kept per query
+    const { wrapper, router } = await mountView("/kanji?q=杏");
+    await loaded(wrapper, false);
+    const header = wrapper.get('[data-char="杏"] .char-header');
+    const expanded = () =>
+      wrapper.get('[data-char="杏"] .char-toggle').attributes("aria-expanded");
+    expect(expanded()).toBe("false");
+    await header.get(".char-summary").trigger("click");
+    expect(expanded()).toBe("true");
+    await header.trigger("click");
+    expect(expanded()).toBe("false");
+    // a link: not a toggle
+    await header.get(".item-actions button").trigger("click");
+    await flushPromises();
+    expect(expanded()).toBe("false");
+    expect(router.currentRoute.value.path).toBe("/dictionary");
+    wrapper.unmount();
+  });
+
+  it('links "in N words" to the words with it anywhere', async () => {
+    const { wrapper, router } = await mountView("/kanji?q=林");
+    await loaded(wrapper);
+    const uses = wrapper.get('[data-char="林"] .uses');
+    expect(uses.text()).toBe("in 120 words");
+    await uses.trigger("click");
+    await flushPromises();
+    expect(router.currentRoute.value.query).toMatchObject({
+      q: "*林*",
+      qState: "",
+    });
+    wrapper.unmount();
+  });
+
+  it("shows the characters made of those typed only once they have loaded", async () => {
+    const { wrapper } = await mountView("/kanji?q=林木");
+    // opened by navigation: looked up at once, without waiting for typing to pause
+    await flushPromises();
+    expect(calls.some((c) => c.cmd === "han_containing")).toBe(true);
+    expect(wrapper.get(".containing").text()).toContain("森");
+    expect(wrapper.get(".containing").text()).not.toContain("None");
+
+    // typed: the new heading at once, but not "None" nor the last query's characters
+    // until they have loaded
+    calls = [];
+    await wrapper.get("input.search-input").setValue("木林");
+    expect(wrapper.get(".containing h2").text()).toContain("木 + 林");
+    expect(wrapper.get(".containing").text()).toContain("Loading…");
+    expect(wrapper.get(".containing").text()).not.toContain("None");
+    expect(wrapper.find(".char-grid").exists()).toBe(false);
+    await loaded(wrapper, false);
+    expect(wrapper.get(".containing").text()).toContain("None");
+    expect(wrapper.get(".containing").text()).not.toContain("Loading…");
+    wrapper.unmount();
+  });
+
+  it('says how many more characters made of those typed there are, as "Used in" does', async () => {
+    const { wrapper } = await mountView("/kanji?q=木口");
+    await loaded(wrapper, false);
+    const more = wrapper.get(".char-grid .grid-more");
+    expect(more.text()).toBe("5 more");
+    calls = [];
+    await more.trigger("click");
+    await flushPromises();
+    expect(calls.find((c) => c.cmd === "han_containing")?.args).toMatchObject({
+      components: "木口",
+      offset: 60,
+    });
+    expect(wrapper.findAll(".char-grid .char-button")).toHaveLength(65);
+    expect(wrapper.find(".grid-more").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("collapses a single character's card too", async () => {
+    // 森: a query no other test opens, as open cards are kept per query
+    const { wrapper } = await mountView("/kanji?q=森");
+    await loaded(wrapper, false);
+    expect(
+      wrapper.get('[data-char="森"] .char-toggle').attributes("aria-expanded"),
+    ).toBe("false");
+    wrapper.unmount();
+  });
+
+  it("links a character to the words with it as a word and anywhere", async () => {
+    const { wrapper, router } = await mountView("/kanji?q=林");
+    await loaded(wrapper);
+
+    const actions = wrapper.findAll('[data-char="林"] .item-actions button');
+    expect(actions.map((b) => b.text())).toEqual(["= 林", "*林*"]);
+    await actions[1].trigger("click");
+    await flushPromises();
+    expect(router.currentRoute.value.path).toBe("/dictionary");
+    expect(router.currentRoute.value.query).toMatchObject({
+      q: "*林*",
+      qState: "",
+    });
+    // no single-character word entries, the same as "= 林"
+    expect(calls.some((c) => c.cmd === "search")).toBe(false);
     wrapper.unmount();
   });
 

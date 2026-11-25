@@ -185,7 +185,10 @@ CREATE TABLE IF NOT EXISTS han_char (
   ch          TEXT PRIMARY KEY,
   ids         TEXT NOT NULL DEFAULT '', -- ids.txt's IDS columns, tab-separated: ⿹②一[GTKV]\t⿻②一[J]
   hangul      TEXT NOT NULL DEFAULT '', -- space-separated Hangul readings (eum), e.g. 악 락 요 for 樂
-  uses        INTEGER NOT NULL DEFAULT 0 -- terms in term_search with the character
+  uses        INTEGER NOT NULL DEFAULT 0, -- terms in term_search with the character
+  uses_ja     INTEGER NOT NULL DEFAULT 0, -- of them, Japanese terms (term_ja)
+  uses_zh     INTEGER NOT NULL DEFAULT 0, -- Chinese (term_zh)
+  uses_ko     INTEGER NOT NULL DEFAULT 0  -- Korean (term_ko)
 ) WITHOUT ROWID;
 -- the components each IDS names directly; characters made of a component are found by
 -- following it up recursively
@@ -340,6 +343,17 @@ fn han_variants(conn: &Connection, ch: &str) -> rusqlite::Result<Vec<HanVariant>
         }
     }
     Ok(out)
+}
+
+fn has_column(conn: &Connection, table: &str, column: &str) -> rusqlite::Result<bool> {
+    Ok(conn
+        .query_row(
+            "SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2",
+            [table, column],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
 }
 
 fn has_table(conn: &Connection, name: &str) -> rusqlite::Result<bool> {
@@ -855,8 +869,13 @@ pub fn pitch_counts(db: &Path) -> Result<HashMap<String, usize>, YomitanError> {
 }
 
 /// Bumped when the character tables are filled differently from the same `ids.txt`, so that
-/// [`build_chars`] refills them: 2 took Hangul readings from [`crate::hanja::char_readings`]
-const HAN_VERSION: &str = "han-2";
+/// [`build_chars`] refills them: 2 took Hangul readings from [`crate::hanja::char_readings`];
+/// 3 counted the terms of each language too (`uses_ja`, `uses_zh`, `uses_ko`)
+const HAN_VERSION: &str = "han-3";
+
+/// `han_char`'s columns of the terms of each language, which a search.db from before
+/// [`HAN_VERSION`] 3 lacks
+const HAN_LANG_USES: [&str; 3] = ["uses_ja", "uses_zh", "uses_ko"];
 
 /// FNV-1a, to tell whether `ids.txt` changed since the last [`build_chars`]
 fn fingerprint(bytes: &[u8]) -> String {
@@ -891,6 +910,16 @@ pub fn build_chars(
 
     let mut conn = Connection::open(db)?;
     conn.execute_batch(HAN_SCHEMA)?;
+    // a han_char from before them: added, and filled again
+    let mut had_lang_uses = true;
+    for col in HAN_LANG_USES {
+        if !has_column(&conn, "han_char", col)? {
+            had_lang_uses = false;
+            conn.execute_batch(&format!(
+                "ALTER TABLE han_char ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0"
+            ))?;
+        }
+    }
     conn.execute_batch(META_SCHEMA)?;
     let stored: Option<String> = conn
         .query_row("SELECT value FROM meta WHERE key = 'ids'", [], |r| r.get(0))
@@ -899,7 +928,7 @@ pub fn build_chars(
         .query_row("SELECT 1 FROM han_char LIMIT 1", [], |_| Ok(()))
         .optional()?
         .is_none();
-    let han_current = !recount && !empty && stored.as_deref() == Some(fp.as_str());
+    let han_current = !recount && !empty && had_lang_uses && stored.as_deref() == Some(fp.as_str());
     let term_char_current =
         !recount && meta(&conn, "term_char")?.as_deref() == Some(TERM_CHAR_VERSION);
     let han_reading_current =
@@ -929,15 +958,22 @@ pub fn build_chars(
 
 /// The character tables from ids.txt (`text`, fingerprinted `fp`)
 fn fill_han(conn: &mut Connection, text: &str, fp: String) -> Result<(), YomitanError> {
-    // terms with each character
-    let mut uses: HashMap<String, i64> = HashMap::new();
+    // terms with each character: in all, and of each language (Japanese, Chinese, Korean),
+    // as Words tells them apart, by the tokens a term has in each
+    let mut uses: HashMap<String, [i64; 4]> = HashMap::new();
     {
-        let mut st = conn.prepare("SELECT term FROM term_search")?;
+        let mut st = conn
+            .prepare("SELECT term, term_ja != '', term_zh != '', term_ko != '' FROM term_search")?;
         let mut rows = st.query([])?;
         while let Some(r) = rows.next()? {
             let term = r.get_ref(0)?.as_str().unwrap_or("");
+            let of: [bool; 3] = [r.get(1)?, r.get(2)?, r.get(3)?];
             for ch in ids::han_chars(term) {
-                *uses.entry(ch).or_insert(0) += 1;
+                let n = uses.entry(ch).or_insert([0; 4]);
+                n[0] += 1;
+                for (i, yes) in of.iter().enumerate() {
+                    n[i + 1] += *yes as i64;
+                }
             }
         }
     }
@@ -946,17 +982,14 @@ fn fill_han(conn: &mut Connection, text: &str, fp: String) -> Result<(), Yomitan
     tx.execute_batch("DELETE FROM han_char; DELETE FROM han_component;")?;
     {
         let mut ins_char = tx.prepare(
-            "INSERT OR REPLACE INTO han_char (ch, ids, hangul, uses) VALUES (?1, ?2, ?3, ?4)",
+            "INSERT OR REPLACE INTO han_char (ch, ids, hangul, uses, uses_ja, uses_zh, uses_ko)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         )?;
         let mut ins_comp =
             tx.prepare("INSERT OR IGNORE INTO han_component (component, ch) VALUES (?1, ?2)")?;
         let mut add = |ch: &str, ids: &str, comps: &[String]| -> Result<(), YomitanError> {
-            ins_char.execute(params![
-                ch,
-                ids,
-                hangul_of(ch),
-                uses.get(ch).copied().unwrap_or(0)
-            ])?;
+            let n = uses.get(ch).copied().unwrap_or([0; 4]);
+            ins_char.execute(params![ch, ids, hangul_of(ch), n[0], n[1], n[2], n[3]])?;
             for c in comps {
                 ins_comp.execute(params![c, ch])?;
             }
@@ -1935,7 +1968,7 @@ pub struct HanChar {
     pub all_components: Vec<String>,
     /// Hangul readings (eum)
     pub hangul: Vec<String>,
-    /// terms with the character
+    /// terms with the character, of the language asked for, or in all
     pub uses: i64,
     /// its variant forms, from Unihan: 学's 學 (traditional, kyujitai)
     pub variants: Vec<HanVariant>,
@@ -2027,6 +2060,8 @@ pub struct SearchDb {
     /// search.db has `term_pitch`
     has_pitch: bool,
     has_han: bool,
+    /// `han_char` counts the terms of each language ([`HAN_LANG_USES`])
+    has_han_lang_uses: bool,
     /// search.db has `han_variant`, filled
     has_han_variant: bool,
     /// search.db has `han_reading`
@@ -2267,6 +2302,7 @@ impl SearchDb {
         let has_kanji = has_table(&conn, "kanji_link")?;
         let has_pitch = has_term_pitch(&conn)?;
         let has_han = has_table(&conn, "han_char")?;
+        let has_han_lang_uses = has_han && has_column(&conn, "han_char", HAN_LANG_USES[0])?;
         let has_han_reading = meta(&conn, "han_reading")?.is_some();
         let has_han_variant = meta(&conn, "han_variant")?.is_some();
         Ok(Self {
@@ -2277,6 +2313,7 @@ impl SearchDb {
             has_kanji,
             has_pitch,
             has_han,
+            has_han_lang_uses,
             has_han_reading,
             langs,
             target_langs,
@@ -2813,9 +2850,23 @@ impl SearchDb {
         Ok(rows)
     }
 
+    /// `han_char`'s column of how many terms use a character: those of `lang`, or with none
+    /// (or a search.db from before it counted them), all
+    fn uses_column(&self, lang: Option<Lang>) -> &'static str {
+        match lang {
+            Some(l) if self.has_han_lang_uses => match l {
+                Lang::Ja => HAN_LANG_USES[0],
+                Lang::Zh => HAN_LANG_USES[1],
+                Lang::Ko => HAN_LANG_USES[2],
+            },
+            _ => "uses",
+        }
+    }
+
     /// The Han characters of `text` (up to [`MAX_HAN_CHARS`]): how each breaks down, and
-    /// its entries in the kanji dictionaries.
-    pub fn han_chars(&self, text: &str) -> Result<Vec<HanChar>, YomitanError> {
+    /// its entries in the kanji dictionaries. [`HanChar::uses`] counts the terms of `lang`,
+    /// or with none, all.
+    pub fn han_chars(&self, text: &str, lang: Option<Lang>) -> Result<Vec<HanChar>, YomitanError> {
         let mut out = vec![];
         for ch in ids::han_chars(text).into_iter().take(MAX_HAN_CHARS) {
             let mut c = HanChar {
@@ -2827,7 +2878,10 @@ impl SearchDb {
                 let conn = self.conn.lock()?;
                 if self.has_han {
                     let row: Option<(String, String, i64)> = conn
-                        .prepare_cached("SELECT ids, hangul, uses FROM han_char WHERE ch = ?1")?
+                        .prepare_cached(&format!(
+                            "SELECT ids, hangul, {} FROM han_char WHERE ch = ?1",
+                            self.uses_column(lang)
+                        ))?
                         .query_row([&ch], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
                         .optional()?;
                     if let Some((ids_cols, hangul, uses)) = row {
@@ -2983,7 +3037,8 @@ impl SearchDb {
     /// Characters made of all of `components` (Han characters, e.g. `木口` for 呆, 杏, ...),
     /// following each component up through the characters built from it. A radical also
     /// matches its forms as a component (水: 氵), see [`ids::component_forms`]. The
-    /// characters the dictionaries use most come first.
+    /// characters the dictionaries use most come first: in the terms of `lang`, or with
+    /// none, in all.
     ///
     /// With `direct`, only the characters whose IDS name every component itself (口: 可, 呆,
     /// but not 河, which is made of 可), as [`HanChar::components`] does the other way.
@@ -2993,6 +3048,7 @@ impl SearchDb {
         limit: Option<u32>,
         offset: Option<u32>,
         direct: bool,
+        lang: Option<Lang>,
     ) -> Result<HanList, YomitanError> {
         let limit = limit.unwrap_or(60).clamp(1, MAX_HAN_LIST);
         let offset = offset.unwrap_or(0);
@@ -3030,9 +3086,10 @@ impl SearchDb {
             sets.push(format!("SELECT ch FROM up{i}"));
         }
         let (with, set) = (ctes.join(", "), sets.join(" INTERSECT "));
+        let uses = self.uses_column(lang);
         let sql = format!(
-            "WITH RECURSIVE {with} SELECT h.ch, h.uses FROM han_char h
-             WHERE h.ch IN ({set}) ORDER BY h.uses DESC, h.ch LIMIT {} OFFSET {offset}",
+            "WITH RECURSIVE {with} SELECT h.ch, h.{uses} FROM han_char h
+             WHERE h.ch IN ({set}) ORDER BY h.{uses} DESC, h.ch LIMIT {} OFFSET {offset}",
             limit + 1,
         );
         let conn = self.conn.lock()?;
@@ -3068,6 +3125,8 @@ impl SearchDb {
     /// matches it (`heung`: 흥), or both. Romaji is converted to kana by the caller, which
     /// passes both when it isn't sure: `["kyou", "きょう"]`.
     ///
+    /// "Most used" counts the terms of `lang`, or with none, all.
+    ///
     /// An error for a search.db from before `han_reading`: it must be built again.
     pub fn han_by_reading(
         &self,
@@ -3075,6 +3134,7 @@ impl SearchDb {
         latin: Latin,
         limit: Option<u32>,
         offset: Option<u32>,
+        lang: Option<Lang>,
     ) -> Result<HanList, YomitanError> {
         if !self.has_han_reading {
             return Err(YomitanError::Error(
@@ -3100,9 +3160,12 @@ impl SearchDb {
             .join(", ");
         let matched = format!("SELECT DISTINCT ch FROM han_reading WHERE reading IN ({ps})");
         let uses = if self.has_han {
-            "coalesce((SELECT uses FROM han_char h WHERE h.ch = r.ch), 0)"
+            format!(
+                "coalesce((SELECT {} FROM han_char h WHERE h.ch = r.ch), 0)",
+                self.uses_column(lang)
+            )
         } else {
-            "0"
+            "0".into()
         };
         let conn = self.conn.lock()?;
         let total: u32 = conn
@@ -3430,11 +3493,19 @@ mod han_tests {
         .await
         .unwrap();
         {
-            // terms, for how often characters are used: 林 twice, 森 once
+            // terms, for how often characters are used: in Japanese, 林 twice and 森 once;
+            // in Chinese, 森 twice and 林 once; in all, both three times
             let conn = Connection::open(&db_path).unwrap();
             for t in ["林", "森林", "河"] {
                 conn.execute(
                     "INSERT INTO term_search (term, term_ja) VALUES (?1, ?1)",
+                    [t],
+                )
+                .unwrap();
+            }
+            for t in ["森", "森林"] {
+                conn.execute(
+                    "INSERT INTO term_search (term, term_zh) VALUES (?1, ?1)",
                     [t],
                 )
                 .unwrap();
@@ -3451,7 +3522,7 @@ mod han_tests {
         assert_eq!(std::fs::read(&db_path).unwrap(), before);
 
         let db = SearchDb::open(&db_path, &dir).unwrap();
-        let found = db.han_chars("森の林檎").unwrap();
+        let found = db.han_chars("森の林檎", None).unwrap();
         assert_eq!(
             found.iter().map(|c| c.ch.as_str()).collect::<Vec<_>>(),
             ["森", "林", "檎"]
@@ -3462,7 +3533,7 @@ mod han_tests {
         let mut all = mori.all_components.clone();
         all.sort();
         assert_eq!(all, ["木", "林"]);
-        assert_eq!(mori.uses, 1);
+        assert_eq!(mori.uses, 3);
         assert_eq!(mori.entries.len(), 1);
         assert_eq!(mori.entries[0].kunyomi, "もり");
         assert_eq!(mori.entries[0].lang.as_deref(), Some("ja-JP"));
@@ -3472,7 +3543,58 @@ mod han_tests {
             (Some("ja-JP".into()), Some("en".into()))
         );
         let hayashi = &found[1];
-        assert_eq!(hayashi.uses, 2);
+        assert_eq!(hayashi.uses, 3);
+        // the terms of a language
+        let uses = |ch: &str, lang| db.han_chars(ch, lang).unwrap()[0].uses;
+        assert_eq!(uses("林", Some(Lang::Ja)), 2);
+        assert_eq!(uses("林", Some(Lang::Zh)), 1);
+        assert_eq!(uses("林", Some(Lang::Ko)), 0);
+        assert_eq!(uses("森", Some(Lang::Zh)), 2);
+        // and the most used in them first
+        assert_eq!(
+            chars(
+                db.han_containing("木", Some(2), None, false, Some(Lang::Ja))
+                    .unwrap()
+            ),
+            ["林", "森"]
+        );
+        assert_eq!(
+            chars(
+                db.han_containing("木", Some(2), None, false, Some(Lang::Zh))
+                    .unwrap()
+            ),
+            ["森", "林"]
+        );
+        {
+            // a search.db from before the counts of each language: those of all
+            let old_dir = temp_dir("han-old");
+            let old_db = old_dir.join("search.db");
+            std::fs::copy(&db_path, &old_db).unwrap();
+            let conn = Connection::open(&old_db).unwrap();
+            for col in HAN_LANG_USES {
+                conn.execute_batch(&format!("ALTER TABLE han_char DROP COLUMN {col}"))
+                    .unwrap();
+            }
+            conn.execute(
+                "UPDATE meta SET value = replace(value, ?1, 'han-2') WHERE key = 'ids'",
+                [HAN_VERSION],
+            )
+            .unwrap();
+            drop(conn);
+            let old = SearchDb::open(&old_db, &dir).unwrap();
+            assert_eq!(old.han_chars("林", Some(Lang::Ja)).unwrap()[0].uses, 3);
+            assert_eq!(
+                chars(
+                    old.han_containing("木", Some(2), None, false, Some(Lang::Zh))
+                        .unwrap()
+                ),
+                ["林", "森"]
+            );
+            // and build_chars adds them, and counts them again
+            assert!(build_chars(&old_db, &ids_txt, &variants_txt, false).unwrap());
+            let old = SearchDb::open(&old_db, &dir).unwrap();
+            assert_eq!(old.han_chars("林", Some(Lang::Ja)).unwrap()[0].uses, 2);
+        }
         assert_eq!(hayashi.entries[0].meanings, ["grove", "forest"]);
         assert_eq!(
             hayashi.entries[0].stats,
@@ -3486,66 +3608,70 @@ mod han_tests {
         // neither in ids.txt nor in a kanji dictionary
         assert!(found[2].ids.is_empty() && found[2].entries.is_empty());
 
-        let regions = &db.han_chars("可").unwrap()[0].ids;
+        let regions = &db.han_chars("可", None).unwrap()[0].ids;
         assert_eq!(regions[1].regions, "J");
 
         // the most used first, then by code point
         assert_eq!(
-            chars(db.han_containing("木", None, None, false).unwrap()),
+            chars(db.han_containing("木", None, None, false, None).unwrap()),
             ["林", "森", "呆", "李", "杏"]
         );
         assert_eq!(
-            chars(db.han_containing("木口", None, None, false).unwrap()),
+            chars(db.han_containing("木口", None, None, false, None).unwrap()),
             ["呆", "杏"]
         );
         // through 可; ⼝ is the Kangxi radical
         assert_eq!(
-            chars(db.han_containing("⼝", None, None, false).unwrap()),
+            chars(db.han_containing("⼝", None, None, false, None).unwrap()),
             ["河", "可", "呆", "杏"]
         );
         // 河 is written with 氵
         assert_eq!(
-            chars(db.han_containing("水", None, None, false).unwrap()),
+            chars(db.han_containing("水", None, None, false, None).unwrap()),
             ["河"]
         );
-        let page = db.han_containing("木", Some(2), Some(2), false).unwrap();
+        let page = db
+            .han_containing("木", Some(2), Some(2), false, None)
+            .unwrap();
         assert_eq!(chars(page), ["呆", "李"]);
         assert_eq!(
-            db.han_containing("木", Some(2), Some(2), false)
+            db.han_containing("木", Some(2), Some(2), false, None)
                 .unwrap()
                 .next,
             Some(4)
         );
         // on every page
         assert_eq!(
-            db.han_containing("木", Some(2), Some(2), false)
+            db.han_containing("木", Some(2), Some(2), false, None)
                 .unwrap()
                 .total,
             5
         );
         assert_eq!(
-            db.han_containing("⼝", Some(1), None, true).unwrap().total,
+            db.han_containing("⼝", Some(1), None, true, None)
+                .unwrap()
+                .total,
             3
         );
         // only what names 口 itself: not 河, made of 可
         assert_eq!(
-            chars(db.han_containing("⼝", None, None, true).unwrap()),
+            chars(db.han_containing("⼝", None, None, true, None).unwrap()),
             ["可", "呆", "杏"]
         );
         assert_eq!(
-            chars(db.han_containing("木口", None, None, true).unwrap()),
+            chars(db.han_containing("木口", None, None, true, None).unwrap()),
             ["呆", "杏"]
         );
         assert_eq!(
-            chars(db.han_containing("林", None, None, true).unwrap()),
+            chars(db.han_containing("林", None, None, true, None).unwrap()),
             ["森"]
         );
         assert_eq!(
-            chars(db.han_containing("水", None, None, true).unwrap()),
+            chars(db.han_containing("水", None, None, true, None).unwrap()),
             ["河"]
         );
         assert!(
-            db.han_containing("か", None, None, false)
+            db.han_containing("か", None, None, false, None)
                 .unwrap()
                 .items
                 .is_empty()
@@ -3553,7 +3679,7 @@ mod han_tests {
 
         #[cfg(feature = "hangul-readings")]
         assert!(
-            db.han_chars("李").unwrap()[0]
+            db.han_chars("李", None).unwrap()[0]
                 .hangul
                 .contains(&"리".to_string())
         );
@@ -3562,7 +3688,7 @@ mod han_tests {
         for r in ["리", "이"] {
             assert!(
                 chars(
-                    db.han_by_reading(&[r.into()], Latin::PINYIN, None, None)
+                    db.han_by_reading(&[r.into()], Latin::PINYIN, None, None, None)
                         .unwrap()
                 )
                 .contains(&"李".to_string())
@@ -3571,7 +3697,7 @@ mod han_tests {
 
         // variants: those of the first kinds first, each with every way it relates
         let variants = |db: &SearchDb, ch: &str| -> Vec<(String, Vec<String>)> {
-            db.han_chars(ch).unwrap()[0]
+            db.han_chars(ch, None).unwrap()[0]
                 .variants
                 .iter()
                 .map(|v| (v.ch.clone(), v.kinds.clone()))
@@ -3715,7 +3841,7 @@ mod han_tests {
         // the characters read so (Characters view)
         let read = |r: &str| {
             chars(
-                db.han_by_reading(&[r.into()], Latin::PINYIN, None, None)
+                db.han_by_reading(&[r.into()], Latin::PINYIN, None, None, None)
                     .unwrap(),
             )
         };
@@ -3732,7 +3858,7 @@ mod han_tests {
         // Korean romanization, with Korean selected
         let roman = |r: &str| {
             chars(
-                db.han_by_reading(&[r.into()], Latin::KOREAN, None, None)
+                db.han_by_reading(&[r.into()], Latin::KOREAN, None, None, None)
                     .unwrap(),
             )
         };
@@ -3741,7 +3867,10 @@ mod han_tests {
         // no search language: pinyin and romanization alike, and the kana of romaji
         let any = |rs: &[&str]| {
             let rs: Vec<String> = rs.iter().map(|r| r.to_string()).collect();
-            let mut v = chars(db.han_by_reading(&rs, Latin::ANY, None, None).unwrap());
+            let mut v = chars(
+                db.han_by_reading(&rs, Latin::ANY, None, None, None)
+                    .unwrap(),
+            );
             v.sort();
             v
         };
@@ -3751,7 +3880,7 @@ mod han_tests {
         assert_eq!(any(&["rin", "りん", "sen"]), ["林", "森"]);
         assert!(read("きょう").is_empty());
         let page = db
-            .han_by_reading(&["りん".into()], Latin::PINYIN, Some(1), None)
+            .han_by_reading(&["りん".into()], Latin::PINYIN, Some(1), None, None)
             .unwrap();
         assert_eq!((page.total, page.next), (1, None));
         drop(db);
@@ -3775,14 +3904,14 @@ mod han_tests {
             .unwrap();
         }
         let db = SearchDb::open(&db_path, &dir).unwrap();
-        assert!(db.han_chars("林").unwrap()[0].entries.is_empty());
+        assert!(db.han_chars("林", None).unwrap()[0].entries.is_empty());
         // no han_reading: it says the library needs an update
         assert!(
-            db.han_by_reading(&["りん".into()], Latin::PINYIN, None, None)
+            db.han_by_reading(&["りん".into()], Latin::PINYIN, None, None, None)
                 .is_err()
         );
         assert!(
-            db.han_containing("木", None, None, false)
+            db.han_containing("木", None, None, false, None)
                 .unwrap()
                 .items
                 .is_empty()
@@ -3794,7 +3923,7 @@ mod han_tests {
             .await
             .unwrap();
         let db = SearchDb::open(&db_path, &dir).unwrap();
-        let found = db.han_chars("林森").unwrap();
+        let found = db.han_chars("林森", None).unwrap();
         assert_eq!(found[0].entries[0].onyomi, "リン");
         assert_eq!(found[1].entries[0].onyomi, "シン");
         drop(db);

@@ -20,7 +20,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager, State};
 use yomitan_parser::char_reading::Latin;
-use yomitan_parser::search::{DictInfo, HanChar, HanList, SearchDb, SearchRequest, SearchResult};
+use yomitan_parser::search::{
+    DictInfo, HanChar, HanList, SearchDb, SearchRequest, SearchResult, parse_lang,
+};
 
 use crate::error::AppError;
 
@@ -583,21 +585,25 @@ pub async fn dicts(state: State<'_, DictState>) -> Result<Vec<DictInfo>, AppErro
         .map_err(AppError::from)
 }
 
-/// The Han characters of `text`: how each breaks down, and its kanji dictionary entries.
+/// The Han characters of `text`: how each breaks down, and its kanji dictionary entries;
+/// how many terms use each, of `lang` (the search language, e.g. `ja-JP`), or with none, all.
 #[tauri::command]
 pub async fn han_chars(
     state: State<'_, DictState>,
     text: String,
+    lang: Option<String>,
 ) -> Result<Vec<HanChar>, AppError> {
     let db = state.get()?;
-    tauri::async_runtime::spawn_blocking(move || db.han_chars(&text))
+    let lang = lang.as_deref().and_then(parse_lang);
+    tauri::async_runtime::spawn_blocking(move || db.han_chars(&text, lang))
         .await
         .map_err(|e| AppError::Error(e.to_string()))?
         .map_err(AppError::from)
 }
 
-/// Characters made of all the characters of `components`, the most used first. With
-/// `direct`, only those whose IDS name the components themselves.
+/// Characters made of all the characters of `components`, the most used first, in the
+/// terms of `lang` or with none, all. With `direct`, only those whose IDS name the
+/// components themselves.
 #[tauri::command]
 pub async fn han_containing(
     state: State<'_, DictState>,
@@ -605,19 +611,22 @@ pub async fn han_containing(
     limit: Option<u32>,
     offset: Option<u32>,
     direct: Option<bool>,
+    lang: Option<String>,
 ) -> Result<HanList, AppError> {
     let db = state.get()?;
     let direct = direct.unwrap_or(false);
+    let lang = lang.as_deref().and_then(parse_lang);
     tauri::async_runtime::spawn_blocking(move || {
-        db.han_containing(&components, limit, offset, direct)
+        db.han_containing(&components, limit, offset, direct, lang)
     })
     .await
     .map_err(|e| AppError::Error(e.to_string()))?
     .map_err(AppError::from)
 }
 
-/// Characters read any of `readings` (kana, pinyin or Hangul), the most used first. Latin
-/// letters are pinyin (`pinyin`, the default), Korean romanization (`korean`), or both.
+/// Characters read any of `readings` (kana, pinyin or Hangul), the most used first, in the
+/// terms of `lang` or with none, all. Latin letters are pinyin (`pinyin`, the default),
+/// Korean romanization (`korean`), or both.
 #[tauri::command]
 pub async fn han_by_reading(
     state: State<'_, DictState>,
@@ -626,16 +635,20 @@ pub async fn han_by_reading(
     korean: Option<bool>,
     limit: Option<u32>,
     offset: Option<u32>,
+    lang: Option<String>,
 ) -> Result<HanList, AppError> {
     let db = state.get()?;
     let latin = Latin {
         pinyin: pinyin.unwrap_or(true),
         korean: korean.unwrap_or(false),
     };
-    tauri::async_runtime::spawn_blocking(move || db.han_by_reading(&readings, latin, limit, offset))
-        .await
-        .map_err(|e| AppError::Error(e.to_string()))?
-        .map_err(AppError::from)
+    let lang = lang.as_deref().and_then(parse_lang);
+    tauri::async_runtime::spawn_blocking(move || {
+        db.han_by_reading(&readings, latin, limit, offset, lang)
+    })
+    .await
+    .map_err(|e| AppError::Error(e.to_string()))?
+    .map_err(AppError::from)
 }
 
 /// A dictionary's `styles.css`, if its zip has one. The view scopes it to that

@@ -174,10 +174,60 @@ export function readingLang(reading: string): string {
 /**
  * A character's reading as a search for the words with it read so, anywhere in the word:
  * `*<興>{キョウ}` (興味, 余興, ...), `*<興>{xīng}`, `*<興>{흥}`. A kun reading counts up to
- * its okurigana, which its dot marks (`おこ.る`: `*<興>{おこ}`, finding 興る and 興す), and
- * its dash marks where other kana go (`-び`).
+ * its okurigana, which its dot marks (`おこ.る`: `*<興>{おこ}`, finding 興る and 興す).
+ *
+ * KANJIDIC's dash marks a suffix or prefix, where other characters go: at least one of
+ * them there, `?` then `*`, and the character at the word's other end. `-び` (a suffix,
+ * often with rendaku) is `*?<日>{び}`, the words ending in 日 read び (曜日); `おお-` (a
+ * prefix) is `<大>{おお}?*`, the words starting with 大 read おお (大雨).
  */
 export function readingQuery(ch: string, reading: string): string {
-  const r = reading.replace(/^[-‐]+|[-‐]+$/gu, "").trim();
-  return `*<${ch}>{${r.split(".")[0]}}`;
+  const t = reading.trim();
+  const suffix = /^[-‐]/u.test(t);
+  const prefix = /[-‐]$/u.test(t);
+  const r = t
+    .replace(/^[-‐]+|[-‐]+$/gu, "")
+    .trim()
+    .split(".")[0];
+  if (suffix) return `*?<${ch}>{${r}}`;
+  if (prefix) return `<${ch}>{${r}}?*`;
+  return `*<${ch}>{${r}}`;
+}
+
+const TONES: Record<string, string[]> = {
+  a: ["ā", "á", "ǎ", "à"],
+  e: ["ē", "é", "ě", "è"],
+  i: ["ī", "í", "ǐ", "ì"],
+  o: ["ō", "ó", "ǒ", "ò"],
+  u: ["ū", "ú", "ǔ", "ù"],
+  ü: ["ǖ", "ǘ", "ǚ", "ǜ"],
+};
+
+/**
+ * Numbered pinyin with tone marks, as KANJIDIC writes it: `xing1` → `xīng`, `lu:e4` or
+ * `lve4` → `lüè`, `ma5` → `ma`. The mark goes on a or e, else the o of ou, else the last
+ * vowel. Pinyin with marks already, or without a number, is kept as it is.
+ */
+export function toneMarks(pinyin: string): string {
+  return pinyin.replace(/([a-zü:]+)([1-5])/giu, (_, syl: string, n: string) => {
+    const s = syl.replace(/u:|v/giu, (m) =>
+      m[0] === m[0].toUpperCase() ? "Ü" : "ü",
+    );
+    const tone = Number(n);
+    if (tone === 5) return s;
+    const lower = s.toLowerCase();
+    let at = lower.search(/[ae]/u);
+    if (at < 0) at = lower.indexOf("ou");
+    if (at < 0) {
+      const vowels = [...lower.matchAll(/[iouü]/gu)];
+      at = vowels.length ? vowels[vowels.length - 1].index! : -1;
+    }
+    if (at < 0) return s;
+    const v = lower[at];
+    const marked = TONES[v][tone - 1];
+    const upper = s[at] !== v;
+    return (
+      s.slice(0, at) + (upper ? marked.toUpperCase() : marked) + s.slice(at + 1)
+    );
+  });
 }

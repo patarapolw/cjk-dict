@@ -229,10 +229,13 @@
               v-if="hanChars(headTerm(it)).length"
               type="button"
               class="link-button"
+              :aria-label="`Characters ${hanChars(headTerm(it)).join('')}`"
               v-tooltip="'Its characters: components, readings and meanings'"
               @click="toCharacters(headTerm(it))"
             >
-              字 {{ hanChars(headTerm(it)).join("") }}
+              <!-- ⿰, as in a character's breakdown in the Characters view -->
+              <span aria-hidden="true">⿰</span>
+              {{ hanChars(headTerm(it)).join("") }}
             </button>
           </div>
           <PitchAccents

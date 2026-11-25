@@ -20,7 +20,7 @@ How the app's search works. The [README](../README.md#app) has how to run the ap
   - an exact search for itself;
   - `~` words containing it;
   - words with the same reading;
-  - its characters.
+  - its Han characters in the Characters view: **⿰ 日本**, ⿰ as in a character's breakdown there.
 - In-dictionary links and the back button keep a search history.
 
 ## Readings
@@ -67,35 +67,70 @@ Without the term's index to narrow it, a search starting with a wildcard walks t
 
 ## Characters
 
-The Characters view (`#/kanji?q=<characters>`) shows, for each Han character:
+The Characters view (`#/kanji?q=<characters>`) shows each Han character as a card, collapsed as Words' results are:
+
+- Outside, always shown:
+  - the character; a tap on it, or anywhere on the header but its links, opens or closes the card;
+  - the meanings of its first kanji dictionary entry shown, on one line, cut off at the card's edge;
+  - how many words use it: those of the search language, or with Auto-detect, all; it searches them, as **\*日\*** does;
+    - "the most used first", in the view's lists, counts the same words;
+  - its readings:
+    - collapsed, those of every kanji dictionary entry shown (see below), merged, one row per kind, by the search language:
+
+      | Search language | Rows                                                                                      | e.g. 光                                        |
+      | --------------- | ----------------------------------------------------------------------------------------- | ---------------------------------------------- |
+      | Auto-detect     | On, short kun, Pinyin, Hangul, the dictionaries' others (Korean romanization, Vietnamese) | コウ; ひか.る, ひか.らす, ひかり, …; guāng; 광 |
+      | Japanese        | On, short kun                                                                             | コウ; ひか.る, ひか.らす, ひかり, …            |
+      | Chinese         | Pinyin                                                                                    | guāng                                          |
+      | Korean          | Hangul (its own, Hanja's, KANJIDIC's)                                                     | 광                                             |
+      - Short kun: the first 3, then "…" if there are more, as KANJIDIC writes them: `ひか.る`, and `-か` for a suffix.
+        - Not rendaku forms: a suffix (`-` in front) whose first kana is voiced, with its unvoiced reading there too: 日's `-び` (of ひ), 光's `-びかり` (of ひかり). A voiced reading without the `-` stays.
+        - Each reading once, whatever its dot or `-`: 果's `は.たす`, `はた.す` and `-は.たす` are one `はた.す`, the form without a `-` with the longest stem, so that the others aren't pushed off the 3.
+        - A tap searches the stem, before the dot (`*<光>{ひか}`, `*<果>{はた}`).
+      - With none of the search language's (e.g. a character only CC-CEDICT.Hanzi has, with Japanese), every kind, as with Auto-detect.
+      - One kind alone has no label: `rì`, not `Pinyin rì`.
+      - Readings are separated by `, `, in every language, as in the open entries.
+      - Never name readings (nanori), often many.
+      - Pinyin in one way, with tone marks and lowercase, so that each reading is listed once: KANJIDIC's `xīng` and CC-CEDICT.Hanzi's `xing1` are one `xīng`. Open, each entry shows it as its dictionary writes it.
+
+    - open, its own Hangul readings, of no dictionary, with Korean or Auto-detect; the dictionaries' are in their entries, so that it's clear where each comes from;
+
+  - **= 日**: 日 as a word (exact search);
+  - **\*日\***: the words with 日 anywhere in them;
+  - **Variants**.
+
+- Inside: the rest, below.
+- Every card starts collapsed, a single character's (`日`) as a list's (`木口`, `*口`, a reading).
+- The cards open are kept per query while the app runs: going to Words and back shows them as they were.
+
+A card shows, for its character:
 
 - **Variants**, from Unihan, each linking to its own page, with how it relates: 学 lists 學 (traditional, kyūjitai); 広 lists 廣 (kyūjitai);
   - traditional, simplified, kyūjitai or shinjitai; "semantic" (the same meaning, not always interchangeable) and "other" only when a variant is none of those;
 - how it breaks down: each IDS, by region, the one for the search language first;
 - every component, all the way down; components link to their own page;
 - **Used in**: up to 30 characters made directly of it (one level up), the most used first: 口 lists 可, 呆, ... but not 河, made of 可;
-  - "5 more" after them when there are more;
+  - its heading, **Used in ›**, searches `*口`: them all, each in full (see below);
+  - a **5 more** button after them when there are more, which searches `*口` too;
   - a radical also lists the characters written with its component forms: 水 lists 河;
-  - **Search `*口`** below it searches `*口`, which shows them all, each in full (see below);
-- its kanji dictionary entries: readings, meanings, and stats with the dictionary's own notes;
+- its kanji dictionary entries, each under its dictionary's name: readings as the dictionary gives them (its on and kun fields, labelled On, Kun or Reading by their script; then its reading stats, e.g. KANJIDIC's pinyin, Korean, name readings, by the dictionary's order and with its own notes), meanings, and stats with the dictionary's own notes;
   - of the kanji dictionaries [chosen](#choosing-dictionaries), and only those of the search language and those that don't say theirs: KANJIDIC (Japanese, Chinese and Korean readings) in every language, CC-CEDICT.Hanzi (Chinese) with Chinese or all, Hanja (Korean) with Korean or all;
   - the search language's first;
   - with none shown, its variants' entries, each marked with the variant and how it relates, e.g. 钟 with Japanese shows 鍾's and 鐘's KANJIDIC entries; their readings search the words with the variant;
-- Hangul readings;
-- its single-character word entries.
 
 Each reading searches the words with the character read so, anywhere in the word:
 
 - on: `*<興>{キョウ}`;
 - kun: `*<興>{おこ}`, up to the okurigana, which the dot marks (興る and 興す);
+  - KANJIDIC's `-` marks a suffix or prefix, with a character there: `-び` is `*?<日>{び}`, the words ending in 日 read び (曜日); `おお-` is `<大>{おお}?*`, the words starting with 大 read おお (大雨);
 - pinyin: `*<興>{xīng}`;
 - Hangul: `*<興>{흥}`.
 
 A Chinese or Korean reading switches the search language to its own, unless it is Auto-detect.
 
-Below, with several characters typed, the characters made of all of them, at any depth, the most used first: `木口` lists 呆, 杏, ...
+Below, with several characters typed, the characters made of all of them, at any depth, the most used first, each with how many words use it: `木口` lists 呆, 杏, ..., 60 at a time, with **N more** at the end for the next 60.
 
-`*` before the characters lists the characters made directly of them instead, each in full, as a card: `*口` shows 可, 呆, ..., 20 at a time, and **More** shows the next 20.
+`*` before the characters lists the characters made directly of them instead, each in full, as a card: `*口` shows 可, 呆, ..., 20 at a time, and **N more** (e.g. "15 more") shows the next 20.
 
 - `*木口`: made directly of both 木 and 口.
 - A full-width `＊` works too.
@@ -107,7 +142,7 @@ In both:
 
 ### By reading
 
-A reading instead of characters lists the characters read so, each in full, as a card, the most used first, 20 at a time: `きょう` shows 京, 強, 教, ...
+A reading instead of characters lists the characters read so, each in full, as a card, the most used first, 20 at a time, with **N more** for the next: `きょう` shows 京, 強, 教, ...
 
 - Text without Han characters is a reading; `{}` around it works too: `{xing}`.
 - Kana: on, kun and name readings, katakana and hiragana alike.
