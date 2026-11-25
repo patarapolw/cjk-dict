@@ -20,7 +20,7 @@ How the app's search works. The [README](../README.md#app) has how to run the ap
   - an exact search for itself;
   - `~` words containing it;
   - words with the same reading;
-  - its Han characters in the Characters view: the boxed **字** icon.
+  - its Han characters in the Characters view: **⿰ 日本**, ⿰ as in a character's breakdown there.
 - In-dictionary links and the back button keep a search history.
 
 ## Readings
