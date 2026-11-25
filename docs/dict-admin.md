@@ -189,4 +189,5 @@ Korean headwords written in Hanja get Hangul readings when `search.db` is built 
 - Copies the zips first, then `search.db.zst`, then `manifest.json`, so the app never sees a manifest pointing at missing files.
 - `search.db` itself isn't uploaded.
 - Then deletes from R2 what was removed from the library.
+- It runs rclone, so the destination can be another S3-compatible service; only R2 is tested (see the [README](../README.md#other-s3-compatible-buckets-not-tested)).
 - Behind a TLS-intercepting proxy, set `SSL_CERT_FILE`.

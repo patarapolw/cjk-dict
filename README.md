@@ -119,6 +119,16 @@ pnpm admin upload --remote r2:cjk-dict     # rclone; or set CJK_DICT_REMOTE
 
 A prefix in `CJK_DICT_REMOTE` must match the app's `CJK_DICT_R2_PREFIX`.
 
+### Other S3-compatible buckets (not tested)
+
+Only R2 has been tried. From the code:
+
+- `upload` copies to any rclone destination, so another S3-compatible service (e.g. Backblaze B2, MinIO) should work as the remote.
+- The app signs requests only for R2: its endpoint is built from `CJK_DICT_R2_ACCOUNT_ID` (`https://<account id>.r2.cloudflarestorage.com`), with the region `auto`. A private bucket elsewhere can't be used.
+- A bucket that is publicly readable, or behind a CDN, should work through `CJK_DICT_BASE_URL`, e.g. `https://cdn.example.com/cjk-dict`:
+  - anyone with the URL can then download the library, dictionaries added besides the defaults included;
+  - a release build on Android needs `https://`: it refuses plain HTTP.
+
 ## App
 
 ```bash
