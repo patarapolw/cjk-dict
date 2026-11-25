@@ -153,6 +153,25 @@ HAN["光"] = {
   ],
 };
 
+/** 杉: kun readings with KANJIDIC's `-`, one of them also in another Japanese dictionary */
+HAN["杉"] = {
+  ch: "杉",
+  ids: [],
+  components: [],
+  all_components: [],
+  hangul: [],
+  uses: 5,
+  variants: [],
+  entries: [
+    {
+      ...daoEntry("KANJIDIC", null),
+      character: "杉",
+      kunyomi: "-びかり すぎ -ばかり",
+    },
+    { ...daoEntry("MyDict", "ja"), character: "杉", kunyomi: "びかり" },
+  ],
+};
+
 /** what the `dicts` command returns */
 let dicts: Partial<IDictInfo>[] = [];
 
@@ -469,6 +488,23 @@ describe("CharacterView", () => {
     await flushPromises();
     expect(router.currentRoute.value.query.q).toBe("*<光>{광}");
     expect(lang.value).toBe("ko-KR");
+    wrapper.unmount();
+  });
+
+  it("writes a collapsed card's kun with KANJIDIC's `-`, but once", async () => {
+    lang.value = "ja-JP";
+    const { wrapper, router } = await mountView("/kanji?q=杉");
+    await loaded(wrapper, false);
+    const card = wrapper.get('[data-char="杉"]');
+    // -びかり is MyDict's びかり too: that one, in its place
+    expect(headerRows(card)).toEqual([["", "びかり、すぎ、-ばかり"]]);
+    // searched without the `-`
+    await card
+      .findAll(".card-readings button.reading")
+      .find((b) => b.text() === "-ばかり")!
+      .trigger("click");
+    await flushPromises();
+    expect(router.currentRoute.value.query.q).toBe("*<杉>{ばかり}");
     wrapper.unmount();
   });
 

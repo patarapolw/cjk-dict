@@ -83,7 +83,9 @@ The Characters view (`#/kanji?q=<characters>`) shows each Han character as a car
       | Japanese        | On, short kun                                                                             | コウ; ひか、ひかり、びかり            |
       | Chinese         | Pinyin                                                                                    | guāng                                 |
       | Korean          | Hangul (its own, Hanja's, KANJIDIC's)                                                     | 광                                    |
-      - Short kun: the first 3, then "…" if there are more, as KANJIDIC writes them (ひか.る); a tap searches the stem, before the dot (`*<光>{ひか}`).
+      - Short kun: the first 3, then "…" if there are more, as KANJIDIC writes them: `ひか.る`, and `-びかり` for a prefix or suffix.
+        - A reading another dictionary has without the `-` is listed once, without it.
+        - A tap searches the stem, before the dot and without the `-` (`*<光>{ひか}`).
       - With none of the search language's (e.g. a character only CC-CEDICT.Hanzi has, with Japanese), every kind, as with Auto-detect.
       - One kind alone has no label: `rì`, not `Pinyin rì`.
       - Never name readings (nanori), often many.

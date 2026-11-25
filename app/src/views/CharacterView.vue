@@ -1100,22 +1100,32 @@ const HEADER_KINDS: Record<string, string[]> = {
 /** kun readings a collapsed card shows: the first few, without okurigana */
 const SHORT_KUN = 3;
 
+/** a kun reading without the `-` that marks it a prefix or suffix (`-びかり`) */
+const undashed = (r: string) => r.replace(/^[-‐]+|[-‐]+$/gu, "");
+
 /**
- * Kun readings, short: the first few, each once, without `-`; the okurigana apart from
- * the stem, which is what a reading's link searches (ひか of ひか.る). Shown as KANJIDIC
- * writes them, with the dot: where the stem ends is the dictionary's word, not a guess.
+ * Kun readings, short: the first few, each once, as KANJIDIC writes them: with the dot
+ * before the okurigana (ひか.る), where the stem ends being the dictionary's word, not a
+ * guess; and with the `-` of a prefix or suffix (`-びかり`), unless another dictionary has
+ * the reading without it, which then stands for both. A reading's link searches its stem,
+ * without the `-` (ひか of ひか.る).
  */
 function shortKun(row: ReadingRow): ReadingRow {
   const items: ReadingItem[] = [];
+  const written = (x: ReadingItem) =>
+    x.okurigana ? `${x.r}.${x.okurigana}` : x.r;
+  const whole = (x: ReadingItem) => undashed(written(x));
+  const dashed = (x: ReadingItem) => whole(x) !== written(x);
   for (const it of row.items) {
-    const [r, okurigana = ""] = it.r.replace(/^[-‐]+|[-‐]+$/gu, "").split(".");
-    if (
-      r &&
-      !items.some(
-        (x) => x.r === r && x.okurigana === okurigana && x.of === it.of,
-      )
-    )
-      items.push({ ...it, r, okurigana });
+    const [r, okurigana = ""] = it.r.split(".");
+    if (!undashed(r)) continue;
+    const item = { ...it, r, okurigana };
+    const i = items.findIndex(
+      (x) => whole(x) === whole(item) && x.of === it.of,
+    );
+    if (i < 0) items.push(item);
+    // the same reading without the `-`, from another dictionary
+    else if (dashed(items[i]) && !dashed(item)) items[i] = item;
   }
   const more = items.length > SHORT_KUN;
   return {
