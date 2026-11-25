@@ -410,7 +410,7 @@
             v-tooltip="usedInTitle(it)"
             @click="go(it.ch)"
           >
-            {{ it.ch }}
+            <span class="char-glyph">{{ it.ch }}</span>
             <span v-if="it.uses" class="char-uses">{{
               it.uses.toLocaleString()
             }}</span>
@@ -1491,6 +1491,8 @@ h3 {
 .char-grid {
   display: flex;
   flex-wrap: wrap;
+  /* each at the top of its row, with or without a count under it */
+  align-items: flex-start;
   gap: 0.25rem;
   font-size: 1.75rem;
 }
@@ -1499,12 +1501,21 @@ h3 {
   display: inline-flex;
   flex-direction: column;
   align-items: center;
+  justify-content: flex-start;
   min-width: 2.5rem;
   min-height: 2.5rem;
 }
 
+/* one height whatever font draws it, so that the counts under line up (#75) */
+.char-glyph {
+  display: block;
+  height: 1.25em;
+  line-height: 1.25em;
+}
+
 /* how many words use it, under it */
 .char-uses {
+  display: block;
   font-size: 0.6875rem;
   line-height: 1;
   color: var(--app-text-muted);
@@ -1531,6 +1542,8 @@ h3 {
 .variant-list {
   display: flex;
   flex-wrap: wrap;
+  /* the variants on one baseline, whatever fonts draw them (#75) */
+  align-items: baseline;
   gap: 0.25rem 1rem;
   margin: 0;
   padding: 0;
