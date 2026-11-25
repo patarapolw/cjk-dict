@@ -43,7 +43,7 @@ The app is currently set up for personal use. A public release would need change
 
 - A build compiles in a **read-only** R2 token, and anyone who has the build can extract it and download the whole bucket. Sharing a build shares every dictionary in the library.
 - The library can include dictionaries you may not redistribute. Check their terms before sharing a build with anyone.
-- The library (`library/`, including `dicts.json`) is gitignored. Your dictionary list and custom zips live only on your machine and in R2.
+- The library (`library/`, including `dicts.json`) is gitignored. Your dictionary list and custom zips live only on your machine and in R2 (or on the devices you push them to).
 - R2 credentials are only read from `.env` or environment variables, and `.env` is gitignored.
 
 ## The library
@@ -172,7 +172,7 @@ They start the app without the Tauri CLI, running Vite and `cargo build` as task
 ### Debugging on Android
 
 - Turn on USB debugging on the phone, connect it, and run `pnpm app android` (a debug build).
-- `pnpm android` first pushes the library over USB (`scripts/push-library.mjs`, also `pnpm android:push`), so the app needn't download it from R2:
+- `pnpm android` first pushes the library over USB (`scripts/push-library.mjs`, also `pnpm android:push`), so the app needn't download it from R2 or a server:
   - it pushes the zips and `search.db.zst` the app lacks into its `dicts/incoming/`, where downloads land; the app checks them when it syncs, as any download;
   - then, once every file is there, the library's `manifest.json`, into `dicts/incoming/` too;
   - with a remote it reaches (R2 or `CJK_DICT_BASE_URL`), the app plans from the remote's `manifest.json`, so run `pnpm admin upload` first: a file that differs from what was uploaded is downloaded again;
@@ -204,6 +204,8 @@ Set in `.env` or by environment variables. They are read when the app is built (
 | `CJK_DICT_R2_BUCKET`            | e.g. `cjk-dict`                                                  |
 | `CJK_DICT_R2_PREFIX`            | optional folder inside the bucket                                |
 | `CJK_DICT_BASE_URL`             | instead of R2: a plain HTTP base URL, e.g. for local development |
+
+With neither R2 nor `CJK_DICT_BASE_URL` set, or when it can't reach them, the app uses a library pushed to it over adb: see [Debugging on Android](#debugging-on-android).
 
 How the app downloads and searches the library: [docs/app.md](docs/app.md), [docs/search.md](docs/search.md).
 
