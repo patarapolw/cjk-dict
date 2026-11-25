@@ -108,7 +108,11 @@
           </button>
           <div class="char-summary">
             <!-- opened, the dictionaries' readings are in their entries, below -->
-            <p v-if="isOpen(c.ch) && c.hangul.length" class="hangul" lang="ko">
+            <p
+              v-if="isOpen(c.ch) && c.hangul.length && hangulShown"
+              class="hangul"
+              lang="ko"
+            >
               <template v-for="(r, k) in c.hangul" :key="r">
                 <template v-if="k"> · </template>
                 <button
@@ -540,6 +544,9 @@ const usedIn = ref<Record<string, IHanList>>({});
 const superNext = ref<number | null>(null);
 /** a reading that no character has */
 const noneFound = ref(false);
+/** a card's own Hangul readings, of no dictionary: with Korean or Auto-detect */
+const hangulShown = computed(() => !lang.value || lang.value === "ko-KR");
+
 /** the characters whose cards are open */
 const opened = ref<string[]>([]);
 
@@ -949,10 +956,37 @@ const rowRank = (key: string) =>
 const byRowKind = (rows: ReadingRow[]) =>
   rows.sort((a, b) => rowRank(a.key) - rowRank(b.key));
 
-/** all an entry's readings, shown in it on an open card */
-function allReadings(e: IKanjiEntry, of: string) {
-  const { outer, inner } = entryReadings(e, of);
-  return byRowKind([...outer, ...inner]);
+/**
+ * All an entry's readings, shown in it on an open card, as its dictionary gives them: its
+ * on and kun fields, labelled by their script, then its reading stats by the tag bank's
+ * order, with the dictionary's own notes
+ */
+function allReadings(e: IKanjiEntry, of: string): ReadingRow[] {
+  const rows: ReadingRow[] = [];
+  [e.onyomi, e.kunyomi].forEach((field, i) => {
+    const rs = splitReadings(field);
+    if (!rs.length) return;
+    rows.push({
+      key: i ? "kunyomi" : "onyomi",
+      label: readingLabel(field),
+      lang: e.lang || undefined,
+      sep: "、",
+      items: rs.map((r) => ({ r, of, searchIn: readingLang(r) })),
+    });
+  });
+  // other languages' readings, e.g. KANJIDIC's pinyin and Korean
+  for (const [name, value] of readingStats(e)) {
+    const searchIn = READING_STAT_LANGS[name];
+    rows.push({
+      key: name,
+      label: e.tag_meta[name]?.notes || name,
+      title: name,
+      lang: STAT_LANGS[name],
+      sep: ", ",
+      items: value.split(/,\s*/).map((r) => ({ r, of, searchIn })),
+    });
+  }
+  return rows;
 }
 
 /**
@@ -962,7 +996,7 @@ function allReadings(e: IKanjiEntry, of: string) {
 const HEADER_KINDS: Record<string, string[]> = {
   "ja-JP": ["on", "kun"],
   zh: ["pinyin"],
-  "ko-KR": ["hangul", "korean_r"],
+  "ko-KR": ["hangul"],
 };
 /** kun readings a collapsed card shows: the first few, without okurigana */
 const SHORT_KUN = 3;

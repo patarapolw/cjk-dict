@@ -130,8 +130,18 @@ HAN["光"] = {
       character: "光",
       onyomi: "コウ",
       kunyomi: "ひか.る ひか.らす ひかり -びかり",
-      stats: [["pinyin", "guāng"]],
-      tag_meta: { pinyin: { category: "reading", order: 0, notes: "Pinyin" } },
+      stats: [
+        ["korean_r", "gwang"],
+        ["pinyin", "guāng"],
+      ],
+      tag_meta: {
+        pinyin: { category: "reading", order: 0, notes: "Pinyin" },
+        korean_r: {
+          category: "reading",
+          order: 1,
+          notes: "Korean romanization",
+        },
+      },
     },
     { ...daoEntry("Hanja", "ko"), character: "光", onyomi: "광" },
     // pinyin written as CC-CEDICT does, the same reading as KANJIDIC's
@@ -304,15 +314,16 @@ describe("CharacterView", () => {
     const card = wrapper.get('[data-char="林"]');
     expect(card.get(".glyph").text()).toBe("林");
     expect(card.get(".ids").text().replace(/\s/g, "")).toBe("⿰木木");
-    // open: its own Hangul readings in the header, and each entry's readings in it, one
-    // row per kind: on and kun by their script, KANJIDIC having no one language
+    // open: its own Hangul readings in the header, and each entry's readings in it, as
+    // the dictionary gives them: on and kun by their script, KANJIDIC having no one
+    // language, then its reading stats by the tag bank's order, with its notes
     expect(card.get(".hangul").text()).toBe("림");
     expect(card.find(".card-readings").exists()).toBe(false);
     expect(readingRows(card, ".kanji-entry .readings")).toEqual([
       ["On", "リン"],
       ["Kun", "はやし"],
       ["Pinyin", "lín"],
-      ["Hangul", "림"],
+      ["Korean", "림"],
       ["Name readings", "しげ"],
     ]);
     expect(card.findAll(".meanings li").map((li) => li.text())).toEqual([
@@ -354,11 +365,12 @@ describe("CharacterView", () => {
           ["On", "コウ"],
           ["Kun", "ひか.る、ひか.らす、ひかり、-びかり"],
           ["Pinyin", "guāng"],
+          ["Korean romanization", "gwang"],
         ],
       ],
-      ["Hanja", [["Hangul", "광"]]],
-      // as the dictionary writes it
-      ["CC-CEDICT.Hanzi", [["Pinyin", "guang1"]]],
+      // as the dictionary gives them: its readings field, labelled by its script
+      ["Hanja", [["Reading", "광"]]],
+      ["CC-CEDICT.Hanzi", [["Reading", "guang1"]]],
     ]);
 
     // collapsed: merged, one row per kind: its own Hangul and Hanja's as one, guāng and
@@ -370,6 +382,7 @@ describe("CharacterView", () => {
       ["Kun", "ひか、ひかり、びかり"],
       ["Pinyin", "guāng"],
       ["Hangul", "광"],
+      ["Korean romanization", "gwang"],
     ]);
     // a short kun reading searches the words with it read so
     await card
@@ -402,8 +415,27 @@ describe("CharacterView", () => {
     ]);
     lang.value = "zh";
     expect(await collapsed()).toEqual([["Pinyin", "guāng"]]);
+    // Hangul only, not its romanization
     lang.value = "ko-KR";
     expect(await collapsed()).toEqual([["Hangul", "광"]]);
+  });
+
+  it("shows an open card's own Hangul readings with Korean or Auto-detect only", async () => {
+    const hangul = async () => {
+      calls = [];
+      const { wrapper } = await mountView("/kanji?q=林");
+      await loaded(wrapper);
+      const shown = wrapper.find('[data-char="林"] .hangul').exists();
+      wrapper.unmount();
+      return shown;
+    };
+    expect(await hangul()).toBe(true);
+    lang.value = "ko-KR";
+    expect(await hangul()).toBe(true);
+    lang.value = "ja-JP";
+    expect(await hangul()).toBe(false);
+    lang.value = "zh";
+    expect(await hangul()).toBe(false);
   });
 
   it("lists a character's variants, each looked up when clicked", async () => {

@@ -81,12 +81,12 @@ The Characters view (`#/kanji?q=<characters>`) shows each Han character as a car
       | Auto-detect     | On, short kun, Pinyin, Hangul, the dictionaries' others (Korean romanization, Vietnamese) | コウ; ひか、ひかり、びかり; guāng; 광 |
       | Japanese        | On, short kun                                                                             | コウ; ひか、ひかり、びかり            |
       | Chinese         | Pinyin                                                                                    | guāng                                 |
-      | Korean          | Hangul (its own, Hanja's, KANJIDIC's), Korean romanization                                | 광                                    |
+      | Korean          | Hangul (its own, Hanja's, KANJIDIC's)                                                     | 광                                    |
       - Short kun: the first 3, without okurigana (ひか.る is ひか), then "…" if there are more.
       - Never name readings (nanori), often many.
       - Pinyin in one way, with tone marks and lowercase, so that each reading is listed once: KANJIDIC's `xīng` and CC-CEDICT.Hanzi's `xing1` are one `xīng`. Open, each entry shows it as its dictionary writes it.
 
-    - open, its own Hangul readings; the dictionaries' are in their entries, so that it's clear where each comes from;
+    - open, its own Hangul readings, of no dictionary, with Korean or Auto-detect; the dictionaries' are in their entries, so that it's clear where each comes from;
 
   - **= 日**: 日 as a word (exact search);
   - **\*日\***: the words with 日 anywhere in them;
@@ -106,7 +106,7 @@ A card shows, for its character:
   - "5 more" after them when there are more;
   - a radical also lists the characters written with its component forms: 水 lists 河;
   - **All characters containing 口** below it searches `*口`, which shows them all, each in full (see below);
-- its kanji dictionary entries, each under its dictionary's name: readings (on, kun, pinyin, Hangul, the dictionary's others, name readings), meanings, and stats with the dictionary's own notes;
+- its kanji dictionary entries, each under its dictionary's name: readings as the dictionary gives them (its on and kun fields, labelled On, Kun or Reading by their script; then its reading stats, e.g. KANJIDIC's pinyin, Korean, name readings, by the dictionary's order and with its own notes), meanings, and stats with the dictionary's own notes;
   - of the kanji dictionaries [chosen](#choosing-dictionaries), and only those of the search language and those that don't say theirs: KANJIDIC (Japanese, Chinese and Korean readings) in every language, CC-CEDICT.Hanzi (Chinese) with Chinese or all, Hanja (Korean) with Korean or all;
   - the search language's first;
   - with none shown, its variants' entries, each marked with the variant and how it relates, e.g. 钟 with Japanese shows 鍾's and 鐘's KANJIDIC entries; their readings search the words with the variant;
