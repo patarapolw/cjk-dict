@@ -282,6 +282,21 @@ const readingRows = (
     .findAll(`${sel} dt`)
     .map((dt) => [dt.text(), dt.element.nextElementSibling!.textContent!]);
 
+/**
+ * Each row of a collapsed card's readings: `[label, readings]`, or with one kind alone,
+ * which needs no label, `["", readings]`
+ */
+const headerRows = (
+  el: ReturnType<Awaited<ReturnType<typeof mountView>>["wrapper"]["get"]>,
+) => {
+  const dl = el.find(".card-readings");
+  if (!dl.exists()) return [];
+  return dl.findAll("dd").map((dd) => {
+    const dt = dd.element.previousElementSibling;
+    return [dt?.tagName === "DT" ? dt.textContent!.trim() : "", dd.text()];
+  });
+};
+
 /** opens a character's card, collapsed in a list */
 async function openCard(
   wrapper: Awaited<ReturnType<typeof mountView>>["wrapper"],
@@ -460,7 +475,7 @@ describe("CharacterView", () => {
       const toggle = card.get(".char-toggle");
       if (toggle.attributes("aria-expanded") === "true")
         await toggle.trigger("click");
-      const rows = readingRows(card, ".card-readings");
+      const rows = headerRows(card);
       wrapper.unmount();
       return rows;
     };
@@ -470,10 +485,11 @@ describe("CharacterView", () => {
       ["Kun", "ひか、ひかり、びかり"],
     ]);
     lang.value = "zh";
-    expect(await collapsed()).toEqual([["Pinyin", "guāng"]]);
+    // one kind alone: no label
+    expect(await collapsed()).toEqual([["", "guāng"]]);
     // Hangul only, not its romanization
     lang.value = "ko-KR";
-    expect(await collapsed()).toEqual([["Hangul", "광"]]);
+    expect(await collapsed()).toEqual([["", "광"]]);
   });
 
   it("falls back to every reading when collapsed with none of the search language's", async () => {
@@ -492,7 +508,7 @@ describe("CharacterView", () => {
       const toggle = card.get(".char-toggle");
       if (toggle.attributes("aria-expanded") === "true")
         await toggle.trigger("click");
-      expect(readingRows(card, ".card-readings")).toEqual([["Pinyin", "dào"]]);
+      expect(headerRows(card)).toEqual([["", "dào"]]);
       // open again: open is remembered per query, and other tests look into 道
       await toggle.trigger("click");
       wrapper.unmount();
@@ -752,6 +768,40 @@ describe("CharacterView", () => {
       expect(calls.some((c) => c.cmd === "han_chars")).toBe(true),
     );
     expect(calls.find((c) => c.cmd === "han_chars")?.args.lang).toBe("zh");
+    wrapper.unmount();
+  });
+
+  it("opens a card on a tap anywhere on its header but its links", async () => {
+    // 杏: a query no other test opens, as open cards are kept per query
+    const { wrapper, router } = await mountView("/kanji?q=杏");
+    await loaded(wrapper, false);
+    const header = wrapper.get('[data-char="杏"] .char-header');
+    const expanded = () =>
+      wrapper.get('[data-char="杏"] .char-toggle').attributes("aria-expanded");
+    expect(expanded()).toBe("false");
+    await header.get(".char-summary").trigger("click");
+    expect(expanded()).toBe("true");
+    await header.trigger("click");
+    expect(expanded()).toBe("false");
+    // a link: not a toggle
+    await header.get(".item-actions button").trigger("click");
+    await flushPromises();
+    expect(expanded()).toBe("false");
+    expect(router.currentRoute.value.path).toBe("/dictionary");
+    wrapper.unmount();
+  });
+
+  it('links "in N words" to the words with it anywhere', async () => {
+    const { wrapper, router } = await mountView("/kanji?q=林");
+    await loaded(wrapper);
+    const uses = wrapper.get('[data-char="林"] .uses');
+    expect(uses.text()).toBe("in 120 words");
+    await uses.trigger("click");
+    await flushPromises();
+    expect(router.currentRoute.value.query).toMatchObject({
+      q: "*林*",
+      qState: "",
+    });
     wrapper.unmount();
   });
 

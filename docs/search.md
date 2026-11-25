@@ -70,9 +70,9 @@ Without the term's index to narrow it, a search starting with a wildcard walks t
 The Characters view (`#/kanji?q=<characters>`) shows each Han character as a card, collapsed as Words' results are:
 
 - Outside, always shown:
-  - the character, tapped to open or close the card;
+  - the character; a tap on it, or anywhere on the header but its links, opens or closes the card;
   - the first 3 meanings of its first kanji dictionary entry shown;
-  - how many words use it: those of the search language, or with Auto-detect, all;
+  - how many words use it: those of the search language, or with Auto-detect, all; it searches them, as **\*日\*** does;
     - "the most used first", in the view's lists, counts the same words;
   - its readings:
     - collapsed, those of every kanji dictionary entry shown (see below), merged, one row per kind, by the search language:
@@ -85,6 +85,7 @@ The Characters view (`#/kanji?q=<characters>`) shows each Han character as a car
       | Korean          | Hangul (its own, Hanja's, KANJIDIC's)                                                     | 광                                    |
       - Short kun: the first 3, without okurigana (ひか.る is ひか), then "…" if there are more.
       - With none of the search language's (e.g. a character only CC-CEDICT.Hanzi has, with Japanese), every kind, as with Auto-detect.
+      - One kind alone has no label: `rì`, not `Pinyin rì`.
       - Never name readings (nanori), often many.
       - Pinyin in one way, with tone marks and lowercase, so that each reading is listed once: KANJIDIC's `xīng` and CC-CEDICT.Hanzi's `xing1` are one `xīng`. Open, each entry shows it as its dictionary writes it.
 
@@ -106,7 +107,7 @@ A card shows, for its character:
 - every component, all the way down; components link to their own page;
 - **Used in**: up to 30 characters made directly of it (one level up), the most used first: 口 lists 可, 呆, ... but not 河, made of 可;
   - its heading, **Used in ›**, searches `*口`: them all, each in full (see below);
-  - "5 more" after them when there are more, which searches `*口` too;
+  - a **5 more** button after them when there are more, which searches `*口` too;
   - a radical also lists the characters written with its component forms: 水 lists 河;
 - its kanji dictionary entries, each under its dictionary's name: readings as the dictionary gives them (its on and kun fields, labelled On, Kun or Reading by their script; then its reading stats, e.g. KANJIDIC's pinyin, Korean, name readings, by the dictionary's order and with its own notes), meanings, and stats with the dictionary's own notes;
   - of the kanji dictionaries [chosen](#choosing-dictionaries), and only those of the search language and those that don't say theirs: KANJIDIC (Japanese, Chinese and Korean readings) in every language, CC-CEDICT.Hanzi (Chinese) with Chinese or all, Hanja (Korean) with Korean or all;

@@ -85,7 +85,9 @@
         class="char-card"
         :data-char="c.ch"
       >
-        <header class="char-header">
+        <!-- the glyph on the left, the rest stacked on the right, the same on every card;
+             a tap anywhere but on a link opens or closes it -->
+        <header class="char-header" @click="onHeaderClick(c.ch, $event)">
           <button
             type="button"
             class="char-toggle"
@@ -94,19 +96,21 @@
             @click="toggle(c.ch)"
           >
             <span class="glyph" :lang="lang || undefined">{{ c.ch }}</span>
-            <span class="char-gist">
-              <span
-                v-if="gist(c)"
-                class="gist-meanings"
-                :lang="gist(c)!.lang"
-                >{{ gist(c)!.text }}</span
-              >
-              <span v-if="c.uses" class="uses"
-                >in {{ c.uses.toLocaleString() }} words</span
-              >
-            </span>
           </button>
           <div class="char-summary">
+            <p v-if="gist(c)" class="gist-meanings" :lang="gist(c)!.lang">
+              {{ gist(c)!.text }}
+            </p>
+            <!-- the words with it anywhere, as *日* -->
+            <button
+              v-if="c.uses"
+              type="button"
+              class="link-button uses"
+              v-tooltip="`Words with ${c.ch} anywhere: *${c.ch}*`"
+              @click="toWords(`*${c.ch}*`, '')"
+            >
+              in {{ c.uses.toLocaleString() }} words
+            </button>
             <!-- opened, the dictionaries' readings are in their entries, below -->
             <p
               v-if="isOpen(c.ch) && c.hangul.length && hangulShown"
@@ -126,12 +130,19 @@
               </template>
             </p>
             <!-- collapsed: every reading but kun and name readings, of every entry shown -->
+            <!-- one kind alone needs no label -->
             <dl
               v-if="!isOpen(c.ch) && cardReadings(c).length"
               class="readings card-readings"
+              :class="{ single: cardReadings(c).length === 1 }"
             >
               <template v-for="row in cardReadings(c)" :key="row.key">
-                <dt v-tooltip="row.title">{{ row.label }}</dt>
+                <dt
+                  v-if="cardReadings(c).length > 1"
+                  v-tooltip="row.title || row.label"
+                >
+                  {{ row.label }}
+                </dt>
                 <dd :lang="row.lang">
                   <template v-for="(it, k) in row.items" :key="k">
                     <template v-if="k">{{ row.sep }}</template>
@@ -562,6 +573,14 @@ const hangulShown = computed(() => !lang.value || lang.value === "ko-KR");
 const opened = ref<string[]>([]);
 
 const isOpen = (ch: string) => opened.value.includes(ch);
+
+/** a tap on a card's header, but not on one of its links or buttons: open or close it */
+function onHeaderClick(ch: string, e: MouseEvent) {
+  if ((e.target as Element).closest("button, a, summary")) return;
+  // selecting text isn't a tap
+  if (window.getSelection()?.toString()) return;
+  toggle(ch);
+}
 
 function toggle(ch: string) {
   opened.value = isOpen(ch)
@@ -1211,24 +1230,22 @@ button:focus-visible {
 }
 
 .char-header {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem 1rem;
-  align-items: center;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0 0.75rem;
+  align-items: start;
+  cursor: pointer;
 }
 
-/* as Words' accordion header */
+/* as Words' accordion header: › then the glyph */
 .char-toggle {
   display: flex;
-  flex: 1 1 12rem;
-  min-width: 0;
-  gap: 0.75rem;
+  gap: 0.5rem;
   align-items: center;
   padding: 0;
   border: 0;
   background: transparent;
   color: var(--app-text);
-  text-align: start;
   font: inherit;
   cursor: pointer;
 }
@@ -1242,31 +1259,35 @@ button:focus-visible {
   transform: rotate(90deg);
 }
 
-.char-gist {
+.glyph {
+  font-size: 4rem;
+  line-height: 1;
+  width: 4.5rem;
+  text-align: center;
+}
+
+.char-summary {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   min-width: 0;
+  /* in line with the glyph's top */
+  padding-top: 0.25rem;
+}
+
+.char-summary p {
+  margin: 0 0 0.125rem;
 }
 
 .gist-meanings {
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.char-toggle[aria-expanded="true"] .gist-meanings {
+.char-toggle[aria-expanded="true"] + .char-summary .gist-meanings {
   white-space: normal;
-}
-
-.glyph {
-  font-size: 4rem;
-  line-height: 1;
-  min-width: 4.5rem;
-  text-align: center;
-}
-
-.char-summary p {
-  margin: 0 0 0.25rem;
 }
 
 .hangul {
@@ -1274,12 +1295,15 @@ button:focus-visible {
 }
 
 .card-readings {
-  margin: 0 0 0.25rem;
+  margin: 0.125rem 0 0.25rem;
 }
 
-.uses {
+.card-readings.single {
+  grid-template-columns: 1fr;
+}
+
+.link-button.uses {
   font-size: 0.875rem;
-  color: var(--app-text-muted);
 }
 
 .item-actions {
@@ -1354,15 +1378,29 @@ h3 {
   font-size: 1.125rem;
 }
 
-.used-in-heading {
+/* the whole row, not only its words */
+.link-button.used-in-heading {
+  display: block;
+  width: 100%;
   font-weight: inherit;
+  text-align: start;
   color: var(--app-link);
 }
 
-.used-in-more {
+/* a small button, in text size beside the characters */
+.link-button.used-in-more {
   margin-inline-start: 0.375rem;
-  font-size: 0.875rem;
+  padding: 0.125rem 0.5rem;
+  border: 1px solid var(--app-input-border);
+  border-radius: 0.25rem;
+  background: var(--app-control-background);
+  font-size: 0.8125rem;
+  vertical-align: middle;
   white-space: nowrap;
+}
+
+.link-button.used-in-more:hover {
+  background: var(--app-selected-background);
 }
 
 .super-more {
