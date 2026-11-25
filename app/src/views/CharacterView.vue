@@ -241,7 +241,19 @@
           </div>
 
           <div v-if="usedIn[c.ch]" class="used-in">
-            <h3>Used in</h3>
+            <!-- a link to them all, each in full: *日 -->
+            <h3>
+              <button
+                v-if="usedIn[c.ch].items.length"
+                type="button"
+                class="link-button used-in-heading"
+                v-tooltip="superTitle(c.ch)"
+                @click="go(`*${c.ch}`)"
+              >
+                Used in ›
+              </button>
+              <template v-else>Used in</template>
+            </h3>
             <p v-if="!usedIn[c.ch].items.length" class="muted">
               Not a component of another character.
             </p>
@@ -272,22 +284,6 @@
                 more
               </button>
             </p>
-            <!-- all listed: until a design is chosen, the search for them each in full -->
-            <button
-              v-if="
-                usedIn[c.ch].items.length &&
-                usedIn[c.ch].total <= usedIn[c.ch].items.length
-              "
-              type="button"
-              class="super-search"
-              v-tooltip="superTitle(c.ch)"
-              @click="go(`*${c.ch}`)"
-            >
-              All characters made directly of
-              <span class="super-query" :lang="lang || undefined">{{
-                c.ch
-              }}</span>
-            </button>
           </div>
 
           <p v-if="cardEntries(c).some((it) => it.via)" class="muted via-note">
@@ -395,6 +391,9 @@
             @click="go(it.ch)"
           >
             {{ it.ch }}
+            <span v-if="it.uses" class="char-uses">{{
+              it.uses.toLocaleString()
+            }}</span>
           </button>
         </div>
         <button
@@ -1355,29 +1354,9 @@ h3 {
   font-size: 1.125rem;
 }
 
-.super-search {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 0.375rem;
-  margin-top: 0.375rem;
-  /* big enough to tap */
-  min-height: 2.25rem;
-  padding: 0.25rem 0.75rem;
-  border: 1px solid var(--app-input-border);
-  border-radius: 0.25rem;
-  background: var(--app-control-background);
-  color: var(--app-text);
-  font: inherit;
-  font-size: 0.875rem;
-  cursor: pointer;
-}
-
-.super-search:hover {
-  background: var(--app-selected-background);
-}
-
-.super-query {
-  font-size: 1.125rem;
+.used-in-heading {
+  font-weight: inherit;
+  color: var(--app-link);
 }
 
 .used-in-more {
@@ -1454,8 +1433,18 @@ h3 {
 }
 
 .char-button {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
   min-width: 2.5rem;
   min-height: 2.5rem;
+}
+
+/* how many words use it, under it */
+.char-uses {
+  font-size: 0.6875rem;
+  line-height: 1;
+  color: var(--app-text-muted);
 }
 
 .link-button {

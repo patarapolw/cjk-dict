@@ -593,7 +593,13 @@ describe("CharacterView", () => {
     ).toEqual(MADE_OF_MU.slice(0, 30));
     // the rest: a link to them all, each in full
     expect(wrapper.get('[data-char="木"] .used-in-more').text()).toBe("5 more");
-    expect(wrapper.find('[data-char="木"] .super-search').exists()).toBe(false);
+    // and the heading: them all, each in full
+    expect(wrapper.get('[data-char="木"] .used-in-heading').text()).toBe(
+      "Used in ›",
+    );
+    await wrapper.get('[data-char="木"] .used-in-more').trigger("click");
+    await flushPromises();
+    expect(router.currentRoute.value.query.q).toBe("*木");
     wrapper.unmount();
   });
 
@@ -611,8 +617,11 @@ describe("CharacterView", () => {
     expect(wrapper.get('[data-char="林"] .used-in').text()).toContain(
       "Not a component of another character",
     );
-    // nothing to search further
-    expect(wrapper.find('[data-char="林"] .super-search').exists()).toBe(false);
+    // nothing to search further: the heading is no link
+    expect(wrapper.find('[data-char="林"] .used-in-heading').exists()).toBe(
+      false,
+    );
+    expect(wrapper.get('[data-char="林"] .used-in h3').text()).toBe("Used in");
     expect(
       wrapper
         .findAll('[data-char="木"] .used-in-list .component')
@@ -623,9 +632,15 @@ describe("CharacterView", () => {
     expect(wrapper.get(".search-hint").text()).toBe("Characters 林 木");
     expect(wrapper.get(".containing h2").text()).toContain("林 + 木");
     expect(wrapper.get(".containing").text()).toContain("all 2 characters");
-    expect(wrapper.findAll(".char-grid button").map((b) => b.text())).toEqual([
-      "森",
-    ]);
+    // each with how many words use it
+    expect(
+      wrapper
+        .findAll(".char-grid button")
+        .map((b) => [
+          b.element.firstChild!.textContent!.trim(),
+          b.get(".char-uses").text(),
+        ]),
+    ).toEqual([["森", "1"]]);
     wrapper.unmount();
   });
 
@@ -634,9 +649,9 @@ describe("CharacterView", () => {
     await loaded(wrapper);
 
     calls = [];
-    // "5 more" after those "Used in" lists: all of them, each in full
-    const button = wrapper.get('[data-char="木"] .used-in-more');
-    expect(button.text()).toBe("5 more");
+    // "5 more" after those "Used in" lists, and its heading: all of them, each in full
+    expect(wrapper.get('[data-char="木"] .used-in-more').text()).toBe("5 more");
+    const button = wrapper.get('[data-char="木"] .used-in-heading');
     await button.trigger("click");
     await vi.waitFor(() =>
       expect(calls.some((c) => c.cmd === "han_chars")).toBe(true),

@@ -105,9 +105,9 @@ A card shows, for its character:
 - how it breaks down: each IDS, by region, the one for the search language first;
 - every component, all the way down; components link to their own page;
 - **Used in**: up to 30 characters made directly of it (one level up), the most used first: 口 lists 可, 呆, ... but not 河, made of 可;
-  - "5 more" after them when there are more, which searches `*口`: them all, each in full (see below);
+  - its heading, **Used in ›**, searches `*口`: them all, each in full (see below);
+  - "5 more" after them when there are more, which searches `*口` too;
   - a radical also lists the characters written with its component forms: 水 lists 河;
-  - with none more, **All characters made directly of 口** below them searches `*口` the same;
 - its kanji dictionary entries, each under its dictionary's name: readings as the dictionary gives them (its on and kun fields, labelled On, Kun or Reading by their script; then its reading stats, e.g. KANJIDIC's pinyin, Korean, name readings, by the dictionary's order and with its own notes), meanings, and stats with the dictionary's own notes;
   - of the kanji dictionaries [chosen](#choosing-dictionaries), and only those of the search language and those that don't say theirs: KANJIDIC (Japanese, Chinese and Korean readings) in every language, CC-CEDICT.Hanzi (Chinese) with Chinese or all, Hanja (Korean) with Korean or all;
   - the search language's first;
@@ -122,7 +122,7 @@ Each reading searches the words with the character read so, anywhere in the word
 
 A Chinese or Korean reading switches the search language to its own, unless it is Auto-detect.
 
-Below, with several characters typed, the characters made of all of them, at any depth, the most used first: `木口` lists 呆, 杏, ...
+Below, with several characters typed, the characters made of all of them, at any depth, the most used first, each with how many words use it: `木口` lists 呆, 杏, ...
 
 `*` before the characters lists the characters made directly of them instead, each in full, as a card: `*口` shows 可, 呆, ..., 20 at a time, and **More** shows the next 20.
 
