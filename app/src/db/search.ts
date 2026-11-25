@@ -111,7 +111,7 @@ export interface IHanChar {
   all_components: string[];
   /** Hangul readings (eum) */
   hangul: string[];
-  /** terms with the character */
+  /** terms with the character: of the search language asked for, or in all */
   uses: number;
   /** its variant forms, from Unihan: 学's 學 (traditional, kyujitai) */
   variants: IHanVariant[];
@@ -193,8 +193,11 @@ class SearchDatabase {
   }
 
   /** The Han characters of `text`: how each breaks down, and its kanji entries. */
-  async hanChars(text: string): Promise<IHanChar[]> {
-    return await invoke<IHanChar[]>("han_chars", { text });
+  async hanChars(text: string, lang = ""): Promise<IHanChar[]> {
+    return await invoke<IHanChar[]>("han_chars", {
+      text,
+      lang: lang || undefined,
+    });
   }
 
   /**
@@ -207,12 +210,14 @@ class SearchDatabase {
     limit: number,
     offset: number,
     direct = false,
+    lang = "",
   ): Promise<IHanList> {
     return await invoke<IHanList>("han_containing", {
       components,
       limit,
       offset,
       direct,
+      lang: lang || undefined,
     });
   }
 
@@ -227,12 +232,14 @@ class SearchDatabase {
     latin: ILatin,
     limit: number,
     offset: number,
+    lang = "",
   ): Promise<IHanList> {
     return await invoke<IHanList>("han_by_reading", {
       readings,
       ...latin,
       limit,
       offset,
+      lang: lang || undefined,
     });
   }
 

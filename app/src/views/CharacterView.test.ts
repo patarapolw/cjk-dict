@@ -717,6 +717,29 @@ describe("CharacterView", () => {
     again.unmount();
   });
 
+  it("counts and orders the characters by the search language's words", async () => {
+    lang.value = "ja-JP";
+    const { wrapper } = await mountView("/kanji?q=木");
+    await loaded(wrapper, false);
+    expect(calls.find((c) => c.cmd === "han_chars")?.args).toEqual({
+      text: "木",
+      lang: "ja-JP",
+    });
+    expect(calls.find((c) => c.cmd === "han_containing")?.args).toMatchObject({
+      components: "木",
+      lang: "ja-JP",
+    });
+
+    // another language: looked up again, with its counts
+    calls = [];
+    lang.value = "zh";
+    await vi.waitFor(() =>
+      expect(calls.some((c) => c.cmd === "han_chars")).toBe(true),
+    );
+    expect(calls.find((c) => c.cmd === "han_chars")?.args.lang).toBe("zh");
+    wrapper.unmount();
+  });
+
   it("collapses a single character's card too", async () => {
     // 森: a query no other test opens, as open cards are kept per query
     const { wrapper } = await mountView("/kanji?q=森");

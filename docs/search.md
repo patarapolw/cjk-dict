@@ -72,7 +72,8 @@ The Characters view (`#/kanji?q=<characters>`) shows each Han character as a car
 - Outside, always shown:
   - the character, tapped to open or close the card;
   - the first 3 meanings of its first kanji dictionary entry shown;
-  - how many words use it;
+  - how many words use it: those of the search language, or with Auto-detect, all;
+    - "the most used first", in the view's lists, counts the same words;
   - its readings:
     - collapsed, those of every kanji dictionary entry shown (see below), merged, one row per kind, by the search language:
 

@@ -636,7 +636,10 @@ watch(variantsToAsk, async (chs) => {
   const id = requestId;
   try {
     for (let i = 0; i < todo.length; i += MAX_CHARS) {
-      const cs = await searchDB.hanChars(todo.slice(i, i + MAX_CHARS).join(""));
+      const cs = await searchDB.hanChars(
+        todo.slice(i, i + MAX_CHARS).join(""),
+        lang.value,
+      );
       if (id !== requestId) return;
       variantChars.value = {
         ...variantChars.value,
@@ -679,9 +682,9 @@ async function load() {
       noneFound.value = !!reading && !page.found.length;
     } else {
       const [cs, list, direct] = await Promise.all([
-        searchDB.hanChars(text),
+        searchDB.hanChars(text, lang.value),
         chars.value.length > 1
-          ? searchDB.hanContaining(text, PAGE, 0)
+          ? searchDB.hanContaining(text, PAGE, 0, false, lang.value)
           : { items: [], next: null },
         usedInOf(chars.value),
       ]);
@@ -719,7 +722,9 @@ function clear() {
 /** Each of `chs`' characters made directly of it */
 async function usedInOf(chs: string[]): Promise<Record<string, IHanList>> {
   const lists = await Promise.all(
-    chs.map((ch) => searchDB.hanContaining(ch, USED_IN_PAGE, 0, true)),
+    chs.map((ch) =>
+      searchDB.hanContaining(ch, USED_IN_PAGE, 0, true, lang.value),
+    ),
   );
   return Object.fromEntries(chs.map((ch, i) => [ch, lists[i]]));
 }
@@ -735,11 +740,26 @@ async function superPage(
   offset: number,
 ) {
   const list = readings.length
-    ? await searchDB.hanByReading(readings, latin, MAX_CHARS, offset)
-    : await searchDB.hanContaining(components, MAX_CHARS, offset, true);
+    ? await searchDB.hanByReading(
+        readings,
+        latin,
+        MAX_CHARS,
+        offset,
+        lang.value,
+      )
+    : await searchDB.hanContaining(
+        components,
+        MAX_CHARS,
+        offset,
+        true,
+        lang.value,
+      );
   const chs = list.items.map((it) => it.ch);
   const [cs, direct] = chs.length
-    ? await Promise.all([searchDB.hanChars(chs.join("")), usedInOf(chs)])
+    ? await Promise.all([
+        searchDB.hanChars(chs.join(""), lang.value),
+        usedInOf(chs),
+      ])
     : [[], {}];
   return { found: cs, usedIn: direct, next: list.next };
 }
@@ -777,6 +797,8 @@ async function loadContaining() {
       chars.value.join(""),
       PAGE,
       offset,
+      false,
+      lang.value,
     );
     if (id !== requestId) return;
     containing.value = [...containing.value, ...list.items];
@@ -796,7 +818,8 @@ const superTitle = (components: string) =>
 /** wait for typing to pause */
 const DEBOUNCE_MS = 200;
 let timer: ReturnType<typeof setTimeout> | undefined;
-watch([chars, lookupKey, dictsVersion], () => {
+// the search language too: the characters most used in its words first, and their counts
+watch([chars, lookupKey, dictsVersion, lang], () => {
   clearTimeout(timer);
   timer = setTimeout(load, DEBOUNCE_MS);
 });
