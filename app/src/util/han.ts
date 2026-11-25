@@ -174,12 +174,22 @@ export function readingLang(reading: string): string {
 /**
  * A character's reading as a search for the words with it read so, anywhere in the word:
  * `*<興>{キョウ}` (興味, 余興, ...), `*<興>{xīng}`, `*<興>{흥}`. A kun reading counts up to
- * its okurigana, which its dot marks (`おこ.る`: `*<興>{おこ}`, finding 興る and 興す), and
- * its dash marks where other kana go (`-び`).
+ * its okurigana, which its dot marks (`おこ.る`: `*<興>{おこ}`, finding 興る and 興す).
+ *
+ * KANJIDIC's dash marks a suffix or prefix, where other characters go: a wildcard for at
+ * least one of them there, `?` then `*`. `-び` (a suffix, often with rendaku) is
+ * `*?<日>{び}`, not the start of a word, as 三日 (みっか) isn't; `おお-` (a prefix) is
+ * `*<大>{おお}?*`.
  */
 export function readingQuery(ch: string, reading: string): string {
-  const r = reading.replace(/^[-‐]+|[-‐]+$/gu, "").trim();
-  return `*<${ch}>{${r.split(".")[0]}}`;
+  const t = reading.trim();
+  const suffix = /^[-‐]/u.test(t);
+  const prefix = /[-‐]$/u.test(t);
+  const r = t
+    .replace(/^[-‐]+|[-‐]+$/gu, "")
+    .trim()
+    .split(".")[0];
+  return `${suffix ? "*?" : "*"}<${ch}>{${r}}${prefix ? "?*" : ""}`;
 }
 
 const TONES: Record<string, string[]> = {

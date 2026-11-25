@@ -190,6 +190,26 @@ HAN["果"] = {
   ],
 };
 
+/** 日: KANJIDIC's kun, with a rendaku form (-び) and a suffix that isn't one (-か) */
+HAN["日"] = {
+  ch: "日",
+  ids: [],
+  components: [],
+  all_components: [],
+  hangul: [],
+  uses: 5,
+  variants: [],
+  entries: [
+    {
+      ...daoEntry("KANJIDIC", null),
+      character: "日",
+      kunyomi: "ひ -び -か",
+    },
+    // a voiced reading without the `-`, which stays
+    { ...daoEntry("MyDict", "ja"), character: "日", kunyomi: "び" },
+  ],
+};
+
 /** what the `dicts` command returns */
 let dicts: Partial<IDictInfo>[] = [];
 
@@ -449,7 +469,7 @@ describe("CharacterView", () => {
     expect(card.find(".hangul").exists()).toBe(false);
     expect(readingRows(card, ".card-readings")).toEqual([
       ["On", "コウ"],
-      ["Kun", "ひか.る, ひか.らす, ひかり, …"],
+      ["Kun", "ひか.る, ひか.らす, ひかり"],
       ["Pinyin", "guāng"],
       ["Hangul", "광"],
       ["Korean romanization", "gwang"],
@@ -522,18 +542,34 @@ describe("CharacterView", () => {
       .find((b) => b.text() === "-ばかり")!
       .trigger("click");
     await flushPromises();
-    expect(router.currentRoute.value.query.q).toBe("*<杉>{ばかり}");
+    // a suffix: with a character before it
+    expect(router.currentRoute.value.query.q).toBe("*?<杉>{ばかり}");
+    wrapper.unmount();
+  });
+
+  it("leaves rendaku forms out of a collapsed card's kun, with the `-` in front only", async () => {
+    lang.value = "ja-JP";
+    const { wrapper } = await mountView("/kanji?q=日");
+    await loaded(wrapper, false);
+    // -び is ひ's rendaku: out; but MyDict's び (first, of the search language), without the
+    // `-`, stays; -か isn't voiced
+    expect(headerRows(wrapper.get('[data-char="日"]'))).toEqual([
+      ["", "び, ひ, -か"],
+    ]);
     wrapper.unmount();
   });
 
   it("lists a collapsed card's kun reading once, whatever its dot or `-`", async () => {
     lang.value = "ja-JP";
-    const { wrapper } = await mountView("/kanji?q=果");
+    const { wrapper, router } = await mountView("/kanji?q=果");
     await loaded(wrapper, false);
-    // は.たす, はた.す and -は.たす are one; so are は.てる and -は.てる
-    expect(headerRows(wrapper.get('[data-char="果"]'))).toEqual([
-      ["", "は.たす, は.てる, は.て"],
-    ]);
+    // は.たす, はた.す and -は.たす are one, the longest stem without a `-`, which a tap
+    // searches; は.てる and -は.てる are one too
+    const card = wrapper.get('[data-char="果"]');
+    expect(headerRows(card)).toEqual([["", "はた.す, は.てる, は.て"]]);
+    await card.get(".card-readings button.reading").trigger("click");
+    await flushPromises();
+    expect(router.currentRoute.value.query.q).toBe("*<果>{はた}");
     wrapper.unmount();
   });
 
@@ -554,7 +590,7 @@ describe("CharacterView", () => {
     lang.value = "ja-JP";
     expect(await collapsed()).toEqual([
       ["On", "コウ"],
-      ["Kun", "ひか.る, ひか.らす, ひかり, …"],
+      ["Kun", "ひか.る, ひか.らす, ひかり"],
     ]);
     lang.value = "zh";
     // one kind alone: no label

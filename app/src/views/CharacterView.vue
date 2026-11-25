@@ -1100,15 +1100,32 @@ const HEADER_KINDS: Record<string, string[]> = {
 /** kun readings a collapsed card shows: the first few, without okurigana */
 const SHORT_KUN = 3;
 
+/**
+ * Whether a kun reading is a rendaku form of another of `readings`: a suffix (`-`) whose
+ * first kana is voiced, the unvoiced reading being there too: `-び` of ひ, `-びかり` of
+ * ひかり. KANJIDIC lists many; a collapsed card leaves them out, for the readings proper.
+ */
+function isRendaku(reading: string, readings: Set<string>) {
+  if (!/^[-‐]/u.test(reading)) return false;
+  const r = undashed(reading).replace(".", "");
+  const first = r.normalize("NFD");
+  // ゛ (U+3099) or ゜ (U+309A) after the first kana
+  if (!/^.[\u3099\u309A]/u.test(first)) return false;
+  const unvoiced = (first[0] + first.slice(2)).normalize("NFC");
+  return unvoiced !== r && readings.has(unvoiced);
+}
+
 /** a kun reading without the `-` that marks it a prefix or suffix (`-びかり`) */
 const undashed = (r: string) => r.replace(/^[-‐]+|[-‐]+$/gu, "");
 
 /**
  * Kun readings, short: the first few, as KANJIDIC writes them: with the dot before the
  * okurigana (ひか.る), where the stem ends being the dictionary's word, not a guess; and
- * with the `-` of a prefix or suffix (`-びかり`). Each once, whatever its dot or `-`:
- * は.たす, はた.す and -は.たす are one は.たす, the first without a `-`, so that the others
- * aren't pushed off. A reading's link searches its stem, without the `-` (ひか of ひか.る).
+ * with the `-` of a prefix or suffix (`-か`), but not rendaku forms (`-び` of ひ, see
+ * isRendaku). Each once, whatever its dot or `-`, so
+ * that the others aren't pushed off: は.たす, はた.す and -は.たす are one はた.す, the form
+ * without a `-` with the longest stem, which a link searches: the narrowest search, which
+ * the user can still widen by editing it.
  */
 function shortKun(row: ReadingRow): ReadingRow {
   const items: ReadingItem[] = [];
@@ -1117,7 +1134,17 @@ function shortKun(row: ReadingRow): ReadingRow {
   const dashed = (x: ReadingItem) => undashed(written(x)) !== written(x);
   /** the reading itself: はたす for は.たす, はた.す and -は.たす */
   const whole = (x: ReadingItem) => undashed(written(x)).replace(".", "");
+  /** of two forms of a reading: without a `-`, else with the longer stem */
+  const better = (a: ReadingItem, b: ReadingItem) =>
+    dashed(a) !== dashed(b)
+      ? !dashed(a)
+      : undashed(a.r).length > undashed(b.r).length;
+  // the readings themselves, to tell rendaku forms by
+  const readings = new Set(
+    row.items.map((it) => undashed(it.r).replace(".", "")),
+  );
   for (const it of row.items) {
+    if (isRendaku(it.r, readings)) continue;
     const [r, okurigana = ""] = it.r.split(".");
     if (!undashed(r)) continue;
     const item = { ...it, r, okurigana };
@@ -1126,7 +1153,7 @@ function shortKun(row: ReadingRow): ReadingRow {
     );
     if (i < 0) items.push(item);
     // the same reading without the `-`, from another dictionary
-    else if (dashed(items[i]) && !dashed(item)) items[i] = item;
+    else if (better(item, items[i])) items[i] = item;
   }
   const more = items.length > SHORT_KUN;
   return {

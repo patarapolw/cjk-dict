@@ -83,9 +83,10 @@ The Characters view (`#/kanji?q=<characters>`) shows each Han character as a car
       | Japanese        | On, short kun                                                                             | コウ; ひか.る, ひか.らす, ひかり, …            |
       | Chinese         | Pinyin                                                                                    | guāng                                          |
       | Korean          | Hangul (its own, Hanja's, KANJIDIC's)                                                     | 광                                             |
-      - Short kun: the first 3, then "…" if there are more, as KANJIDIC writes them: `ひか.る`, and `-びかり` for a prefix or suffix.
-        - Each reading once, whatever its dot or `-`: 果's `は.たす`, `はた.す` and `-は.たす` are one `は.たす`, the first without a `-`, so that the others aren't pushed off the 3.
-        - A tap searches the stem, before the dot and without the `-` (`*<光>{ひか}`).
+      - Short kun: the first 3, then "…" if there are more, as KANJIDIC writes them: `ひか.る`, and `-か` for a suffix.
+        - Not rendaku forms: a suffix (`-` in front) whose first kana is voiced, with its unvoiced reading there too: 日's `-び` (of ひ), 光's `-びかり` (of ひかり). A voiced reading without the `-` stays.
+        - Each reading once, whatever its dot or `-`: 果's `は.たす`, `はた.す` and `-は.たす` are one `はた.す`, the form without a `-` with the longest stem, so that the others aren't pushed off the 3.
+        - A tap searches the stem, before the dot (`*<光>{ひか}`, `*<果>{はた}`).
       - With none of the search language's (e.g. a character only CC-CEDICT.Hanzi has, with Japanese), every kind, as with Auto-detect.
       - One kind alone has no label: `rì`, not `Pinyin rì`.
       - Readings are separated by `, `, in every language, as in the open entries.
@@ -121,6 +122,7 @@ Each reading searches the words with the character read so, anywhere in the word
 
 - on: `*<興>{キョウ}`;
 - kun: `*<興>{おこ}`, up to the okurigana, which the dot marks (興る and 興す);
+  - KANJIDIC's `-` marks a suffix or prefix, with a character there: `-び` is `*?<日>{び}` (not at a word's start), `おお-` is `*<大>{おお}?*`;
 - pinyin: `*<興>{xīng}`;
 - Hangul: `*<興>{흥}`.
 
