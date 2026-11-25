@@ -1022,15 +1022,24 @@ function shortKun(row: ReadingRow): ReadingRow {
 /**
  * A collapsed card's readings, of every entry shown, merged, one row per kind: On, short
  * kun, Pinyin, Hangul (its own Hangul readings too), then the dictionaries' others; those
- * of the search language only (see HEADER_KINDS), and never name readings, often many
+ * of the search language only (see HEADER_KINDS), or with none, all; never name readings,
+ * often many
  */
 function cardReadings(c: IHanChar): ReadingRow[] {
+  const all = mergedReadings(c);
   const kinds = HEADER_KINDS[lang.value];
-  const shown = (key: string) =>
-    kinds ? kinds.includes(key) : !INNER_STATS.has(key);
+  if (!kinds) return all;
+  const ofLang = all.filter((row) => kinds.includes(row.key));
+  // none of the search language's, e.g. a character only CC-CEDICT.Hanzi has, with
+  // Japanese: whatever it has, rather than nothing
+  return ofLang.length ? ofLang : all;
+}
+
+/** every reading kind of a card, merged, but name readings */
+function mergedReadings(c: IHanChar): ReadingRow[] {
   const rows = new Map<string, ReadingRow>();
   const add = (row: ReadingRow) => {
-    if (!shown(row.key)) return;
+    if (INNER_STATS.has(row.key)) return;
     // one way of writing pinyin, so that each reading is listed once: KANJIDIC's xīng
     // and CC-CEDICT.Hanzi's xing1 are both xīng
     if (row.key === "pinyin")

@@ -465,6 +465,31 @@ describe("CharacterView", () => {
     expect(await collapsed()).toEqual([["Hangul", "광"]]);
   });
 
+  it("falls back to every reading when collapsed with none of the search language's", async () => {
+    // 道's entries have no readings: give CC-CEDICT.Hanzi's pinyin only
+    const saved = HAN["道"];
+    HAN["道"] = {
+      ...saved,
+      hangul: [],
+      entries: [{ ...daoEntry("CC-CEDICT.Hanzi", null), onyomi: "dao4" }],
+    };
+    try {
+      lang.value = "ja-JP";
+      const { wrapper } = await mountView("/kanji?q=道");
+      await loaded(wrapper);
+      const card = wrapper.get('[data-char="道"]');
+      const toggle = card.get(".char-toggle");
+      if (toggle.attributes("aria-expanded") === "true")
+        await toggle.trigger("click");
+      expect(readingRows(card, ".card-readings")).toEqual([["Pinyin", "dào"]]);
+      // open again: open is remembered per query, and other tests look into 道
+      await toggle.trigger("click");
+      wrapper.unmount();
+    } finally {
+      HAN["道"] = saved;
+    }
+  });
+
   it("shows an open card's own Hangul readings with Korean or Auto-detect only", async () => {
     const hangul = async () => {
       calls = [];
