@@ -23,6 +23,7 @@ How the app gets the library and shows entries. The [README](../README.md#app) h
 - Without a remote (none configured, or one it can't reach), it plans from a `manifest.json` pushed with the library's files to `dicts/incoming/` (by `pnpm desktop:push` or `pnpm android:push`, see the [README](../README.md#offline)):
   - nothing can be downloaded then: a file that isn't on the device is named in the downloads panel, and nothing is committed;
   - once committed, the pushed manifest is deleted. So is it when the remote's `manifest.json` is fetched: the remote's library wins.
+  - With no remote configured and no pushed manifest, it plans from the committed manifest: the library is up to date, rather than an error on every launch. A configured remote it can't reach is still an error.
 - On first launch, it also downloads the [lindera](https://github.com/lindera/lindera) tokenizer dictionaries in the background, used to tokenize `~` queries:
   - unidic (Japanese), ko-dic (Korean) and cc-cedict (Chinese), from [lindera's 6.2.0 release](https://github.com/lindera/lindera/releases/tag/v6.2.0);
   - \~73 MB to download, \~310 MB unpacked.

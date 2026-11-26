@@ -405,18 +405,17 @@ pub struct PlannedFile {
 /// then every file must be on the device already, as nothing can be downloaded.
 #[tauri::command]
 pub async fn dict_plan(app: AppHandle) -> Result<Plan, AppError> {
-    let pushed = app.state::<DictState>().dir.join(INCOMING).join(MANIFEST);
-    let read_pushed = |e: AppError| std::fs::read_to_string(&pushed).map_err(|_| e);
+    let dir = app.state::<DictState>().dir.clone();
     let (remote, text) = match Remote::from_env() {
         Ok(remote) => match fetch_manifest(&remote).await {
             Ok(text) => {
                 // the remote's is the library now
-                let _ = std::fs::remove_file(&pushed);
+                let _ = std::fs::remove_file(dir.join(INCOMING).join(MANIFEST));
                 (Some(remote), text)
             }
-            Err(e) => (None, read_pushed(e)?),
+            Err(e) => (None, manifest_without_remote(&dir, e, true)?),
         },
-        Err(e) => (None, read_pushed(e)?),
+        Err(e) => (None, manifest_without_remote(&dir, e, false)?),
     };
 
     // reading the library and committing is blocking work
@@ -425,6 +424,22 @@ pub async fn dict_plan(app: AppHandle) -> Result<Plan, AppError> {
     })
     .await
     .map_err(|e| AppError::Error(e.to_string()))?
+}
+
+/// The manifest to plan from when the remote's can't be had (`e` says why): one pushed to
+/// `incoming/`, else, with no remote `configured`, the committed one, so that a library
+/// pushed and committed before is checked rather than every launch failing for want of a
+/// remote. A configured remote that can't be reached stays an error.
+fn manifest_without_remote(dir: &Path, e: AppError, configured: bool) -> Result<String, AppError> {
+    if let Ok(text) = std::fs::read_to_string(dir.join(INCOMING).join(MANIFEST)) {
+        return Ok(text);
+    }
+    if !configured {
+        if let Ok(text) = std::fs::read_to_string(dir.join(MANIFEST)) {
+            return Ok(text);
+        }
+    }
+    Err(e)
 }
 
 async fn fetch_manifest(remote: &Remote) -> Result<String, AppError> {
@@ -934,6 +949,38 @@ mod tests {
         assert!(plan(&state, V2, None).is_err());
         assert!(!incoming.join("A.zip").exists());
         assert!(!state.dir.join(PENDING).exists());
+        std::fs::remove_dir_all(&app_data).unwrap();
+    }
+
+    #[test]
+    fn without_a_remote_a_committed_library_is_up_to_date() {
+        let app_data = temp_dir("offline-committed");
+        let state = DictState::new(&app_data);
+        let no_remote = || AppError::Error("no remote".into());
+
+        // nothing pushed, nothing committed: the error stands
+        std::fs::create_dir_all(state.dir.join(INCOMING)).unwrap();
+        assert!(manifest_without_remote(&state.dir, no_remote(), false).is_err());
+
+        // committed (and its pushed manifest deleted): planned from, and nothing to do
+        std::fs::write(state.dir.join(MANIFEST), V2).unwrap();
+        std::fs::write(state.dir.join("A.zip"), b"a").unwrap();
+        std::fs::write(state.dir.join(SEARCH_DB), b"12345").unwrap();
+        let text = manifest_without_remote(&state.dir, no_remote(), false).unwrap();
+        assert_eq!(text, V2);
+        let p = plan(&state, &text, None).unwrap();
+        assert!(p.files.is_empty() && !p.needs_newer_app);
+        assert!(!state.dir.join(PENDING).exists());
+
+        // a remote configured but unreachable is still an error
+        assert!(manifest_without_remote(&state.dir, no_remote(), true).is_err());
+
+        // a pushed manifest comes first
+        std::fs::write(state.dir.join(INCOMING).join(MANIFEST), V1).unwrap();
+        assert_eq!(
+            manifest_without_remote(&state.dir, no_remote(), true).unwrap(),
+            V1
+        );
         std::fs::remove_dir_all(&app_data).unwrap();
     }
 
