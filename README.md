@@ -193,6 +193,7 @@ They start the app without the Tauri CLI, running Vite and `cargo build` as task
 - Turn on USB debugging on the phone, connect it, and run `pnpm app android` (a debug build).
 - `pnpm android` first pushes the library over USB (`scripts/push-library.mjs`, also `pnpm android:push`), so the app needn't download it from R2 or a server:
   - it pushes the zips and `search.db.zst` the app lacks into its `dicts/incoming/`, where downloads land; the app checks them when it syncs, as any download;
+  - it sends each file 32 MB at a time, so an interrupted push (e.g. the phone dropped off USB) resumes where it stopped when run again;
   - then, once every file is there, the library's `manifest.json`, into `dicts/incoming/` too;
   - with a remote it reaches (R2 or `CJK_DICT_BASE_URL`), the app plans from the remote's `manifest.json`, so run `pnpm admin upload` first: a file that differs from what was uploaded is downloaded again;
   - it needs the app installed, as a debug build (for `run-as`): on a first install it pushes nothing;

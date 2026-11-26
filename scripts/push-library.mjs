@@ -19,6 +19,8 @@
 // - Pushes only what the app lacks: not a file its committed manifest vouches for, nor one
 //   already in `incoming/` with the right size; not search.db.zst when its search.db is the
 //   current one.
+// - Android: sends each file a chunk at a time into a .push-tmp, and resumes one left by an
+//   interrupted push.
 // - Android: needs the app installed (a debug build, for `run-as`): on a first install it
 //   pushes nothing, and the app downloads the library. adb picks the device as usual: set
 //   ANDROID_SERIAL when several are connected.
@@ -71,16 +73,20 @@ function adbShell(cmd) {
 /** run `script` with sh in the app's data folder */
 const runAs = (script) => adbShell(`run-as ${PKG} sh -c '${script}'`);
 
-/** Stream `file` (`size` bytes) into `dest` (relative to the app's data folder); resolves
- * to seconds taken */
-async function pushFile(file, size, dest) {
-  const t = Date.now();
-  await new Promise((ok, fail) => {
+// bytes per `adb exec-in`: a long stream may stop early, or drop the device, and exec-in
+// exits 0 all the same; a chunk at a time, only the chunk is sent again
+const CHUNK = 32 * 1024 * 1024;
+// chunks in a row that may add nothing before the file is given up
+const STALLS = 3;
+
+/** Append bytes `start` to `end` (exclusive) of `file` to `tmp` on the device */
+function appendChunk(file, start, end, tmp) {
+  return new Promise((ok, fail) => {
     // one argument: adb joins them into a command line for the device's shell, which
     // would otherwise apply the redirect outside run-as
     const child = spawn(
       "adb",
-      ["exec-in", `run-as ${PKG} sh -c 'cat > ${dest}${PART}'`],
+      ["exec-in", `run-as ${PKG} sh -c 'cat >> ${tmp}'`],
       {
         stdio: ["pipe", "ignore", "pipe"],
       },
@@ -88,15 +94,64 @@ async function pushFile(file, size, dest) {
     let err = "";
     child.stderr.on("data", (d) => (err += d));
     child.on("error", fail);
+    // EPIPE when adb ends before its input does: the size check after says how far it got
+    child.stdin.on("error", () => {});
     child.on("close", (code) =>
-      code === 0 ? ok() : fail(new Error(err.trim() || `exit ${code}`)),
+      code === 0 ? ok() : fail(new Error(err.trim() || `adb exit ${code}`)),
     );
-    createReadStream(file).on("error", fail).pipe(child.stdin);
+    createReadStream(file, { start, end: end - 1 })
+      .on("error", fail)
+      .pipe(child.stdin);
   });
+}
+
+/** The size of `path` on the device, or -1 when it's missing (or adb can't tell) */
+function deviceSize(path) {
+  const out = runAs(`stat -c %s ${path} 2>/dev/null || echo -1`);
+  const n = Number(out?.trim());
+  return Number.isInteger(n) ? n : -1;
+}
+
+/** Stream `file` (`size` bytes) into `dest` (relative to the app's data folder), resuming
+ * a `.push-tmp` of `have` bytes left by an earlier push; resolves to seconds taken */
+async function pushFile(file, size, dest, have = 0) {
+  const t = Date.now();
+  const tmp = dest + PART;
+  let offset = have;
+  if (offset > size) {
+    runAs(`rm -f ${tmp}`);
+    offset = 0;
+  }
+  let stalls = 0;
+  while (offset < size) {
+    const end = Math.min(offset + CHUNK, size);
+    try {
+      await appendChunk(file, offset, end, tmp);
+    } catch {
+      // adb itself failed: the size below says whether the device is still there
+    }
+    const now = deviceSize(tmp);
+    if (now === -1) {
+      // the device dropped off: the next push resumes the .push-tmp
+      throw new Error(`the device stopped answering at ${mb(offset)}`);
+    }
+    if (now < offset || now > end) {
+      // something else wrote to it: start over
+      runAs(`rm -f ${tmp}`);
+      throw new Error(`${tmp} changed on the device while it was pushed`);
+    }
+    if (now === offset) {
+      if (++stalls >= STALLS)
+        throw new Error(`no progress at ${mb(offset)}, ${STALLS} times`);
+    } else {
+      stalls = 0;
+    }
+    offset = now;
+  }
   // renamed only when whole; in a call of its own, as exec-in ends the command when its
   // input does
   const done = runAs(
-    `[ "$(stat -c %s ${dest}${PART})" = ${size} ] && chmod 600 ${dest}${PART} && mv ${dest}${PART} ${dest} && echo ok`,
+    `[ "$(stat -c %s ${tmp})" = ${size} ] && chmod 600 ${tmp} && mv ${tmp} ${dest} && echo ok`,
   );
   if (done?.trim() !== "ok") throw new Error("incomplete on the device");
   return (Date.now() - t) / 1000;
@@ -121,8 +176,8 @@ function androidTarget() {
       const sizes = new Map();
       const listing =
         runAs(
-          "mkdir -p dicts/incoming && cd dicts && rm -f incoming/*" +
-            PART +
+          // .push-tmp files included: pushes resume them
+          "mkdir -p dicts/incoming && cd dicts" +
             ' && for f in * incoming/*; do [ -f "$f" ] && stat -c "%s %n" "$f"; done; true',
         ) ?? "";
       for (const line of listing.split("\n")) {
@@ -132,7 +187,8 @@ function androidTarget() {
       return sizes;
     },
     committedManifest: () => runAs(`cat dicts/${MANIFEST} 2>/dev/null`) || "",
-    push: (file, size, name) => pushFile(file, size, `dicts/incoming/${name}`),
+    push: (file, size, name, have) =>
+      pushFile(file, size, `dicts/incoming/${name}`, have),
   };
 }
 
@@ -272,8 +328,12 @@ async function main() {
       continue;
     }
     try {
-      const s = await target.push(local, f.size, name);
-      console.log(`push  ${name}: ${mb(f.size)} in ${s.toFixed(1)} s`);
+      const have = sizes.get(`incoming/${name}${PART}`) ?? 0;
+      const s = await target.push(local, f.size, name, have);
+      const resumed = have ? `, resumed at ${mb(have)}` : "";
+      console.log(
+        `push  ${name}: ${mb(f.size)} in ${s.toFixed(1)} s${resumed}`,
+      );
       pushed++;
     } catch (e) {
       console.log(`FAIL  ${name}: ${e.message}`);
