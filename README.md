@@ -37,13 +37,32 @@ More in [`docs/`](docs/):
   - Variables already set in the environment take precedence.
 - `pnpm format` runs Prettier, and `pnpm typecheck` checks the app.
 
+### Offline
+
+The app can get the library without R2 or a server (neither `pnpm serve` nor Vite needs to run), from a copy pushed to it:
+
+1. Build the library: `pnpm admin build`.
+2. Build the app with no `CJK_DICT_R2_*` and no `CJK_DICT_BASE_URL` (leave them out of `.env`):
+   - desktop: `pnpm app tauri build`, or `pnpm app tauri build --debug`;
+   - Android: a debug build, `pnpm app android`.
+3. Push the library to it (`scripts/push-library.mjs`):
+   - desktop: close the app, then `pnpm desktop:push`. It copies into the app data folder, e.g. `%APPDATA%\cc.polv.cjk-dict\dicts\incoming` on Windows;
+   - Android: install the app first, then `pnpm android:push` (over USB, with `adb`).
+4. Start the app: it checks the files, unpacks `search.db`, and searches it.
+
+- Push again after each `pnpm admin build`: it copies only what the app lacks.
+- The app plans from the pushed `manifest.json`, so every file must be there: it names those that aren't.
+- An app built with a remote uses the pushed library only when it can't reach the remote.
+- The lindera tokenizer dictionaries and the HanaMin fonts still download from GitHub on first launch. Without them, `~` searches fail and rare characters may not show.
+- Android needs a debug build: the push uses `run-as`.
+
 ## Security
 
 The app is currently set up for personal use. A public release would need changes first.
 
 - A build compiles in a **read-only** R2 token, and anyone who has the build can extract it and download the whole bucket. Sharing a build shares every dictionary in the library.
 - The library can include dictionaries you may not redistribute. Check their terms before sharing a build with anyone.
-- The library (`library/`, including `dicts.json`) is gitignored. Your dictionary list and custom zips live only on your machine and in R2.
+- The library (`library/`, including `dicts.json`) is gitignored. Your dictionary list and custom zips live only on your machine and in R2 (or on the devices you push them to).
 - R2 credentials are only read from `.env` or environment variables, and `.env` is gitignored.
 
 ## The library
@@ -172,11 +191,14 @@ They start the app without the Tauri CLI, running Vite and `cargo build` as task
 ### Debugging on Android
 
 - Turn on USB debugging on the phone, connect it, and run `pnpm app android` (a debug build).
-- `pnpm android` first pushes the library over USB (`scripts/push-library.mjs`, also `pnpm android:push`), so the app needn't download it from R2:
+- `pnpm android` first pushes the library over USB (`scripts/push-library.mjs`, also `pnpm android:push`), so the app needn't download it from R2 or a server:
   - it pushes the zips and `search.db.zst` the app lacks into its `dicts/incoming/`, where downloads land; the app checks them when it syncs, as any download;
-  - the app plans from R2's `manifest.json`, so run `pnpm admin upload` first: a file that differs from what was uploaded is downloaded again;
+  - it sends each file 32 MB at a time, so an interrupted push (e.g. the phone dropped off USB) resumes where it stopped when run again;
+  - then, once every file is there, the library's `manifest.json`, into `dicts/incoming/` too;
+  - with a remote it reaches (R2 or `CJK_DICT_BASE_URL`), the app plans from the remote's `manifest.json`, so run `pnpm admin upload` first: a file that differs from what was uploaded is downloaded again;
   - it needs the app installed, as a debug build (for `run-as`): on a first install it pushes nothing;
   - with several devices connected, set `ANDROID_SERIAL`.
+- Without R2 or a server, see [Offline](#offline).
 - A debug build's Rust code is unoptimized: checksums, unpacking and searches run several times slower than in a release build. For realistic timings, build with `CARGO_PROFILE_DEV_OPT_LEVEL=3 pnpm app android`.
 - If installing fails with `INSTALL_FAILED_VERIFICATION_FAILURE`, Play Protect blocked the APK, and doesn't ask when `adb` installs it. Copy the APK (`app/src-tauri/gen/android/app/build/outputs/apk/arm64/debug/`) to the phone, and install it from there.
 - A debug build allows WebView debugging: open `chrome://inspect/#devices` in Chrome (or `edge://inspect` in Edge) on the computer, and inspect the app's WebView.
@@ -196,6 +218,8 @@ Set in `.env` or by environment variables. They are read when the app is built (
 | `CJK_DICT_R2_BUCKET`            | e.g. `cjk-dict`                                                  |
 | `CJK_DICT_R2_PREFIX`            | optional folder inside the bucket                                |
 | `CJK_DICT_BASE_URL`             | instead of R2: a plain HTTP base URL, e.g. for local development |
+
+With neither R2 nor `CJK_DICT_BASE_URL` set, or when it can't reach them, the app uses a library pushed to it: see [Offline](#offline).
 
 How the app downloads and searches the library: [docs/app.md](docs/app.md), [docs/search.md](docs/search.md).
 
